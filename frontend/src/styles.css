@@ -657,12 +657,26 @@ select {
 }
 
 .metric-card {
+  position: relative;
   min-width: 0;
   padding: 1rem;
   border: 1px solid var(--line);
   border-radius: 16px;
   background: var(--card);
   box-shadow: 0 8px 30px rgb(31 44 38 / 4%);
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 160ms ease,
+    transform 160ms ease;
+}
+
+button.metric-card:hover,
+button.metric-card:focus-visible {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+  outline: none;
 }
 
 .metric-card strong,
@@ -689,6 +703,14 @@ select {
   margin-top: 0.15rem;
   color: var(--muted-ink);
   font-size: 0.66rem;
+}
+
+.metric-card > b {
+  display: block;
+  margin-top: 0.6rem;
+  color: var(--accent-dark);
+  font-size: 0.62rem;
+  font-weight: 850;
 }
 
 .panel {
@@ -1190,6 +1212,254 @@ select {
   backdrop-filter: blur(3px);
 }
 
+.weekly-insight {
+  width: 100%;
+  min-width: 0;
+  max-width: 700px;
+  max-height: min(88dvh, 820px);
+  display: grid;
+  grid-template-rows: auto 1fr;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-bottom: 0;
+  border-radius: 24px 24px 0 0;
+  background: var(--card);
+  box-shadow: 0 -24px 70px rgb(0 0 0 / 38%);
+  color: var(--ink);
+}
+
+.weekly-insight > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1rem 0.8rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.weekly-insight > header > div {
+  min-width: 0;
+}
+
+.weekly-insight h2,
+.muscle-group-card h3 {
+  margin: 0;
+  letter-spacing: -0.03em;
+}
+
+.weekly-insight h2 {
+  margin-top: 0.15rem;
+  font-size: 1.35rem;
+}
+
+.weekly-insight-body {
+  padding: 0.9rem 1rem calc(1rem + env(safe-area-inset-bottom));
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.weekly-empty {
+  padding: 2rem 1rem;
+  color: var(--muted-ink);
+  text-align: center;
+}
+
+.muscle-group-card,
+.weekly-day-card,
+.streak-breakdown {
+  margin-bottom: 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--card) 85%, var(--page));
+}
+
+.muscle-group-card > header,
+.weekly-day-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.muscle-group-card > header {
+  padding: 0.85rem 0.9rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.muscle-group-card h3 {
+  font-size: 0.98rem;
+}
+
+.muscle-group-card > header > strong,
+.weekly-day-heading > b {
+  color: var(--accent-dark);
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+.muscle-exercise {
+  display: grid;
+  grid-template-columns: minmax(8rem, 1fr) minmax(10rem, auto);
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 0.9rem;
+  border-top: 1px solid var(--line);
+}
+
+.muscle-exercise:first-of-type {
+  border-top: 0;
+}
+
+.muscle-exercise strong,
+.muscle-exercise small {
+  display: block;
+}
+
+.muscle-exercise strong {
+  font-size: 0.8rem;
+}
+
+.muscle-exercise small {
+  margin-top: 0.15rem;
+  color: var(--muted-ink);
+  font-size: 0.64rem;
+}
+
+.day-set-chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.3rem;
+}
+
+.day-set-chips span,
+.weekly-category-row span {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.3rem 0.5rem;
+  background: var(--card);
+  color: var(--muted-ink);
+  font-size: 0.62rem;
+  white-space: nowrap;
+}
+
+.weekly-day-card {
+  padding: 0.85rem 0.9rem;
+}
+
+.weekly-day-heading > div > strong,
+.weekly-day-heading > div > small {
+  display: block;
+}
+
+.weekly-day-heading > div > small {
+  margin-top: 0.12rem;
+  color: var(--muted-ink);
+  font-size: 0.65rem;
+}
+
+.weekly-day-card > p {
+  margin: 0.55rem 0 0;
+  font-size: 0.78rem;
+  font-weight: 750;
+}
+
+.weekly-category-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.65rem;
+}
+
+.weekly-category-row span {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.weekly-category-row i {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+}
+
+.weekly-exercise-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 0.6rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--line);
+  font-size: 0.75rem;
+}
+
+.weekly-exercise-line small {
+  color: var(--muted-ink);
+}
+
+.streak-breakdown {
+  padding: 1.2rem 1rem;
+  text-align: center;
+}
+
+.streak-breakdown > strong,
+.streak-breakdown > span {
+  display: block;
+}
+
+.streak-breakdown > strong {
+  color: var(--accent-dark);
+  font-size: 3rem;
+  line-height: 1;
+}
+
+.streak-breakdown > span {
+  margin-top: 0.3rem;
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.streak-breakdown > p {
+  margin: 1rem auto 0;
+  color: var(--muted-ink);
+  font-size: 0.7rem;
+}
+
+.streak-week {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 0.45rem;
+  margin-top: 1.1rem;
+}
+
+.streak-week i,
+.streak-week small {
+  display: block;
+}
+
+.streak-week i {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  place-items: center;
+  margin: 0 auto;
+  border-radius: 50%;
+  background: var(--page);
+  color: var(--muted-ink);
+  font-style: normal;
+}
+
+.streak-week i.trained {
+  background: var(--accent);
+  color: white;
+}
+
+.streak-week small {
+  margin-top: 0.35rem;
+  color: var(--muted-ink);
+  font-size: 0.6rem;
+}
+
 .exercise-picker {
   width: min(100%, 680px);
   max-height: min(84dvh, 720px);
@@ -1601,6 +1871,14 @@ select {
 
   .metric-card {
     padding: 0.85rem;
+  }
+
+  .muscle-exercise {
+    grid-template-columns: 1fr;
+  }
+
+  .day-set-chips {
+    justify-content: flex-start;
   }
 
   .progress-controls {

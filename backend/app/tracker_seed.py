@@ -29,7 +29,7 @@ def seed_sample_workouts(db: Session) -> int:
     today = date.today()
     specs = (
         (
-            6,
+            4,
             "Sample push session",
             WorkoutCategory.PUSH,
             (
@@ -40,7 +40,7 @@ def seed_sample_workouts(db: Session) -> int:
             ),
         ),
         (
-            5,
+            3,
             "Sample lower session",
             WorkoutCategory.LOWER,
             (
@@ -51,7 +51,7 @@ def seed_sample_workouts(db: Session) -> int:
             ),
         ),
         (
-            3,
+            2,
             "Sample pull session",
             WorkoutCategory.PULL,
             (
@@ -62,7 +62,7 @@ def seed_sample_workouts(db: Session) -> int:
             ),
         ),
         (
-            1,
+            0,
             "Sample upper session",
             WorkoutCategory.UPPER,
             (

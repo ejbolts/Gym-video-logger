@@ -139,14 +139,28 @@ def infer_exercise(name: str) -> tuple[WorkoutCategory, ExerciseKind, str, str |
     lowered = name.casefold()
     if any(word in lowered for word in ("treadmill", "run", "cycling", "bike", "cardio")):
         return WorkoutCategory.CARDIO, ExerciseKind.CARDIO, "Cardio", None
-    if any(
-        word in lowered for word in ("squat", "leg", "lunge", "hip", "calf", "romanian deadlift")
-    ):
-        return WorkoutCategory.LOWER, ExerciseKind.STRENGTH, "Lower body", None
-    if any(word in lowered for word in ("bench", "chest", "shoulder", "tricep", "fly")):
-        return WorkoutCategory.PUSH, ExerciseKind.STRENGTH, "Push", None
-    if any(word in lowered for word in ("row", "pulldown", "pull-up", "curl", "bicep")):
-        return WorkoutCategory.PULL, ExerciseKind.STRENGTH, "Pull", None
+    if any(word in lowered for word in ("pulldown", "pull-up", "pullup", "pullover")):
+        return WorkoutCategory.PULL, ExerciseKind.STRENGTH, "Lats", None
+    if "row" in lowered:
+        return WorkoutCategory.PULL, ExerciseKind.STRENGTH, "Mid / Upper Back", None
+    if any(word in lowered for word in ("reverse fly", "face pull", "rear delt")):
+        return WorkoutCategory.PULL, ExerciseKind.STRENGTH, "Rear Delts", None
+    if any(word in lowered for word in ("curl", "bicep")):
+        return WorkoutCategory.PULL, ExerciseKind.STRENGTH, "Biceps", None
+    if "tricep" in lowered:
+        return WorkoutCategory.PUSH, ExerciseKind.STRENGTH, "Triceps", None
+    if any(word in lowered for word in ("bench", "chest", "cable fly", "pec fly")):
+        return WorkoutCategory.PUSH, ExerciseKind.STRENGTH, "Chest", None
+    if any(word in lowered for word in ("shoulder", "overhead press", "lateral raise")):
+        return WorkoutCategory.PUSH, ExerciseKind.STRENGTH, "Shoulders", None
+    if any(word in lowered for word in ("romanian deadlift", "leg curl", "hamstring")):
+        return WorkoutCategory.LOWER, ExerciseKind.STRENGTH, "Hamstrings", None
+    if any(word in lowered for word in ("hip thrust", "glute")):
+        return WorkoutCategory.LOWER, ExerciseKind.STRENGTH, "Glutes", None
+    if "calf" in lowered:
+        return WorkoutCategory.LOWER, ExerciseKind.STRENGTH, "Calves", None
+    if any(word in lowered for word in ("squat", "leg press", "leg extension", "lunge")):
+        return WorkoutCategory.LOWER, ExerciseKind.STRENGTH, "Quads", None
     return WorkoutCategory.OTHER, ExerciseKind.STRENGTH, "Other", None
 
 

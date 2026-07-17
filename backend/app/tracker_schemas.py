@@ -132,12 +132,32 @@ class HeatmapDay(BaseModel):
     set_count: int
 
 
+class WeeklyExerciseBreakdown(BaseModel):
+    exercise_id: str
+    exercise_name: str
+    muscle_group: str
+    category: WorkoutCategory
+    set_count: int
+    volume_kg: float
+
+
+class WeeklyDayBreakdown(BaseModel):
+    workout_date: date
+    workout_count: int
+    total_sets: int
+    volume_kg: float
+    workout_names: list[str]
+    categories: list[WorkoutCategory]
+    exercises: list[WeeklyExerciseBreakdown]
+
+
 class DashboardRead(BaseModel):
     workouts_this_week: int
     sets_this_week: int
     volume_this_week_kg: float
     current_streak: int
     heatmap: list[HeatmapDay]
+    weekly_days: list[WeeklyDayBreakdown]
     recent_workouts: list[TrainingWorkoutRead]
 
 

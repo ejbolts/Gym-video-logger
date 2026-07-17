@@ -14,6 +14,7 @@ import { VideoUpload } from './VideoUpload';
 
 type AppTab = 'dashboard' | 'log' | 'progress' | 'history' | 'videos';
 type ProgressMetric = 'estimated_1rm' | 'best_weight_kg' | 'volume_kg';
+type DashboardMetric = 'workouts' | 'sets' | 'volume' | 'streak';
 
 type DraftSet = WorkoutSetInput & { key: string };
 type DraftMovement = {
@@ -298,6 +299,8 @@ function LoadingState() {
 }
 
 function DashboardScreen({ data, onStart }: { data: DashboardData; onStart: () => void }) {
+  const [activeMetric, setActiveMetric] = useState<DashboardMetric | null>(null);
+
   return (
     <section className="dashboard-screen content-page">
       <div className="welcome-row">
@@ -312,17 +315,29 @@ function DashboardScreen({ data, onStart }: { data: DashboardData; onStart: () =
       </div>
 
       <div className="metric-grid">
-        <MetricCard value={data.workouts_this_week} label="Workouts" suffix="this week" />
-        <MetricCard value={data.sets_this_week} label="Working sets" suffix="this week" />
+        <MetricCard
+          value={data.workouts_this_week}
+          label="Workouts"
+          suffix="this week"
+          onClick={() => setActiveMetric('workouts')}
+        />
+        <MetricCard
+          value={data.sets_this_week}
+          label="Working sets"
+          suffix="this week"
+          onClick={() => setActiveMetric('sets')}
+        />
         <MetricCard
           value={Math.round(data.volume_this_week_kg).toLocaleString()}
           label="Volume"
           suffix="kg this week"
+          onClick={() => setActiveMetric('volume')}
         />
         <MetricCard
           value={data.current_streak}
           label="Day streak"
           suffix={data.current_streak ? 'keep it going' : 'ready to begin'}
+          onClick={() => setActiveMetric('streak')}
         />
       </div>
 
@@ -366,6 +381,10 @@ function DashboardScreen({ data, onStart }: { data: DashboardData; onStart: () =
           ))
         )}
       </section>
+
+      {activeMetric && (
+        <WeeklyInsight data={data} metric={activeMetric} onClose={() => setActiveMetric(null)} />
+      )}
     </section>
   );
 }
@@ -374,18 +393,224 @@ function MetricCard({
   value,
   label,
   suffix,
+  onClick,
 }: {
   value: number | string;
   label: string;
   suffix: string;
+  onClick?: () => void;
 }) {
-  return (
-    <article className="metric-card">
+  const content = (
+    <>
       <strong>{value}</strong>
       <span>{label}</span>
       <small>{suffix}</small>
+      {onClick && <b aria-hidden="true">View details&nbsp; →</b>}
+    </>
+  );
+  return onClick ? (
+    <button type="button" className="metric-card" onClick={onClick} aria-label={`View ${label}`}>
+      {content}
+    </button>
+  ) : (
+    <article className="metric-card">{content}</article>
+  );
+}
+
+function WeeklyInsight({
+  data,
+  metric,
+  onClose,
+}: {
+  data: DashboardData;
+  metric: DashboardMetric;
+  onClose: () => void;
+}) {
+  const muscleGroups = useMemo(() => {
+    const groups = new Map<
+      string,
+      Map<string, { total: number; days: Array<{ date: string; sets: number }> }>
+    >();
+    data.weekly_days.forEach((day) => {
+      day.exercises.forEach((exercise) => {
+        if (exercise.category === 'cardio') return;
+        const exercises = groups.get(exercise.muscle_group) ?? new Map();
+        const current = exercises.get(exercise.exercise_name) ?? { total: 0, days: [] };
+        current.total += exercise.set_count;
+        current.days.push({ date: day.workout_date, sets: exercise.set_count });
+        exercises.set(exercise.exercise_name, current);
+        groups.set(exercise.muscle_group, exercises);
+      });
+    });
+    return [...groups.entries()]
+      .map(([name, exercises]) => ({
+        name,
+        total: [...exercises.values()].reduce((sum, item) => sum + item.total, 0),
+        exercises: [...exercises.entries()].map(([exerciseName, detail]) => ({
+          name: exerciseName,
+          ...detail,
+        })),
+      }))
+      .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name));
+  }, [data.weekly_days]);
+
+  const title = {
+    workouts: 'This week’s workouts',
+    sets: 'Weekly sets by muscle',
+    volume: 'Weekly training volume',
+    streak: 'Training streak',
+  }[metric];
+
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        className="weekly-insight"
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header>
+          <div>
+            <p className="section-kicker">WEEKLY DETAIL</p>
+            <h2>{title}</h2>
+          </div>
+          <button type="button" className="icon-button" onClick={onClose} aria-label="Close">
+            ×
+          </button>
+        </header>
+
+        <div className="weekly-insight-body">
+          {data.weekly_days.length === 0 ? (
+            <div className="weekly-empty">Log a workout to start building your weekly view.</div>
+          ) : metric === 'sets' ? (
+            <MuscleGroupBreakdown groups={muscleGroups} />
+          ) : metric === 'workouts' ? (
+            data.weekly_days.map((day) => <WeeklyWorkoutDay key={day.workout_date} day={day} />)
+          ) : metric === 'volume' ? (
+            data.weekly_days.map((day) => (
+              <article className="weekly-day-card" key={day.workout_date}>
+                <div className="weekly-day-heading">
+                  <strong>{weekday(day.workout_date)}</strong>
+                  <b>{Math.round(day.volume_kg).toLocaleString()} kg</b>
+                </div>
+                {day.exercises
+                  .filter((exercise) => exercise.volume_kg > 0)
+                  .map((exercise) => (
+                    <div className="weekly-exercise-line" key={exercise.exercise_id}>
+                      <span>{exercise.exercise_name}</span>
+                      <small>{Math.round(exercise.volume_kg).toLocaleString()} kg</small>
+                    </div>
+                  ))}
+              </article>
+            ))
+          ) : (
+            <StreakBreakdown data={data} />
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function MuscleGroupBreakdown({
+  groups,
+}: {
+  groups: Array<{
+    name: string;
+    total: number;
+    exercises: Array<{
+      name: string;
+      total: number;
+      days: Array<{ date: string; sets: number }>;
+    }>;
+  }>;
+}) {
+  if (groups.length === 0) {
+    return <div className="weekly-empty">This week only contains cardio so far.</div>;
+  }
+  return groups.map((group) => (
+    <article className="muscle-group-card" key={group.name}>
+      <header>
+        <h3>{group.name}</h3>
+        <strong>{group.total} sets</strong>
+      </header>
+      {group.exercises.map((exercise) => (
+        <div className="muscle-exercise" key={exercise.name}>
+          <div>
+            <strong>{exercise.name}</strong>
+            <small>{exercise.total} sets total</small>
+          </div>
+          <div className="day-set-chips">
+            {exercise.days.map((day) => (
+              <span key={day.date}>
+                {weekday(day.date)} · {day.sets} {day.sets === 1 ? 'set' : 'sets'}
+              </span>
+            ))}
+          </div>
+        </div>
+      ))}
+    </article>
+  ));
+}
+
+function WeeklyWorkoutDay({ day }: { day: DashboardData['weekly_days'][number] }) {
+  return (
+    <article className="weekly-day-card">
+      <div className="weekly-day-heading">
+        <div>
+          <strong>{weekday(day.workout_date)}</strong>
+          <small>{prettyDate(day.workout_date)}</small>
+        </div>
+        <b>{day.total_sets} sets</b>
+      </div>
+      <div className="weekly-category-row">
+        {day.categories.map((category) => (
+          <span key={category}>
+            <i style={{ background: categoryColors[category] }} /> {categoryNames[category]}
+          </span>
+        ))}
+      </div>
+      {day.workout_names.map((name) => (
+        <p key={name}>{name}</p>
+      ))}
     </article>
   );
+}
+
+function StreakBreakdown({ data }: { data: DashboardData }) {
+  const trainedDates = new Set(data.heatmap.map((entry) => entry.workout_date));
+  const days = Array.from({ length: 7 }, (_, index) => {
+    const value = new Date();
+    value.setHours(12, 0, 0, 0);
+    value.setDate(value.getDate() - (6 - index));
+    return value;
+  });
+  return (
+    <div className="streak-breakdown">
+      <strong>{data.current_streak}</strong>
+      <span>
+        {data.current_streak === 1 ? 'day in your current streak' : 'days in your current streak'}
+      </span>
+      <div className="streak-week">
+        {days.map((day) => {
+          const key = day.toISOString().slice(0, 10);
+          const trained = trainedDates.has(key);
+          return (
+            <div key={key}>
+              <i className={trained ? 'trained' : ''}>{trained ? '✓' : '·'}</i>
+              <small>{day.toLocaleDateString(undefined, { weekday: 'narrow' })}</small>
+            </div>
+          );
+        })}
+      </div>
+      <p>A training day counts whether you lift, do cardio, or combine both.</p>
+    </div>
+  );
+}
+
+function weekday(value: string): string {
+  return new Date(`${value}T12:00:00`).toLocaleDateString(undefined, { weekday: 'short' });
 }
 
 function WorkoutHeatmap({ entries }: { entries: DashboardData['heatmap'] }) {

@@ -6,7 +6,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import Response
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
@@ -30,6 +30,8 @@ from .tracker_schemas import (
     ProgressPoint,
     TrainingWorkoutCreate,
     TrainingWorkoutRead,
+    WeeklyDayBreakdown,
+    WeeklyExerciseBreakdown,
 )
 
 router = APIRouter(prefix="/api", tags=["workout tracking"])
@@ -46,18 +48,18 @@ DEFAULT_EXERCISES = (
     ("Triceps Pushdown", WorkoutCategory.PUSH, "Triceps", "Cable"),
     ("Dips", WorkoutCategory.PUSH, "Chest / Triceps", "Bodyweight"),
     ("Deadlift", WorkoutCategory.PULL, "Posterior chain", "Barbell"),
-    ("Barbell Row", WorkoutCategory.PULL, "Back", "Barbell"),
-    ("Pull-up", WorkoutCategory.PULL, "Back", "Bodyweight"),
-    ("Lat Pulldown", WorkoutCategory.PULL, "Back", "Cable"),
-    ("Seated Cable Row", WorkoutCategory.PULL, "Back", "Cable"),
-    ("Face Pull", WorkoutCategory.PULL, "Rear delts", "Cable"),
+    ("Barbell Row", WorkoutCategory.PULL, "Mid / Upper Back", "Barbell"),
+    ("Pull-up", WorkoutCategory.PULL, "Lats", "Bodyweight"),
+    ("Lat Pulldown", WorkoutCategory.PULL, "Lats", "Cable"),
+    ("Seated Cable Row", WorkoutCategory.PULL, "Mid / Upper Back", "Cable"),
+    ("Face Pull", WorkoutCategory.PULL, "Rear Delts", "Cable"),
     ("Barbell Curl", WorkoutCategory.PULL, "Biceps", "Barbell"),
     ("Hammer Curl", WorkoutCategory.PULL, "Biceps", "Dumbbell"),
-    ("Back Squat", WorkoutCategory.LOWER, "Quads / Glutes", "Barbell"),
+    ("Back Squat", WorkoutCategory.LOWER, "Quads", "Barbell"),
     ("Front Squat", WorkoutCategory.LOWER, "Quads", "Barbell"),
     ("Romanian Deadlift", WorkoutCategory.LOWER, "Hamstrings", "Barbell"),
-    ("Leg Press", WorkoutCategory.LOWER, "Quads / Glutes", "Machine"),
-    ("Bulgarian Split Squat", WorkoutCategory.LOWER, "Quads / Glutes", "Dumbbell"),
+    ("Leg Press", WorkoutCategory.LOWER, "Quads", "Machine"),
+    ("Bulgarian Split Squat", WorkoutCategory.LOWER, "Quads", "Dumbbell"),
     ("Leg Extension", WorkoutCategory.LOWER, "Quads", "Machine"),
     ("Leg Curl", WorkoutCategory.LOWER, "Hamstrings", "Machine"),
     ("Hip Thrust", WorkoutCategory.LOWER, "Glutes", "Barbell"),
@@ -76,28 +78,34 @@ DEFAULT_CARDIO = (
 
 
 def seed_default_exercises(db: Session) -> None:
-    if db.scalar(select(func.count(Exercise.id))):
-        return
-    for name, category, muscle_group, equipment in DEFAULT_EXERCISES:
-        db.add(
-            Exercise(
-                name=name,
-                category=category,
-                kind=ExerciseKind.STRENGTH,
-                muscle_group=muscle_group,
-                equipment=equipment,
+    existing = {item.name.casefold(): item for item in db.scalars(select(Exercise))}
+    defaults = (
+        *(
+            (name, category, ExerciseKind.STRENGTH, muscle_group, equipment)
+            for name, category, muscle_group, equipment in DEFAULT_EXERCISES
+        ),
+        *(
+            (name, WorkoutCategory.CARDIO, ExerciseKind.CARDIO, muscle_group, equipment)
+            for name, muscle_group, equipment in DEFAULT_CARDIO
+        ),
+    )
+    for name, category, kind, muscle_group, equipment in defaults:
+        exercise = existing.get(name.casefold())
+        if exercise and not exercise.is_custom:
+            exercise.category = category
+            exercise.kind = kind
+            exercise.muscle_group = muscle_group
+            exercise.equipment = equipment
+        elif not exercise:
+            db.add(
+                Exercise(
+                    name=name,
+                    category=category,
+                    kind=kind,
+                    muscle_group=muscle_group,
+                    equipment=equipment,
+                )
             )
-        )
-    for name, muscle_group, equipment in DEFAULT_CARDIO:
-        db.add(
-            Exercise(
-                name=name,
-                category=WorkoutCategory.CARDIO,
-                kind=ExerciseKind.CARDIO,
-                muscle_group=muscle_group,
-                equipment=equipment,
-            )
-        )
     db.commit()
 
 
@@ -290,6 +298,32 @@ def dashboard(db: DbSession) -> DashboardRead:
     def completed_sets(workout: TrainingWorkout) -> list[WorkoutSet]:
         return [item for movement in workout.movements for item in movement.sets if item.completed]
 
+    def display_categories(items: list[TrainingWorkout]) -> list[WorkoutCategory]:
+        """Collapse a day to one strength colour plus cardio when both occurred."""
+        has_cardio = False
+        strength_categories: list[WorkoutCategory] = []
+        for workout in items:
+            movement_categories = {movement.exercise.category for movement in workout.movements}
+            has_cardio = has_cardio or WorkoutCategory.CARDIO in movement_categories
+            non_cardio = movement_categories - {WorkoutCategory.CARDIO}
+            if non_cardio:
+                category = workout.category
+                if category == WorkoutCategory.CARDIO:
+                    category = (
+                        next(iter(non_cardio))
+                        if len(non_cardio) == 1
+                        else WorkoutCategory.FULL_BODY
+                    )
+                strength_categories.append(category)
+            elif workout.category == WorkoutCategory.CARDIO:
+                has_cardio = True
+            else:
+                strength_categories.append(workout.category)
+        unique_strength = list(dict.fromkeys(strength_categories))
+        if len(unique_strength) > 1:
+            unique_strength = [WorkoutCategory.FULL_BODY]
+        return [*unique_strength, *([WorkoutCategory.CARDIO] if has_cardio else [])]
+
     volume_this_week = sum(
         (item.weight_kg or 0) * (item.reps or 0)
         for workout in this_week
@@ -301,12 +335,71 @@ def dashboard(db: DbSession) -> DashboardRead:
     heatmap = [
         HeatmapDay(
             workout_date=workout_date,
-            categories=list(dict.fromkeys(item.category for item in items)),
+            categories=display_categories(items),
             workout_count=len(items),
             set_count=sum(len(completed_sets(item)) for item in items),
         )
         for workout_date, items in sorted(day_groups.items())
     ]
+
+    weekly_groups: dict[date, list[TrainingWorkout]] = defaultdict(list)
+    for workout in this_week:
+        weekly_groups[workout.workout_date].append(workout)
+    weekly_days: list[WeeklyDayBreakdown] = []
+    for workout_date, items in sorted(weekly_groups.items(), reverse=True):
+        exercise_groups: dict[str, dict[str, object]] = {}
+        for workout in items:
+            for movement in workout.movements:
+                sets = [item for item in movement.sets if item.completed]
+                if not sets:
+                    continue
+                aggregate = exercise_groups.setdefault(
+                    movement.exercise_id,
+                    {
+                        "exercise": movement.exercise,
+                        "set_count": 0,
+                        "volume_kg": 0.0,
+                    },
+                )
+                aggregate["set_count"] = int(aggregate["set_count"]) + len(sets)
+                aggregate["volume_kg"] = float(aggregate["volume_kg"]) + sum(
+                    (item.weight_kg or 0) * (item.reps or 0) for item in sets
+                )
+        exercises = []
+        for aggregate in exercise_groups.values():
+            exercise = aggregate["exercise"]
+            exercises.append(
+                WeeklyExerciseBreakdown(
+                    exercise_id=exercise.id,
+                    exercise_name=exercise.name,
+                    muscle_group=exercise.muscle_group,
+                    category=exercise.category,
+                    set_count=int(aggregate["set_count"]),
+                    volume_kg=round(float(aggregate["volume_kg"]), 1),
+                )
+            )
+        exercises.sort(
+            key=lambda item: (item.muscle_group.casefold(), item.exercise_name.casefold())
+        )
+        day_sets = sum(len(completed_sets(item)) for item in items)
+        weekly_days.append(
+            WeeklyDayBreakdown(
+                workout_date=workout_date,
+                workout_count=len(items),
+                total_sets=day_sets,
+                volume_kg=round(
+                    sum(
+                        (item.weight_kg or 0) * (item.reps or 0)
+                        for workout in items
+                        for item in completed_sets(workout)
+                    ),
+                    1,
+                ),
+                workout_names=[item.name for item in items],
+                categories=display_categories(items),
+                exercises=exercises,
+            )
+        )
 
     workout_dates = sorted(day_groups, reverse=True)
     streak = 0
@@ -325,6 +418,7 @@ def dashboard(db: DbSession) -> DashboardRead:
         volume_this_week_kg=round(volume_this_week, 1),
         current_streak=streak,
         heatmap=heatmap,
+        weekly_days=weekly_days,
         recent_workouts=workouts[:5],
     )
 

@@ -39,8 +39,15 @@ def test_default_exercise_library_is_seeded(client):
     response = client.get("/api/exercises")
 
     assert response.status_code == 200
-    names = {item["name"] for item in response.json()}
+    exercises = response.json()
+    names = {item["name"] for item in exercises}
     assert {"Barbell Bench Press", "Back Squat", "Running"} <= names
+    assert next(item for item in exercises if item["name"] == "Barbell Row")["muscle_group"] == (
+        "Mid / Upper Back"
+    )
+    assert (
+        next(item for item in exercises if item["name"] == "Lat Pulldown")["muscle_group"] == "Lats"
+    )
 
 
 def test_workout_sets_notes_rest_and_rpe_are_saved(client):
@@ -88,6 +95,15 @@ def test_dashboard_and_progress_reflect_completed_workout(client):
     assert dashboard.json()["sets_this_week"] == 2
     assert dashboard.json()["volume_this_week_kg"] == 1012.5
     assert dashboard.json()["heatmap"][0]["categories"] == ["push"]
+    assert dashboard.json()["weekly_days"][0]["total_sets"] == 2
+    assert dashboard.json()["weekly_days"][0]["exercises"][0] == {
+        "exercise_id": exercise["id"],
+        "exercise_name": "Barbell Bench Press",
+        "muscle_group": "Chest",
+        "category": "push",
+        "set_count": 2,
+        "volume_kg": 1012.5,
+    }
     assert progress.status_code == 200
     assert progress.json()["personal_best_weight_kg"] == 102.5
     assert progress.json()["points"][0]["estimated_1rm"] == 119.6
@@ -125,6 +141,12 @@ def test_csv_import_and_export_use_supplied_column_format(client):
         "sets_imported": 2,
         "warnings": [],
     }
+    imported_exercise = next(
+        item
+        for item in client.get("/api/exercises").json()
+        if item["name"] == "Machine Reverse Fly"
+    )
+    assert imported_exercise["muscle_group"] == "Rear Delts"
     assert exported.status_code == 200
     decoded = exported.content.decode("utf-8-sig")
     assert decoded.splitlines()[0] == (
@@ -145,7 +167,15 @@ def test_sample_seed_creates_one_week_once(client):
     workouts = client.get("/api/workouts").json()
     assert len(workouts) == 5
     assert all(item["is_sample"] for item in workouts)
-    assert len({item["workout_date"] for item in workouts}) == 5
+    assert len({item["workout_date"] for item in workouts}) == 4
+
+    today = max(item["workout_date"] for item in workouts)
+    today_heatmap = next(
+        item
+        for item in client.get("/api/dashboard").json()["heatmap"]
+        if item["workout_date"] == today
+    )
+    assert today_heatmap["categories"] == ["upper", "cardio"]
 
     assert client.delete("/api/sample-data").status_code == 204
     with SessionLocal() as db:

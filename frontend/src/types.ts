@@ -157,12 +157,32 @@ export interface HeatmapDay {
   set_count: number;
 }
 
+export interface WeeklyExerciseBreakdown {
+  exercise_id: string;
+  exercise_name: string;
+  muscle_group: string;
+  category: WorkoutCategory;
+  set_count: number;
+  volume_kg: number;
+}
+
+export interface WeeklyDayBreakdown {
+  workout_date: string;
+  workout_count: number;
+  total_sets: number;
+  volume_kg: number;
+  workout_names: string[];
+  categories: WorkoutCategory[];
+  exercises: WeeklyExerciseBreakdown[];
+}
+
 export interface DashboardData {
   workouts_this_week: number;
   sets_this_week: number;
   volume_this_week_kg: number;
   current_streak: number;
   heatmap: HeatmapDay[];
+  weekly_days: WeeklyDayBreakdown[];
   recent_workouts: TrackedWorkout[];
 }
 
