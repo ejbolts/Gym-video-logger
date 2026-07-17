@@ -30,6 +30,9 @@ from .schemas import (
     SessionRead,
 )
 from .storage import UploadValidationError, clean_abandoned_partials, stream_upload_to_disk
+from .tracker import router as tracker_router
+from .tracker import seed_default_exercises
+from .tracker_seed import seed_sample_workouts
 
 logging.basicConfig(
     level=logging.INFO,
@@ -77,6 +80,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(app: FastAPI):
         settings.ensure_directories()
         Base.metadata.create_all(bind=engine)
+        with SessionLocal() as db:
+            seed_default_exercises(db)
+            if settings.seed_sample_data:
+                seeded = seed_sample_workouts(db)
+                if seeded:
+                    logger.info("Seeded sample workouts", extra={"count": seeded})
         removed = clean_abandoned_partials(settings)
         if removed:
             logger.info("Removed abandoned partial uploads", extra={"count": removed})
@@ -97,13 +106,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(_: Request, exc: RequestValidationError) -> JSONResponse:
+        details = exc.errors()
+        for detail in details:
+            detail.pop("ctx", None)
         return JSONResponse(
             status_code=422,
             content={
                 "error": {
                     "code": "validation_error",
                     "message": "Request validation failed.",
-                    "details": exc.errors(),
+                    "details": details,
                 }
             },
         )
@@ -429,6 +441,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         session.processing_error = None
         db.commit()
         return load_session(db, session.id)
+
+    app.include_router(tracker_router)
 
     frontend_dist = Path(__file__).resolve().parents[2] / "frontend" / "dist"
     if frontend_dist.is_dir():

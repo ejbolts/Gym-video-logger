@@ -1,4 +1,15 @@
-import type { Clip, Health, PushConfig, WorkoutSession } from './types';
+import type {
+  Clip,
+  CsvImportResult,
+  DashboardData,
+  Exercise,
+  ExerciseProgress,
+  Health,
+  PushConfig,
+  TrackedWorkout,
+  WorkoutInput,
+  WorkoutSession,
+} from './types';
 
 export class ApiError extends Error {
   constructor(
@@ -25,6 +36,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.status === 204 ? (undefined as T) : ((await response.json()) as T);
 }
 
+async function requestBlob(path: string): Promise<Blob> {
+  const response = await fetch(path, { credentials: 'omit' });
+  if (!response.ok)
+    throw new ApiError(`Export failed (${response.status})`, 'export_failed', response.status);
+  return response.blob();
+}
+
 export const api = {
   health: () => request<Health>('/api/health'),
   pushConfig: () => request<PushConfig>('/api/notifications/push/config'),
@@ -36,6 +54,42 @@ export const api = {
     }),
   testPush: () => request<void>('/api/notifications/push/test', { method: 'POST' }),
   listSessions: () => request<WorkoutSession[]>('/api/sessions'),
+  listExercises: () => request<Exercise[]>('/api/exercises'),
+  createExercise: (payload: {
+    name: string;
+    category: string;
+    kind: string;
+    muscle_group: string;
+    equipment: string | null;
+  }) =>
+    request<Exercise>('/api/exercises', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+  dashboard: () => request<DashboardData>('/api/dashboard'),
+  listWorkouts: () => request<TrackedWorkout[]>('/api/workouts'),
+  exportWorkouts: () => requestBlob('/api/workouts/export.csv'),
+  importWorkouts: (file: File) => {
+    const form = new FormData();
+    form.append('file', file, file.name);
+    return request<CsvImportResult>('/api/workouts/import', { method: 'POST', body: form });
+  },
+  createWorkout: (payload: WorkoutInput) =>
+    request<TrackedWorkout>('/api/workouts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+  updateWorkout: (id: string, payload: WorkoutInput) =>
+    request<TrackedWorkout>(`/api/workouts/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+  deleteWorkout: (id: string) => request<void>(`/api/workouts/${id}`, { method: 'DELETE' }),
+  deleteSampleData: () => request<void>('/api/sample-data', { method: 'DELETE' }),
+  exerciseProgress: (id: string) => request<ExerciseProgress>(`/api/progress/${id}`),
   getSession: (id: string) => request<WorkoutSession>(`/api/sessions/${id}`),
   deleteSession: (id: string) =>
     request<void>(`/api/sessions/${id}`, {

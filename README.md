@@ -2,6 +2,12 @@
 
 A private, single-user mobile PWA for batching individual gym-set videos, stitching them locally, and uploading one unlisted workout video to YouTube. It intentionally has **no application authentication**: access is restricted by a private Tailscale network, not a login page.
 
+The app also includes a structured, dark, mobile-first workout tracker: an exercise library, set/reps/weight logging, RPE and rest tracking, per-set notes, a live rest timer, workout history, colour-coded training heatmap, weekly totals, and per-exercise progression charts. Workout records live in the local SQLite database independently of the optional video workflow.
+
+Workout history can be imported and exported from the History screen using CSV. The round-trip format uses these exact columns: `Date Lifted`, `Exercise`, `Weight (kg)`, `Weight (lb)`, `Reps`, `Bodyweight (kg)`, `Bodyweight (lb)`, `Percentile (%)`, and `Warmup`. Imports accept both comma-separated CSV and tab-separated text copied from a spreadsheet. Missing exercises are added to the local exercise library automatically.
+
+On a fresh workout database, the app seeds five sample sessions across one week so the dashboard, heatmap, history, and progression graphs can be evaluated immediately. Set `GYM_SEED_SAMPLE_DATA=false` before first startup to disable this. Seeded workouts are labelled **Sample**; **Remove samples** in History deletes all of them without affecting real workouts or video sessions, and they will not reappear after a restart.
+
 The first working path is YouTube mock mode. It accepts a batch, processes it with local ffmpeg, and returns a deterministic mock YouTube URL without any Google credentials.
 
 ## Architecture
@@ -175,4 +181,4 @@ Each clip is also trimmed by 5 seconds at its start and end before it is normali
 - A processing job cannot be cancelled once ffmpeg work begins; cancellation is supported during upload.
 - The in-process worker processes one session at a time and is not suitable for multi-user or distributed deployment.
 - Real YouTube uploads need credentials and internet access; mock mode remains ideal for local verification.
-- Future milestones could add import/export, video trimming, richer YouTube processing progress, or carefully designed exercise analysis. AI exercise recognition and rep counting are deliberately out of scope here.
+- Future milestones could add saved workout templates, richer YouTube processing progress, or carefully designed exercise analysis. AI exercise recognition and rep counting are deliberately out of scope here.

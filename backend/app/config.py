@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     delete_output_after_success: bool = True
     trim_start_seconds: float = Field(default=5, ge=0, le=60)
     trim_end_seconds: float = Field(default=5, ge=0, le=60)
+    seed_sample_data: bool = True
 
     @field_validator("youtube_privacy_status")
     @classmethod

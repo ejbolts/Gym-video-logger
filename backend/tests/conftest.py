@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 TEST_DATA_DIR = Path(__file__).parent / ".test-data"
 os.environ["GYM_DATA_DIR"] = str(TEST_DATA_DIR)
 os.environ["GYM_DATABASE_PATH"] = str(TEST_DATA_DIR / "gym-video-logger-test.db")
+os.environ["GYM_SEED_SAMPLE_DATA"] = "false"
 
 from app.database import Base, engine  # noqa: E402
 from app.main import create_app  # noqa: E402

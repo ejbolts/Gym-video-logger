@@ -11,11 +11,11 @@ export default defineConfig({
         importScripts: ['push-notifications.js'],
       },
       manifest: {
-        name: 'Gym Video Logger',
+        name: 'Gym Logger',
         short_name: 'Gym Logger',
-        description: 'Private gym-set video upload and processing',
-        theme_color: '#0d1b2a',
-        background_color: '#f7f9fc',
+        description: 'Private workout tracking, progress, and video logging',
+        theme_color: '#18201d',
+        background_color: '#f4f5f1',
         display: 'standalone',
         start_url: '/',
         icons: [
