@@ -1,0 +1,17 @@
+.env
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.py[cod]
+data/
+backend/data/
+frontend/node_modules/
+frontend/dist/
+frontend/coverage/
+backend/tests/.test-data/
+*.log
+youtube-token*.json
+client_secret*.json
+secrets/*.json
