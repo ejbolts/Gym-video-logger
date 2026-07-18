@@ -5,8 +5,25 @@ from pathlib import Path
 
 from app.config import Settings, get_settings
 from app.database import SessionLocal
-from app.models import Clip, ClipUploadStatus, SessionStatus, WorkoutSession
-from app.processing import ProcessingError, SessionProcessor, make_timestamps
+from app.models import (
+    Clip,
+    ClipUploadStatus,
+    Exercise,
+    ExerciseKind,
+    SessionStatus,
+    Timestamp,
+    TrainingWorkout,
+    WorkoutCategory,
+    WorkoutMovement,
+    WorkoutSession,
+    WorkoutSet,
+)
+from app.processing import (
+    ProcessingError,
+    SessionProcessor,
+    link_session_videos_to_workout,
+    make_timestamps,
+)
 from app.youtube import MockYouTubeUploader, YouTubeUploadError
 
 
@@ -38,6 +55,65 @@ def test_timestamp_calculation_and_set_numbering():
         (12, "back squat - Set 2"),
         (22, "Set N"),
     ]
+
+
+def test_completed_video_timestamp_is_added_to_matching_exercise_notes():
+    with SessionLocal() as db:
+        exercise = Exercise(
+            name="Back Squat",
+            category=WorkoutCategory.LOWER,
+            kind=ExerciseKind.STRENGTH,
+            muscle_group="Quads",
+        )
+        workout = TrainingWorkout(
+            name="Lower body",
+            workout_date=date(2026, 7, 12),
+            category=WorkoutCategory.LOWER,
+        )
+        movement = WorkoutMovement(exercise=exercise, order_index=0, notes="Keep the chest tall.")
+        movement.sets.append(WorkoutSet(order_index=0, reps=5, weight_kg=100, completed=True))
+        workout.movements.append(movement)
+        session = WorkoutSession(
+            name="Lower body",
+            workout_date=date(2026, 7, 12),
+            expected_clip_count=1,
+            uploaded_clip_count=1,
+            status=SessionStatus.COMPLETE,
+            youtube_video_id="youtube-video",
+            youtube_url="https://youtu.be/youtube-video",
+        )
+        clip = Clip(
+            client_clip_id="client-1",
+            original_filename="squat.mov",
+            stored_filename="stored.mov",
+            order_index=0,
+            exercise_label="Back squat",
+            file_size=1,
+            upload_status=ClipUploadStatus.UPLOADED,
+            duration_ms=12_000,
+        )
+        session.clips.append(clip)
+        session.timestamps.append(
+            Timestamp(
+                clip=clip,
+                order_index=0,
+                label="Back squat - Set 1",
+                start_seconds=0,
+                youtube_url="https://youtu.be/youtube-video?t=0",
+            )
+        )
+        db.add_all([workout, session])
+        db.commit()
+
+        assert link_session_videos_to_workout(db, session) == 1
+        assert link_session_videos_to_workout(db, session) == 0
+        db.commit()
+        db.refresh(movement)
+
+        assert movement.notes == (
+            "Keep the chest tall.\n"
+            "Video - Back squat - Set 1 @ 0:00: https://youtu.be/youtube-video?t=0"
+        )
 
 
 def test_mock_youtube_uploader_returns_unlisted_style_link(tmp_path: Path):

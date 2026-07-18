@@ -39,6 +39,7 @@ export function VideoUpload() {
   const [serverSession, setServerSession] = useState<WorkoutSession | null>(null);
   const [history, setHistory] = useState<WorkoutSession[]>([]);
   const [health, setHealth] = useState<Health | null>(null);
+  const [exerciseNames, setExerciseNames] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [pushEnabled, setPushEnabled] = useState(false);
   const [pushEnabling, setPushEnabling] = useState(false);
@@ -53,6 +54,10 @@ export function VideoUpload() {
       .health()
       .then(setHealth)
       .catch(() => setMessage('Could not reach the local service.'));
+    void api
+      .listExercises()
+      .then((items) => setExerciseNames(items.map((item) => item.name)))
+      .catch(() => undefined);
     return () => {
       for (const url of urls) URL.revokeObjectURL(url);
       if (wakeLock.current) void wakeLock.current.release();
@@ -451,6 +456,11 @@ export function VideoUpload() {
               event.currentTarget.value = '';
             }}
           />
+          <datalist id="video-exercise-options">
+            {exerciseNames.map((name) => (
+              <option key={name} value={name} />
+            ))}
+          </datalist>
           <button className="picker" onClick={() => pickerRef.current?.click()}>
             <span aria-hidden="true">＋</span>
             Add set videos
@@ -497,6 +507,7 @@ export function VideoUpload() {
                     <label>
                       Exercise label <span className="optional">optional</span>
                       <input
+                        list="video-exercise-options"
                         value={clip.exerciseLabel}
                         onChange={(event) =>
                           updateClip(clip.clientId, { exerciseLabel: event.target.value })

@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from .models import (
     AppSetting,
+    BodyMeasurement,
     Exercise,
     TrainingWorkout,
     WorkoutCategory,
@@ -62,7 +63,7 @@ def seed_sample_workouts(db: Session) -> int:
             ),
         ),
         (
-            0,
+            1,
             "Sample upper session",
             WorkoutCategory.UPPER,
             (
@@ -103,7 +104,7 @@ def seed_sample_workouts(db: Session) -> int:
 
     cardio = TrainingWorkout(
         name="Sample conditioning",
-        workout_date=today,
+        workout_date=today - timedelta(days=1),
         category=WorkoutCategory.CARDIO,
         notes="Easy aerobic finish to complete the sample week.",
         duration_minutes=32,
@@ -124,3 +125,25 @@ def seed_sample_workouts(db: Session) -> int:
     db.add(AppSetting(key=SAMPLE_SEED_KEY, value=today.isoformat()))
     db.commit()
     return 5
+
+
+def seed_sample_body_measurements(db: Session) -> int:
+    if db.scalar(select(func.count(BodyMeasurement.id))):
+        return 0
+    if not db.scalar(
+        select(func.count(TrainingWorkout.id)).where(TrainingWorkout.is_sample.is_(True))
+    ):
+        return 0
+    today = date.today()
+    for days_ago, weight, body_fat in ((4, 83.8, 17.6), (2, 83.5, 17.3), (1, 83.3, 17.1)):
+        db.add(
+            BodyMeasurement(
+                measurement_date=today - timedelta(days=days_ago),
+                weight_kg=weight,
+                body_fat_pct=body_fat,
+                notes="Sample body-composition entry.",
+                is_sample=True,
+            )
+        )
+    db.commit()
+    return 3

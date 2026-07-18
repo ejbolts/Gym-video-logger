@@ -125,11 +125,26 @@ class TrainingWorkoutRead(BaseModel):
     movements: list[WorkoutMovementRead] = []
 
 
+class CalendarExerciseRead(BaseModel):
+    exercise_name: str
+    set_count: int
+    bodyweight_kg: float | None
+
+
+class CalendarWorkoutRead(BaseModel):
+    id: str
+    name: str
+    category: WorkoutCategory
+    duration_minutes: int | None
+    exercises: list[CalendarExerciseRead]
+
+
 class HeatmapDay(BaseModel):
     workout_date: date
     categories: list[WorkoutCategory]
     workout_count: int
     set_count: int
+    workouts: list[CalendarWorkoutRead]
 
 
 class WeeklyExerciseBreakdown(BaseModel):
@@ -151,6 +166,44 @@ class WeeklyDayBreakdown(BaseModel):
     exercises: list[WeeklyExerciseBreakdown]
 
 
+class MuscleFrequencyRead(BaseModel):
+    muscle_group: str
+    sessions_last_7_days: int
+    target_sessions: int
+
+
+class WorkoutRecommendationRead(BaseModel):
+    category: WorkoutCategory
+    session_name: str
+    rotation_next: WorkoutCategory
+    reason: str
+    muscle_frequency: list[MuscleFrequencyRead]
+
+
+class BodyMeasurementCreate(BaseModel):
+    measurement_date: date
+    weight_kg: float = Field(gt=0, le=500)
+    body_fat_pct: float | None = Field(default=None, ge=1, le=70)
+    notes: str | None = Field(default=None, max_length=2_000)
+
+    @field_validator("notes", mode="before")
+    @classmethod
+    def clean_notes(cls, value: str | None) -> str | None:
+        return value.strip() or None if isinstance(value, str) else value
+
+
+class BodyMeasurementRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    measurement_date: date
+    weight_kg: float
+    body_fat_pct: float | None
+    notes: str | None
+    is_sample: bool
+    created_at: datetime
+
+
 class DashboardRead(BaseModel):
     workouts_this_week: int
     sets_this_week: int
@@ -158,6 +211,7 @@ class DashboardRead(BaseModel):
     current_streak: int
     heatmap: list[HeatmapDay]
     weekly_days: list[WeeklyDayBreakdown]
+    recommendation: WorkoutRecommendationRead
     recent_workouts: list[TrainingWorkoutRead]
 
 

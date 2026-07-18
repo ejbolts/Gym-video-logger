@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import date
+
 
 def workout_payload(exercise_id: str) -> dict:
     return {
@@ -48,6 +50,9 @@ def test_default_exercise_library_is_seeded(client):
     assert (
         next(item for item in exercises if item["name"] == "Lat Pulldown")["muscle_group"] == "Lats"
     )
+    recommendation = client.get("/api/dashboard").json()["recommendation"]
+    assert recommendation["category"] == "push"
+    assert recommendation["rotation_next"] == "push"
 
 
 def test_workout_sets_notes_rest_and_rpe_are_saved(client):
@@ -79,6 +84,43 @@ def test_workout_sets_notes_rest_and_rpe_are_saved(client):
     }
 
 
+def test_body_measurements_are_upserted_and_used_in_calendar_workouts(client):
+    created = client.post(
+        "/api/body-measurements",
+        json={
+            "measurement_date": "2026-07-17",
+            "weight_kg": 88,
+            "body_fat_pct": 18.5,
+            "notes": "Morning check-in",
+        },
+    )
+    exercise = next(
+        item
+        for item in client.get("/api/exercises").json()
+        if item["name"] == "Barbell Bench Press"
+    )
+    assert client.post("/api/workouts", json=workout_payload(exercise["id"])).status_code == 201
+
+    day = client.get("/api/dashboard").json()["heatmap"][0]
+    assert created.status_code == 200
+    assert day["workouts"][0]["exercises"][0]["bodyweight_kg"] == 88
+
+    updated = client.post(
+        "/api/body-measurements",
+        json={
+            "measurement_date": "2026-07-17",
+            "weight_kg": 87.6,
+            "body_fat_pct": 18.1,
+            "notes": None,
+        },
+    )
+    measurements = client.get("/api/body-measurements").json()
+    assert updated.json()["id"] == created.json()["id"]
+    assert len(measurements) == 1
+    assert measurements[0]["weight_kg"] == 87.6
+    assert client.delete(f"/api/body-measurements/{measurements[0]['id']}").status_code == 204
+
+
 def test_dashboard_and_progress_reflect_completed_workout(client):
     exercise = next(
         item
@@ -104,6 +146,8 @@ def test_dashboard_and_progress_reflect_completed_workout(client):
         "set_count": 2,
         "volume_kg": 1012.5,
     }
+    assert dashboard.json()["recommendation"]["category"] == "pull"
+    assert dashboard.json()["recommendation"]["rotation_next"] == "pull"
     assert progress.status_code == 200
     assert progress.json()["personal_best_weight_kg"] == 102.5
     assert progress.json()["points"][0]["estimated_1rm"] == 119.6
@@ -158,11 +202,13 @@ def test_csv_import_and_export_use_supplied_column_format(client):
 
 def test_sample_seed_creates_one_week_once(client):
     from app.database import SessionLocal
-    from app.tracker_seed import seed_sample_workouts
+    from app.tracker_seed import seed_sample_body_measurements, seed_sample_workouts
 
     with SessionLocal() as db:
         assert seed_sample_workouts(db) == 5
         assert seed_sample_workouts(db) == 0
+        assert seed_sample_body_measurements(db) == 3
+        assert seed_sample_body_measurements(db) == 0
 
     workouts = client.get("/api/workouts").json()
     assert len(workouts) == 5
@@ -176,6 +222,11 @@ def test_sample_seed_creates_one_week_once(client):
         if item["workout_date"] == today
     )
     assert today_heatmap["categories"] == ["upper", "cardio"]
+    assert today < date.today().isoformat()
+    recommendation = client.get("/api/dashboard").json()["recommendation"]
+    assert recommendation["rotation_next"] == "push"
+    assert recommendation["category"] == "lower"
+    assert "moves ahead of Push" in recommendation["reason"]
 
     assert client.delete("/api/sample-data").status_code == 204
     with SessionLocal() as db:

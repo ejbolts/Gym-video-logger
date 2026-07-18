@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from .database import get_db
 from .models import (
+    BodyMeasurement,
     Exercise,
     ExerciseKind,
     TrainingWorkout,
@@ -19,19 +20,26 @@ from .models import (
     WorkoutMovement,
     WorkoutSet,
 )
+from .processing import backfill_completed_video_links
 from .tracker_csv import CsvImportError, export_workouts, import_workouts
 from .tracker_schemas import (
+    BodyMeasurementCreate,
+    BodyMeasurementRead,
+    CalendarExerciseRead,
+    CalendarWorkoutRead,
     CsvImportRead,
     DashboardRead,
     ExerciseCreate,
     ExerciseProgressRead,
     ExerciseRead,
     HeatmapDay,
+    MuscleFrequencyRead,
     ProgressPoint,
     TrainingWorkoutCreate,
     TrainingWorkoutRead,
     WeeklyDayBreakdown,
     WeeklyExerciseBreakdown,
+    WorkoutRecommendationRead,
 )
 
 router = APIRouter(prefix="/api", tags=["workout tracking"])
@@ -75,6 +83,120 @@ DEFAULT_CARDIO = (
     ("Stair Climber", "Cardio", "Machine"),
     ("Walking", "Cardio", "Outdoor / Treadmill"),
 )
+
+TRAINING_ROTATION = (
+    WorkoutCategory.PUSH,
+    WorkoutCategory.PULL,
+    WorkoutCategory.LOWER,
+    WorkoutCategory.CARDIO,
+)
+SESSION_MUSCLE_GROUPS = {
+    WorkoutCategory.PUSH: ("Chest", "Shoulders", "Triceps"),
+    WorkoutCategory.PULL: ("Lats", "Mid / Upper Back", "Rear Delts", "Biceps"),
+    WorkoutCategory.LOWER: ("Quads", "Hamstrings", "Glutes", "Calves"),
+    WorkoutCategory.CARDIO: ("Cardio",),
+}
+SESSION_NAMES = {
+    WorkoutCategory.PUSH: "Push",
+    WorkoutCategory.PULL: "Pull",
+    WorkoutCategory.LOWER: "Legs",
+    WorkoutCategory.CARDIO: "Cardio",
+}
+
+
+def exercise_coverage_groups(exercise: Exercise) -> set[str]:
+    if exercise.category == WorkoutCategory.CARDIO or exercise.kind == ExerciseKind.CARDIO:
+        return {"Cardio"}
+    label = exercise.muscle_group.casefold()
+    groups: set[str] = set()
+    aliases = {
+        "chest": "Chest",
+        "shoulder": "Shoulders",
+        "tricep": "Triceps",
+        "lat": "Lats",
+        "mid / upper back": "Mid / Upper Back",
+        "rear delt": "Rear Delts",
+        "bicep": "Biceps",
+        "quad": "Quads",
+        "hamstring": "Hamstrings",
+        "glute": "Glutes",
+        "calf": "Calves",
+    }
+    for needle, group in aliases.items():
+        if needle in label:
+            groups.add(group)
+    if "posterior chain" in label:
+        groups.update(("Hamstrings", "Glutes"))
+    return groups
+
+
+def workout_recommendation(
+    workouts: list[TrainingWorkout], today: date
+) -> WorkoutRecommendationRead:
+    recent_start = today - timedelta(days=6)
+    group_dates: dict[str, set[date]] = defaultdict(set)
+    for workout in workouts:
+        if not recent_start <= workout.workout_date <= today:
+            continue
+        for movement in workout.movements:
+            if not any(item.completed for item in movement.sets):
+                continue
+            for group in exercise_coverage_groups(movement.exercise):
+                group_dates[group].add(workout.workout_date)
+
+    last_rotation = next(
+        (workout.category for workout in workouts if workout.category in TRAINING_ROTATION),
+        None,
+    )
+    rotation_next = (
+        WorkoutCategory.PUSH
+        if last_rotation is None
+        else TRAINING_ROTATION[
+            (TRAINING_ROTATION.index(last_rotation) + 1) % len(TRAINING_ROTATION)
+        ]
+    )
+
+    def candidate_score(category: WorkoutCategory) -> float:
+        groups = SESSION_MUSCLE_GROUPS[category]
+        target = 1 if category == WorkoutCategory.CARDIO else 2
+        deficits = [max(0, target - len(group_dates[group])) for group in groups]
+        days_since = [
+            min((today - max(group_dates[group])).days, 7) if group_dates[group] else 7
+            for group in groups
+        ]
+        coverage_need = sum(deficits) / len(groups)
+        recovery_readiness = sum(days_since) / len(days_since) / 7
+        rotation_bonus = 0.8 if category == rotation_next else 0
+        return coverage_need * 2 + recovery_readiness + rotation_bonus
+
+    recommended = max(TRAINING_ROTATION, key=candidate_score)
+    target = 1 if recommended == WorkoutCategory.CARDIO else 2
+    frequencies = [
+        MuscleFrequencyRead(
+            muscle_group=group,
+            sessions_last_7_days=len(group_dates[group]),
+            target_sessions=target,
+        )
+        for group in SESSION_MUSCLE_GROUPS[recommended]
+    ]
+    overdue = [item.muscle_group for item in frequencies if item.sessions_last_7_days < target]
+    overdue_text = ", ".join(overdue[:3])
+    if recommended == rotation_next:
+        reason = "Next in your Push → Pull → Legs → Cardio rotation."
+        if overdue_text:
+            reason += f" {overdue_text} are also below their 7-day frequency target."
+    else:
+        reason = (
+            f"{SESSION_NAMES[recommended]} moves ahead of {SESSION_NAMES[rotation_next]} because "
+            f"{overdue_text or 'its muscle groups'} have the largest 7-day frequency gap."
+        )
+    return WorkoutRecommendationRead(
+        category=recommended,
+        session_name=f"{SESSION_NAMES[recommended]} workout",
+        rotation_next=rotation_next,
+        reason=reason,
+        muscle_frequency=frequencies,
+    )
 
 
 def seed_default_exercises(db: Session) -> None:
@@ -163,6 +285,40 @@ def list_exercises(
     return list(db.scalars(query))
 
 
+@router.get("/body-measurements", response_model=list[BodyMeasurementRead])
+def list_body_measurements(db: DbSession) -> list[BodyMeasurement]:
+    return list(
+        db.scalars(select(BodyMeasurement).order_by(BodyMeasurement.measurement_date.desc()))
+    )
+
+
+@router.post("/body-measurements", response_model=BodyMeasurementRead)
+def save_body_measurement(payload: BodyMeasurementCreate, db: DbSession) -> BodyMeasurement:
+    measurement = db.scalar(
+        select(BodyMeasurement).where(BodyMeasurement.measurement_date == payload.measurement_date)
+    )
+    if measurement:
+        measurement.weight_kg = payload.weight_kg
+        measurement.body_fat_pct = payload.body_fat_pct
+        measurement.notes = payload.notes
+        measurement.is_sample = False
+    else:
+        measurement = BodyMeasurement(**payload.model_dump())
+        db.add(measurement)
+    db.commit()
+    db.refresh(measurement)
+    return measurement
+
+
+@router.delete("/body-measurements/{measurement_id}", status_code=204)
+def delete_body_measurement(measurement_id: str, db: DbSession) -> None:
+    measurement = db.get(BodyMeasurement, measurement_id)
+    if not measurement:
+        raise HTTPException(status_code=404, detail="Body measurement was not found.")
+    db.delete(measurement)
+    db.commit()
+
+
 @router.post("/exercises", response_model=ExerciseRead, status_code=201)
 def create_exercise(payload: ExerciseCreate, db: DbSession) -> Exercise:
     exercise = Exercise(**payload.model_dump(), is_custom=True)
@@ -204,6 +360,7 @@ def create_workout(payload: TrainingWorkoutCreate, db: DbSession) -> TrainingWor
     db.add(workout)
     replace_workout_contents(db, workout, payload)
     db.commit()
+    backfill_completed_video_links(db, workout.workout_date)
     return load_workout(db, workout.id)
 
 
@@ -262,6 +419,7 @@ def update_workout(
     workout = load_workout(db, workout_id)
     replace_workout_contents(db, workout, payload)
     db.commit()
+    backfill_completed_video_links(db, workout.workout_date)
     return load_workout(db, workout.id)
 
 
@@ -277,6 +435,10 @@ def delete_sample_data(db: DbSession) -> None:
     samples = list(db.scalars(select(TrainingWorkout).where(TrainingWorkout.is_sample.is_(True))))
     for workout in samples:
         db.delete(workout)
+    for measurement in db.scalars(
+        select(BodyMeasurement).where(BodyMeasurement.is_sample.is_(True))
+    ):
+        db.delete(measurement)
     db.commit()
 
 
@@ -294,6 +456,15 @@ def dashboard(db: DbSession) -> DashboardRead:
     )
     week_start = today - timedelta(days=today.weekday())
     this_week = [workout for workout in workouts if workout.workout_date >= week_start]
+    measurements = list(
+        db.scalars(select(BodyMeasurement).order_by(BodyMeasurement.measurement_date))
+    )
+
+    def bodyweight_on(workout_date: date) -> float | None:
+        applicable = [
+            item.weight_kg for item in measurements if item.measurement_date <= workout_date
+        ]
+        return applicable[-1] if applicable else None
 
     def completed_sets(workout: TrainingWorkout) -> list[WorkoutSet]:
         return [item for movement in workout.movements for item in movement.sets if item.completed]
@@ -338,6 +509,34 @@ def dashboard(db: DbSession) -> DashboardRead:
             categories=display_categories(items),
             workout_count=len(items),
             set_count=sum(len(completed_sets(item)) for item in items),
+            workouts=[
+                CalendarWorkoutRead(
+                    id=item.id,
+                    name=item.name,
+                    category=item.category,
+                    duration_minutes=item.duration_minutes,
+                    exercises=[
+                        CalendarExerciseRead(
+                            exercise_name=movement.exercise.name,
+                            set_count=len(
+                                [set_item for set_item in movement.sets if set_item.completed]
+                            ),
+                            bodyweight_kg=bodyweight_on(item.workout_date)
+                            or next(
+                                (
+                                    set_item.bodyweight_kg
+                                    for set_item in movement.sets
+                                    if set_item.completed and set_item.bodyweight_kg is not None
+                                ),
+                                None,
+                            ),
+                        )
+                        for movement in item.movements
+                        if any(set_item.completed for set_item in movement.sets)
+                    ],
+                )
+                for item in items
+            ],
         )
         for workout_date, items in sorted(day_groups.items())
     ]
@@ -419,6 +618,7 @@ def dashboard(db: DbSession) -> DashboardRead:
         current_streak=streak,
         heatmap=heatmap,
         weekly_days=weekly_days,
+        recommendation=workout_recommendation(workouts, today),
         recent_workouts=workouts[:5],
     )
 

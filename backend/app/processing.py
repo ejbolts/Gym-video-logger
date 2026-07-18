@@ -2,17 +2,27 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import shutil
 import subprocess
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from .config import Settings
-from .models import Clip, ClipUploadStatus, SessionStatus, Timestamp, WorkoutSession
+from .models import (
+    Clip,
+    ClipUploadStatus,
+    SessionStatus,
+    Timestamp,
+    TrainingWorkout,
+    WorkoutMovement,
+    WorkoutSession,
+)
 from .notifications import send_push_notification
 from .storage import inspect_media, original_clip_path
 from .youtube import YouTubeUploader, YouTubeUploadError, make_uploader
@@ -106,6 +116,111 @@ def youtube_chapter_text(timestamps: Sequence[TimestampSpec]) -> str:
     return "\n".join(f"{display_time(item.start_seconds)} {item.label}" for item in timestamps)
 
 
+def normalized_exercise_label(value: str) -> str:
+    return " ".join(re.findall(r"[a-z0-9]+", value.casefold()))
+
+
+def exercise_match_score(clip_label: str, exercise_name: str) -> int:
+    """Prefer exact names, with a conservative equipment-prefix fallback."""
+    left = normalized_exercise_label(clip_label)
+    right = normalized_exercise_label(exercise_name)
+    if not left or not right:
+        return 0
+    if left == right:
+        return 100
+    left_tokens = set(left.split())
+    right_tokens = set(right.split())
+    if min(len(left_tokens), len(right_tokens)) >= 2 and (
+        left_tokens <= right_tokens or right_tokens <= left_tokens
+    ):
+        return 70 + len(left_tokens & right_tokens)
+    return 0
+
+
+def link_session_videos_to_workout(db: Session, session: WorkoutSession) -> int:
+    """Attach each timestamp to the best matching exercise in a completed workout."""
+    if session.status != SessionStatus.COMPLETE or not session.youtube_video_id:
+        return 0
+    timestamps = list(
+        db.scalars(
+            select(Timestamp)
+            .where(Timestamp.session_id == session.id)
+            .options(selectinload(Timestamp.clip))
+            .order_by(Timestamp.order_index)
+        )
+    )
+    if not timestamps:
+        return 0
+    workouts = list(
+        db.scalars(
+            select(TrainingWorkout)
+            .where(
+                TrainingWorkout.workout_date == session.workout_date,
+                TrainingWorkout.is_sample.is_(False),
+            )
+            .options(
+                selectinload(TrainingWorkout.movements).selectinload(WorkoutMovement.exercise),
+                selectinload(TrainingWorkout.movements).selectinload(WorkoutMovement.sets),
+            )
+            .order_by(TrainingWorkout.created_at.desc())
+        )
+    )
+    candidates = [
+        (workout, movement)
+        for workout in workouts
+        for movement in workout.movements
+        if any(item.completed for item in movement.sets)
+    ]
+    linked = 0
+    for timestamp in timestamps:
+        clip_label = timestamp.clip.exercise_label if timestamp.clip else None
+        if not clip_label or not timestamp.youtube_url:
+            continue
+        ranked = sorted(
+            (
+                (
+                    exercise_match_score(clip_label, movement.exercise.name),
+                    int(
+                        normalized_exercise_label(workout.name)
+                        == normalized_exercise_label(session.name)
+                    ),
+                    movement,
+                )
+                for workout, movement in candidates
+            ),
+            key=lambda item: (item[0], item[1]),
+            reverse=True,
+        )
+        if not ranked or ranked[0][0] == 0:
+            continue
+        movement = ranked[0][2]
+        note_line = (
+            f"Video - {timestamp.label} @ {display_time(timestamp.start_seconds)}: "
+            f"{timestamp.youtube_url}"
+        )
+        if note_line in (movement.notes or ""):
+            continue
+        movement.notes = "\n".join(item for item in (movement.notes, note_line) if item)
+        linked += 1
+    db.flush()
+    return linked
+
+
+def backfill_completed_video_links(db: Session, workout_date: date | None = None) -> int:
+    linked = 0
+    query = select(WorkoutSession).where(
+        WorkoutSession.status == SessionStatus.COMPLETE,
+        WorkoutSession.youtube_video_id.is_not(None),
+    )
+    if workout_date is not None:
+        query = query.where(WorkoutSession.workout_date == workout_date)
+    sessions = list(db.scalars(query))
+    for session in sessions:
+        linked += link_session_videos_to_workout(db, session)
+    db.commit()
+    return linked
+
+
 class SessionProcessor:
     """A deliberately small persistent-state, in-process queue for one home PC."""
 
@@ -124,6 +239,10 @@ class SessionProcessor:
         self._youtube_monitor: asyncio.Task[None] | None = None
 
     async def start(self) -> None:
+        with self.session_factory() as db:
+            linked = backfill_completed_video_links(db)
+            if linked:
+                logger.info("Backfilled workout video links", extra={"links": linked})
         queued = self.recover_interrupted_sessions()
         self._worker = asyncio.create_task(self._work(), name="gym-video-worker")
         self._youtube_monitor = asyncio.create_task(
@@ -260,6 +379,9 @@ class SessionProcessor:
                     else SessionStatus.YOUTUBE_PROCESSING
                 )
                 session.processing_error = None
+                db.flush()
+                if session.status == SessionStatus.COMPLETE:
+                    link_session_videos_to_workout(db, session)
                 db.commit()
                 self._cleanup_after_upload(session_dir)
                 if self.uploader.is_mock:
@@ -325,6 +447,8 @@ class SessionProcessor:
             elif status == "succeeded":
                 session.status = SessionStatus.COMPLETE
                 session.processing_error = None
+                db.flush()
+                link_session_videos_to_workout(db, session)
                 db.commit()
                 notification = ("Workout video ready", f"{session.name} is ready on YouTube.")
             else:

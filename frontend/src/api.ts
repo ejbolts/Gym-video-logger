@@ -1,4 +1,5 @@
 import type {
+  BodyMeasurement,
   Clip,
   CsvImportResult,
   DashboardData,
@@ -69,6 +70,20 @@ export const api = {
     }),
   dashboard: () => request<DashboardData>('/api/dashboard'),
   listWorkouts: () => request<TrackedWorkout[]>('/api/workouts'),
+  listBodyMeasurements: () => request<BodyMeasurement[]>('/api/body-measurements'),
+  saveBodyMeasurement: (payload: {
+    measurement_date: string;
+    weight_kg: number;
+    body_fat_pct: number | null;
+    notes: string | null;
+  }) =>
+    request<BodyMeasurement>('/api/body-measurements', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+  deleteBodyMeasurement: (id: string) =>
+    request<void>(`/api/body-measurements/${id}`, { method: 'DELETE' }),
   exportWorkouts: () => requestBlob('/api/workouts/export.csv'),
   importWorkouts: (file: File) => {
     const form = new FormData();

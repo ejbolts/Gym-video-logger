@@ -155,6 +155,27 @@ export interface HeatmapDay {
   categories: WorkoutCategory[];
   workout_count: number;
   set_count: number;
+  workouts: Array<{
+    id: string;
+    name: string;
+    category: WorkoutCategory;
+    duration_minutes: number | null;
+    exercises: Array<{
+      exercise_name: string;
+      set_count: number;
+      bodyweight_kg: number | null;
+    }>;
+  }>;
+}
+
+export interface BodyMeasurement {
+  id: string;
+  measurement_date: string;
+  weight_kg: number;
+  body_fat_pct: number | null;
+  notes: string | null;
+  is_sample: boolean;
+  created_at: string;
 }
 
 export interface WeeklyExerciseBreakdown {
@@ -176,6 +197,20 @@ export interface WeeklyDayBreakdown {
   exercises: WeeklyExerciseBreakdown[];
 }
 
+export interface MuscleFrequency {
+  muscle_group: string;
+  sessions_last_7_days: number;
+  target_sessions: number;
+}
+
+export interface WorkoutRecommendation {
+  category: WorkoutCategory;
+  session_name: string;
+  rotation_next: WorkoutCategory;
+  reason: string;
+  muscle_frequency: MuscleFrequency[];
+}
+
 export interface DashboardData {
   workouts_this_week: number;
   sets_this_week: number;
@@ -183,6 +218,7 @@ export interface DashboardData {
   current_streak: number;
   heatmap: HeatmapDay[];
   weekly_days: WeeklyDayBreakdown[];
+  recommendation: WorkoutRecommendation;
   recent_workouts: TrackedWorkout[];
 }
 

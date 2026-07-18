@@ -168,6 +168,28 @@ class AppSetting(Base):
     value: Mapped[str] = mapped_column(Text)
 
 
+class BodyMeasurement(Base):
+    __tablename__ = "body_measurements"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    measurement_date: Mapped[date] = mapped_column(Date, unique=True)
+    weight_kg: Mapped[float] = mapped_column(Float)
+    body_fat_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_sample: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, server_default=func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint("weight_kg > 0 AND weight_kg <= 500", name="body_weight_range"),
+        CheckConstraint(
+            "body_fat_pct IS NULL OR (body_fat_pct >= 1 AND body_fat_pct <= 70)",
+            name="body_fat_range",
+        ),
+    )
+
+
 class Exercise(Base):
     __tablename__ = "exercises"
 

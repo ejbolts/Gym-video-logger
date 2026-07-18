@@ -1,18 +1,21 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api';
 import type {
+  BodyMeasurement,
   DashboardData,
   Exercise,
   ExerciseProgress,
+  TrackedSet,
   TrackedWorkout,
   WorkoutCategory,
   WorkoutInput,
+  WorkoutRecommendation,
   WorkoutSetInput,
 } from './types';
 import { localDate } from './utils';
 import { VideoUpload } from './VideoUpload';
 
-type AppTab = 'dashboard' | 'log' | 'progress' | 'history' | 'videos';
+type AppTab = 'dashboard' | 'log' | 'progress' | 'body' | 'history' | 'videos';
 type ProgressMetric = 'estimated_1rm' | 'best_weight_kg' | 'volume_kg';
 type DashboardMetric = 'workouts' | 'sets' | 'volume' | 'streak';
 
@@ -78,29 +81,40 @@ function prettyDate(value: string): string {
   }).format(new Date(`${value}T12:00:00`));
 }
 
+function bodyweightForDate(measurements: BodyMeasurement[], workoutDate: string): number | null {
+  return (
+    measurements.find((measurement) => measurement.measurement_date <= workoutDate)?.weight_kg ??
+    null
+  );
+}
+
 export function App() {
   const [tab, setTab] = useState<AppTab>(() => {
     const requested = window.location.hash.slice(1) as AppTab;
-    return ['dashboard', 'log', 'progress', 'history', 'videos'].includes(requested)
+    return ['dashboard', 'log', 'progress', 'body', 'history', 'videos'].includes(requested)
       ? requested
       : 'dashboard';
   });
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [workouts, setWorkouts] = useState<TrackedWorkout[]>([]);
+  const [measurements, setMeasurements] = useState<BodyMeasurement[]>([]);
+  const [workoutStartDate, setWorkoutStartDate] = useState(localDate());
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
 
   async function refreshData() {
     try {
-      const [nextDashboard, nextExercises, nextWorkouts] = await Promise.all([
+      const [nextDashboard, nextExercises, nextWorkouts, nextMeasurements] = await Promise.all([
         api.dashboard(),
         api.listExercises(),
         api.listWorkouts(),
+        api.listBodyMeasurements(),
       ]);
       setDashboard(nextDashboard);
       setExercises(nextExercises);
       setWorkouts(nextWorkouts);
+      setMeasurements(nextMeasurements);
       setMessage(null);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Could not load your training data.');
@@ -177,10 +191,33 @@ export function App() {
     }
   }
 
+  function startWorkout(workoutDate = localDate()) {
+    setWorkoutStartDate(workoutDate);
+    setTab('log');
+  }
+
+  async function saveMeasurement(payload: {
+    measurement_date: string;
+    weight_kg: number;
+    body_fat_pct: number | null;
+    notes: string | null;
+  }) {
+    await api.saveBodyMeasurement(payload);
+    await refreshData();
+    setMessage('Body measurement saved.');
+  }
+
+  async function deleteMeasurement(id: string) {
+    await api.deleteBodyMeasurement(id);
+    await refreshData();
+    setMessage('Body measurement deleted.');
+  }
+
   const titles: Record<AppTab, string> = {
     dashboard: 'Overview',
     log: 'Log workout',
     progress: 'Progress',
+    body: 'Body composition',
     history: 'History',
     videos: 'Workout videos',
   };
@@ -196,7 +233,7 @@ export function App() {
           </div>
         </div>
         {tab !== 'log' && (
-          <button className="header-start" onClick={() => setTab('log')}>
+          <button className="header-start" onClick={() => startWorkout()}>
             <span>＋</span> Start workout
           </button>
         )}
@@ -211,19 +248,35 @@ export function App() {
       <main className={`tracker-content ${tab === 'videos' ? 'video-content' : ''}`}>
         {loading && <LoadingState />}
         {!loading && tab === 'dashboard' && dashboard && (
-          <DashboardScreen data={dashboard} onStart={() => setTab('log')} />
+          <DashboardScreen data={dashboard} onStart={startWorkout} />
         )}
         {!loading && tab === 'log' && (
           <WorkoutLogger
             exercises={exercises}
+            recommendation={dashboard?.recommendation ?? null}
+            initialDate={workoutStartDate}
+            currentBodyweight={measurements[0]?.weight_kg ?? null}
             onSave={saveWorkout}
             onCancel={() => setTab('dashboard')}
           />
         )}
-        {!loading && tab === 'progress' && <ProgressScreen exercises={exercises} />}
+        {!loading && tab === 'progress' && (
+          <ProgressScreen
+            exercises={exercises}
+            currentBodyweight={measurements[0]?.weight_kg ?? null}
+          />
+        )}
+        {!loading && tab === 'body' && (
+          <BodyCompositionScreen
+            measurements={measurements}
+            onSave={saveMeasurement}
+            onDelete={deleteMeasurement}
+          />
+        )}
         {!loading && tab === 'history' && (
           <HistoryScreen
             workouts={workouts}
+            measurements={measurements}
             onDelete={deleteWorkout}
             onImport={importWorkoutCsv}
             onExport={exportWorkoutCsv}
@@ -248,11 +301,12 @@ export function App() {
         />
         <button
           className={`nav-log ${tab === 'log' ? 'active' : ''}`}
-          onClick={() => setTab('log')}
+          onClick={() => startWorkout()}
         >
           <span>＋</span>
           Log
         </button>
+        <NavButton active={tab === 'body'} label="Body" icon="◒" onClick={() => setTab('body')} />
         <NavButton
           active={tab === 'history'}
           label="History"
@@ -298,8 +352,16 @@ function LoadingState() {
   );
 }
 
-function DashboardScreen({ data, onStart }: { data: DashboardData; onStart: () => void }) {
+function DashboardScreen({
+  data,
+  onStart,
+}: {
+  data: DashboardData;
+  onStart: (workoutDate?: string) => void;
+}) {
   const [activeMetric, setActiveMetric] = useState<DashboardMetric | null>(null);
+  const [calendarMonths, setCalendarMonths] = useState(6);
+  const [selectedDay, setSelectedDay] = useState<DashboardData['heatmap'][number] | null>(null);
 
   return (
     <section className="dashboard-screen content-page">
@@ -309,7 +371,7 @@ function DashboardScreen({ data, onStart }: { data: DashboardData; onStart: () =
           <h1>Keep the momentum.</h1>
           <p>Your week at a glance, with every set adding to the story.</p>
         </div>
-        <button className="quick-start" onClick={onStart}>
+        <button className="quick-start" onClick={() => onStart()}>
           Start
         </button>
       </div>
@@ -345,11 +407,28 @@ function DashboardScreen({ data, onStart }: { data: DashboardData; onStart: () =
         <div className="panel-heading">
           <div>
             <p className="section-kicker">CONSISTENCY</p>
-            <h2>Training heatmap</h2>
+            <h2>Training calendar</h2>
           </div>
-          <small>Last 20 weeks</small>
+          <label className="calendar-range">
+            Range
+            <select
+              value={calendarMonths}
+              onChange={(event) => setCalendarMonths(Number(event.target.value))}
+            >
+              <option value={3}>3 months</option>
+              <option value={6}>6 months</option>
+              <option value={12}>12 months</option>
+            </select>
+          </label>
         </div>
-        <WorkoutHeatmap entries={data.heatmap} />
+        <WorkoutHeatmap
+          entries={data.heatmap}
+          monthCount={calendarMonths}
+          onDayClick={(workoutDate, entry) => {
+            if (entry) setSelectedDay(entry);
+            else if (workoutDate === localDate()) onStart(workoutDate);
+          }}
+        />
         <div className="heatmap-legend">
           {(Object.keys(categoryNames) as WorkoutCategory[])
             .filter((category) => category !== 'other' && category !== 'full_body')
@@ -385,6 +464,7 @@ function DashboardScreen({ data, onStart }: { data: DashboardData; onStart: () =
       {activeMetric && (
         <WeeklyInsight data={data} metric={activeMetric} onClose={() => setActiveMetric(null)} />
       )}
+      {selectedDay && <CalendarDayDetail day={selectedDay} onClose={() => setSelectedDay(null)} />}
     </section>
   );
 }
@@ -613,47 +693,142 @@ function weekday(value: string): string {
   return new Date(`${value}T12:00:00`).toLocaleDateString(undefined, { weekday: 'short' });
 }
 
-function WorkoutHeatmap({ entries }: { entries: DashboardData['heatmap'] }) {
+function WorkoutHeatmap({
+  entries,
+  monthCount,
+  onDayClick,
+}: {
+  entries: DashboardData['heatmap'];
+  monthCount: number;
+  onDayClick: (workoutDate: string, entry: DashboardData['heatmap'][number] | undefined) => void;
+}) {
   const map = new Map(entries.map((entry) => [entry.workout_date, entry]));
-  const dates = useMemo(() => {
-    const end = new Date();
-    end.setHours(12, 0, 0, 0);
-    const start = new Date(end);
-    start.setDate(start.getDate() - 139 - start.getDay());
-    return Array.from({ length: 140 + end.getDay() }, (_, index) => {
-      const next = new Date(start);
-      next.setDate(start.getDate() + index);
-      return next;
+  const months = useMemo(() => {
+    const today = new Date();
+    today.setHours(12, 0, 0, 0);
+    return Array.from({ length: monthCount }, (_, offset) => {
+      const first = new Date(today.getFullYear(), today.getMonth() - offset, 1, 12);
+      const dayCount = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate();
+      const leading = (first.getDay() + 6) % 7;
+      const cells: Array<Date | null> = [
+        ...Array.from({ length: leading }, () => null),
+        ...Array.from(
+          { length: dayCount },
+          (_, index) => new Date(first.getFullYear(), first.getMonth(), index + 1, 12),
+        ),
+      ];
+      while (cells.length < 42) cells.push(null);
+      return {
+        key: `${first.getFullYear()}-${first.getMonth()}`,
+        title: first.toLocaleDateString(undefined, { month: 'long', year: 'numeric' }),
+        cells,
+      };
     });
-  }, []);
+  }, [monthCount]);
+  const todayKey = localCalendarDate(new Date());
 
   return (
-    <div className="heatmap-scroll">
-      <div className="heatmap-grid">
-        {dates.map((day) => {
-          const key = day.toISOString().slice(0, 10);
-          const entry = map.get(key);
-          const colours = entry?.categories.map((category) => categoryColors[category]) ?? [];
-          const background =
-            colours.length > 1
-              ? `linear-gradient(135deg, ${colours[0]} 0 49%, ${colours[1]} 51% 100%)`
-              : (colours[0] ?? '#222926');
-          return (
-            <span
-              className="heatmap-day"
-              key={key}
-              style={{ background }}
-              title={
-                entry
-                  ? `${prettyDate(key)}: ${entry.workout_count} workout, ${entry.set_count} sets`
-                  : prettyDate(key)
-              }
-            />
-          );
-        })}
-      </div>
+    <div className="calendar-scroll">
+      {months.map((month) => (
+        <article className="calendar-month" key={month.key}>
+          <h3>{month.title}</h3>
+          <div className="calendar-weekdays" aria-hidden="true">
+            {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((day, index) => (
+              <span key={`${day}-${index}`}>{day}</span>
+            ))}
+          </div>
+          <div className="calendar-days">
+            {month.cells.map((day, index) => {
+              if (!day) return <span className="calendar-day empty" key={`empty-${index}`} />;
+              const key = localCalendarDate(day);
+              const entry = map.get(key);
+              const colours = entry?.categories.map((category) => categoryColors[category]) ?? [];
+              const background =
+                colours.length > 1
+                  ? `linear-gradient(135deg, ${colours[0]} 0 49%, ${colours[1]} 51% 100%)`
+                  : colours[0];
+              return (
+                <button
+                  type="button"
+                  className={`calendar-day ${entry ? 'trained' : ''} ${key === todayKey ? 'today' : ''} ${key > todayKey ? 'future' : ''}`}
+                  key={key}
+                  style={background ? { background } : undefined}
+                  disabled={!entry && key !== todayKey}
+                  onClick={() => onDayClick(key, entry)}
+                  title={
+                    entry
+                      ? `${prettyDate(key)}: ${entry.workout_count} ${entry.workout_count === 1 ? 'workout' : 'workouts'}, ${entry.set_count} sets`
+                      : prettyDate(key)
+                  }
+                >
+                  {day.getDate()}
+                  {entry && entry.workout_count > 1 && <b>{entry.workout_count}</b>}
+                </button>
+              );
+            })}
+          </div>
+        </article>
+      ))}
     </div>
   );
+}
+
+function CalendarDayDetail({
+  day,
+  onClose,
+}: {
+  day: DashboardData['heatmap'][number];
+  onClose: () => void;
+}) {
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        className="calendar-day-detail"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Workouts for ${prettyDate(day.workout_date)}`}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header>
+          <div>
+            <p className="section-kicker">TRAINING DAY</p>
+            <h2>{prettyDate(day.workout_date)}</h2>
+          </div>
+          <button type="button" className="icon-button" onClick={onClose} aria-label="Close">
+            ×
+          </button>
+        </header>
+        <div className="calendar-day-workouts">
+          {day.workouts.map((workout) => (
+            <article key={workout.id}>
+              <div>
+                <i style={{ background: categoryColors[workout.category] }} />
+                <div>
+                  <strong>{workout.name}</strong>
+                  <small>
+                    {categoryNames[workout.category]} · {workout.duration_minutes ?? '–'} min
+                  </small>
+                </div>
+              </div>
+              {workout.exercises.map((exercise) => (
+                <p key={exercise.exercise_name}>
+                  <span>
+                    {exercise.exercise_name}
+                    {exercise.bodyweight_kg !== null && ` @ ${exercise.bodyweight_kg} kg`}
+                  </span>
+                  <b>{exercise.set_count} sets</b>
+                </p>
+              ))}
+            </article>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function localCalendarDate(value: Date): string {
+  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
 }
 
 function WorkoutSummary({ workout }: { workout: TrackedWorkout }) {
@@ -687,16 +862,22 @@ function WorkoutSummary({ workout }: { workout: TrackedWorkout }) {
 
 function WorkoutLogger({
   exercises,
+  recommendation,
+  initialDate,
+  currentBodyweight,
   onSave,
   onCancel,
 }: {
   exercises: Exercise[];
+  recommendation: WorkoutRecommendation | null;
+  initialDate: string;
+  currentBodyweight: number | null;
   onSave: (payload: WorkoutInput) => Promise<void>;
   onCancel: () => void;
 }) {
   const [name, setName] = useState('');
-  const [workoutDate, setWorkoutDate] = useState(localDate());
-  const [category, setCategory] = useState<WorkoutCategory>('push');
+  const [workoutDate, setWorkoutDate] = useState(initialDate);
+  const [category, setCategory] = useState<WorkoutCategory>(recommendation?.category ?? 'push');
   const [notes, setNotes] = useState('');
   const [movements, setMovements] = useState<DraftMovement[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -817,6 +998,43 @@ function WorkoutLogger({
         </button>
       </div>
 
+      {recommendation && (
+        <section className="workout-recommendation panel">
+          <div className="recommendation-heading">
+            <div>
+              <p className="section-kicker">RECOMMENDED NEXT</p>
+              <h2>{recommendation.session_name.replace(' workout', '')}</h2>
+            </div>
+            <span style={{ background: categoryColors[recommendation.category] }} />
+          </div>
+          <p>{recommendation.reason}</p>
+          <div className="frequency-chips" aria-label="Seven-day muscle frequency">
+            {recommendation.muscle_frequency.map((item) => (
+              <span
+                className={
+                  item.sessions_last_7_days < item.target_sessions ? 'needs-attention' : 'on-target'
+                }
+                key={item.muscle_group}
+              >
+                {item.muscle_group}{' '}
+                <b>
+                  {item.sessions_last_7_days}/{item.target_sessions}
+                </b>
+              </span>
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setCategory(recommendation.category);
+              setName(recommendation.session_name);
+            }}
+          >
+            Use {recommendation.session_name}
+          </button>
+        </section>
+      )}
+
       <section className="workout-details panel">
         <input
           className="workout-name-input"
@@ -857,6 +1075,7 @@ function WorkoutLogger({
             key={movement.key}
             movement={movement}
             number={movementIndex + 1}
+            currentBodyweight={currentBodyweight}
             onUpdateSet={(setKey, update) => updateSet(movement.key, setKey, update)}
             onToggleSet={(item) => toggleSet(movement, item)}
             onAddSet={() => addSet(movement)}
@@ -888,6 +1107,7 @@ function WorkoutLogger({
       {pickerOpen && (
         <ExercisePicker
           exercises={exercises}
+          currentBodyweight={currentBodyweight}
           onChoose={addExercise}
           onClose={() => setPickerOpen(false)}
         />
@@ -906,6 +1126,7 @@ function WorkoutLogger({
 function MovementCard({
   movement,
   number,
+  currentBodyweight,
   onUpdateSet,
   onToggleSet,
   onAddSet,
@@ -914,6 +1135,7 @@ function MovementCard({
 }: {
   movement: DraftMovement;
   number: number;
+  currentBodyweight: number | null;
   onUpdateSet: (setKey: string, update: Partial<DraftSet>) => void;
   onToggleSet: (item: DraftSet) => void;
   onAddSet: () => void;
@@ -929,6 +1151,7 @@ function MovementCard({
           <h2>{movement.exercise.name}</h2>
           <p>
             {movement.exercise.muscle_group} · {movement.exercise.equipment}
+            {currentBodyweight !== null && ` · @ ${currentBodyweight} kg`}
           </p>
         </div>
         <button
@@ -958,106 +1181,119 @@ function MovementCard({
           <span>DONE</span>
         </div>
         {movement.sets.map((item, index) => (
-          <div className={`set-row ${item.completed ? 'completed' : ''}`} key={item.key}>
-            <span className="set-index">{index + 1}</span>
-            {cardio ? (
-              <>
+          <Fragment key={item.key}>
+            <div className={`set-row ${item.completed ? 'completed' : ''}`}>
+              <span className="set-index">{index + 1}</span>
+              {cardio ? (
+                <>
+                  <input
+                    inputMode="numeric"
+                    type="number"
+                    min="0"
+                    value={
+                      item.duration_seconds === null ? '' : Math.round(item.duration_seconds / 60)
+                    }
+                    onChange={(event) =>
+                      onUpdateSet(item.key, {
+                        duration_seconds:
+                          numberOrNull(event.target.value) === null
+                            ? null
+                            : Number(event.target.value) * 60,
+                      })
+                    }
+                    aria-label="Duration minutes"
+                  />
+                  <input
+                    inputMode="decimal"
+                    type="number"
+                    min="0"
+                    step="0.1"
+                    value={item.distance_km ?? ''}
+                    onChange={(event) =>
+                      onUpdateSet(item.key, { distance_km: numberOrNull(event.target.value) })
+                    }
+                    aria-label="Distance kilometres"
+                  />
+                </>
+              ) : (
+                <>
+                  <input
+                    inputMode="decimal"
+                    type="number"
+                    min="0"
+                    step="0.5"
+                    value={item.weight_kg ?? ''}
+                    onChange={(event) =>
+                      onUpdateSet(item.key, { weight_kg: numberOrNull(event.target.value) })
+                    }
+                    aria-label="Weight kilograms"
+                  />
+                  <input
+                    inputMode="numeric"
+                    type="number"
+                    min="0"
+                    value={item.reps ?? ''}
+                    onChange={(event) =>
+                      onUpdateSet(item.key, { reps: numberOrNull(event.target.value) })
+                    }
+                    aria-label="Repetitions"
+                  />
+                </>
+              )}
+              <select
+                value={item.rpe ?? ''}
+                onChange={(event) =>
+                  onUpdateSet(item.key, { rpe: numberOrNull(event.target.value) })
+                }
+                aria-label="RPE"
+              >
+                <option value="">–</option>
+                {[5, 6, 7, 7.5, 8, 8.5, 9, 9.5, 10].map((rpe) => (
+                  <option key={rpe} value={rpe}>
+                    {rpe}
+                  </option>
+                ))}
+              </select>
+              <button
+                className="complete-set"
+                onClick={() => onToggleSet(item)}
+                aria-label={item.completed ? 'Mark set incomplete' : 'Complete set'}
+              >
+                {item.completed ? '✓' : ''}
+              </button>
+              <div className="set-extras">
+                <label>
+                  Rest
+                  <select
+                    value={item.rest_seconds ?? 120}
+                    onChange={(event) =>
+                      onUpdateSet(item.key, { rest_seconds: Number(event.target.value) })
+                    }
+                  >
+                    {restOptions.map((seconds) => (
+                      <option key={seconds} value={seconds}>
+                        {seconds < 60 ? `${seconds}s` : `${seconds / 60}m`}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 <input
-                  inputMode="numeric"
-                  type="number"
-                  min="0"
-                  value={
-                    item.duration_seconds === null ? '' : Math.round(item.duration_seconds / 60)
-                  }
-                  onChange={(event) =>
-                    onUpdateSet(item.key, {
-                      duration_seconds:
-                        numberOrNull(event.target.value) === null
-                          ? null
-                          : Number(event.target.value) * 60,
-                    })
-                  }
-                  aria-label="Duration minutes"
+                  value={item.notes ?? ''}
+                  onChange={(event) => onUpdateSet(item.key, { notes: event.target.value || null })}
+                  placeholder="Set note (optional)"
                 />
-                <input
-                  inputMode="decimal"
-                  type="number"
-                  min="0"
-                  step="0.1"
-                  value={item.distance_km ?? ''}
-                  onChange={(event) =>
-                    onUpdateSet(item.key, { distance_km: numberOrNull(event.target.value) })
-                  }
-                  aria-label="Distance kilometres"
-                />
-              </>
-            ) : (
-              <>
-                <input
-                  inputMode="decimal"
-                  type="number"
-                  min="0"
-                  step="0.5"
-                  value={item.weight_kg ?? ''}
-                  onChange={(event) =>
-                    onUpdateSet(item.key, { weight_kg: numberOrNull(event.target.value) })
-                  }
-                  aria-label="Weight kilograms"
-                />
-                <input
-                  inputMode="numeric"
-                  type="number"
-                  min="0"
-                  value={item.reps ?? ''}
-                  onChange={(event) =>
-                    onUpdateSet(item.key, { reps: numberOrNull(event.target.value) })
-                  }
-                  aria-label="Repetitions"
-                />
-              </>
-            )}
-            <select
-              value={item.rpe ?? ''}
-              onChange={(event) => onUpdateSet(item.key, { rpe: numberOrNull(event.target.value) })}
-              aria-label="RPE"
-            >
-              <option value="">–</option>
-              {[5, 6, 7, 7.5, 8, 8.5, 9, 9.5, 10].map((rpe) => (
-                <option key={rpe} value={rpe}>
-                  {rpe}
-                </option>
-              ))}
-            </select>
-            <button
-              className="complete-set"
-              onClick={() => onToggleSet(item)}
-              aria-label={item.completed ? 'Mark set incomplete' : 'Complete set'}
-            >
-              {item.completed ? '✓' : ''}
-            </button>
-            <div className="set-extras">
-              <label>
-                Rest
-                <select
-                  value={item.rest_seconds ?? 120}
-                  onChange={(event) =>
-                    onUpdateSet(item.key, { rest_seconds: Number(event.target.value) })
-                  }
-                >
-                  {restOptions.map((seconds) => (
-                    <option key={seconds} value={seconds}>
-                      {seconds < 60 ? `${seconds}s` : `${seconds / 60}m`}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <input
-                value={item.notes ?? ''}
-                onChange={(event) => onUpdateSet(item.key, { notes: event.target.value || null })}
-                placeholder="Set note (optional)"
-              />
+              </div>
             </div>
-          </div>
+            {index < movement.sets.length - 1 && (
+              <div className="rest-between" aria-label={`Rest after set ${index + 1}`}>
+                <i />
+                <span>
+                  <b>{formatDuration(item.rest_seconds ?? 120)}</b> rest
+                </span>
+                <i />
+              </div>
+            )}
+          </Fragment>
         ))}
       </div>
       <button className="add-set-button" onClick={onAddSet}>
@@ -1075,10 +1311,12 @@ function MovementCard({
 
 function ExercisePicker({
   exercises,
+  currentBodyweight,
   onChoose,
   onClose,
 }: {
   exercises: Exercise[];
+  currentBodyweight: number | null;
   onChoose: (exercise: Exercise) => void;
   onClose: () => void;
 }) {
@@ -1140,6 +1378,7 @@ function ExercisePicker({
                 <strong>{exercise.name}</strong>
                 <small>
                   {exercise.muscle_group} · {exercise.equipment}
+                  {currentBodyweight !== null && ` · @ ${currentBodyweight} kg`}
                 </small>
               </span>
               <b>＋</b>
@@ -1173,7 +1412,13 @@ function RestTimer({
   );
 }
 
-function ProgressScreen({ exercises }: { exercises: Exercise[] }) {
+function ProgressScreen({
+  exercises,
+  currentBodyweight,
+}: {
+  exercises: Exercise[];
+  currentBodyweight: number | null;
+}) {
   const strengthExercises = exercises.filter((exercise) => exercise.kind === 'strength');
   const [exerciseId, setExerciseId] = useState(strengthExercises[0]?.id ?? '');
   const [metric, setMetric] = useState<ProgressMetric>('estimated_1rm');
@@ -1247,7 +1492,10 @@ function ProgressScreen({ exercises }: { exercises: Exercise[] }) {
             <div className="panel-heading">
               <div>
                 <p className="section-kicker">TREND</p>
-                <h2>{progress.exercise.name}</h2>
+                <h2>
+                  {progress.exercise.name}
+                  {currentBodyweight !== null && ` @ ${currentBodyweight} kg`}
+                </h2>
               </div>
               <small>{progress.points.length} sessions</small>
             </div>
@@ -1332,14 +1580,228 @@ function ProgressChart({
   );
 }
 
+function BodyCompositionScreen({
+  measurements,
+  onSave,
+  onDelete,
+}: {
+  measurements: BodyMeasurement[];
+  onSave: (payload: {
+    measurement_date: string;
+    weight_kg: number;
+    body_fat_pct: number | null;
+    notes: string | null;
+  }) => Promise<void>;
+  onDelete: (id: string) => Promise<void>;
+}) {
+  const [measurementDate, setMeasurementDate] = useState(localDate());
+  const [weight, setWeight] = useState('');
+  const [bodyFat, setBodyFat] = useState('');
+  const [notes, setNotes] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const latest = measurements[0];
+
+  async function submitMeasurement() {
+    const weightValue = Number(weight);
+    if (!weightValue || weightValue <= 0) {
+      setError('Enter your body weight in kilograms.');
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      await onSave({
+        measurement_date: measurementDate,
+        weight_kg: weightValue,
+        body_fat_pct: bodyFat ? Number(bodyFat) : null,
+        notes: notes.trim() || null,
+      });
+      setWeight('');
+      setBodyFat('');
+      setNotes('');
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : 'Could not save this measurement.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section className="body-screen content-page">
+      <div className="screen-intro">
+        <p className="section-kicker">BODY COMPOSITION</p>
+        <h1>Track the change.</h1>
+        <p>Log consistently under similar conditions to make the trend more useful.</p>
+      </div>
+
+      <div className="body-current-grid">
+        <MetricCard
+          value={latest ? `${latest.weight_kg} kg` : '–'}
+          label="Current weight"
+          suffix={latest ? prettyDate(latest.measurement_date) : 'No entries yet'}
+        />
+        <MetricCard
+          value={latest && latest.body_fat_pct !== null ? `${latest.body_fat_pct}%` : '–'}
+          label="Body fat"
+          suffix={latest ? 'latest estimate' : 'optional'}
+        />
+      </div>
+
+      <section className="panel body-entry-panel">
+        <div className="panel-heading">
+          <div>
+            <p className="section-kicker">CHECK-IN</p>
+            <h2>Log measurement</h2>
+          </div>
+        </div>
+        <div className="body-entry-fields">
+          <label>
+            Date
+            <input
+              type="date"
+              value={measurementDate}
+              onChange={(event) => setMeasurementDate(event.target.value)}
+            />
+          </label>
+          <label>
+            Weight (kg)
+            <input
+              inputMode="decimal"
+              type="number"
+              min="1"
+              max="500"
+              step="0.1"
+              value={weight}
+              onChange={(event) => setWeight(event.target.value)}
+              placeholder="88.0"
+            />
+          </label>
+          <label>
+            Body fat %
+            <input
+              inputMode="decimal"
+              type="number"
+              min="1"
+              max="70"
+              step="0.1"
+              value={bodyFat}
+              onChange={(event) => setBodyFat(event.target.value)}
+              placeholder="Optional"
+            />
+          </label>
+        </div>
+        <textarea
+          value={notes}
+          onChange={(event) => setNotes(event.target.value)}
+          placeholder="Conditions, phase, or anything worth remembering…"
+          rows={2}
+        />
+        {error && <p className="inline-error">{error}</p>}
+        <button disabled={saving} onClick={() => void submitMeasurement()}>
+          {saving ? 'Saving…' : 'Save check-in'}
+        </button>
+      </section>
+
+      {measurements.length > 1 && (
+        <section className="panel body-trend-panel">
+          <div className="panel-heading">
+            <div>
+              <p className="section-kicker">TREND</p>
+              <h2>Body composition</h2>
+            </div>
+          </div>
+          <BodyTrendChart measurements={measurements} />
+        </section>
+      )}
+
+      <section className="panel body-history-panel">
+        <div className="panel-heading">
+          <div>
+            <p className="section-kicker">HISTORY</p>
+            <h2>Check-ins</h2>
+          </div>
+        </div>
+        {!measurements.length && (
+          <p className="body-empty">Your first check-in will appear here.</p>
+        )}
+        {measurements.map((measurement) => (
+          <article key={measurement.id}>
+            <div>
+              <strong>{measurement.weight_kg} kg</strong>
+              <small>
+                {prettyDate(measurement.measurement_date)}
+                {measurement.body_fat_pct !== null && ` · ${measurement.body_fat_pct}% body fat`}
+                {measurement.is_sample && ' · Sample'}
+              </small>
+              {measurement.notes && <p>{measurement.notes}</p>}
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                if (window.confirm('Delete this body-composition check-in?')) {
+                  void onDelete(measurement.id);
+                }
+              }}
+            >
+              Delete
+            </button>
+          </article>
+        ))}
+      </section>
+    </section>
+  );
+}
+
+function BodyTrendChart({ measurements }: { measurements: BodyMeasurement[] }) {
+  const ordered = measurements.slice().reverse();
+  const width = 340;
+  const height = 140;
+  const padding = 14;
+  function points(values: Array<number | null>): string {
+    const present = values.filter((value): value is number => value !== null);
+    if (!present.length) return '';
+    const min = Math.min(...present);
+    const max = Math.max(...present);
+    return values
+      .map((value, index) => {
+        if (value === null) return null;
+        const x = padding + (index / Math.max(ordered.length - 1, 1)) * (width - padding * 2);
+        const ratio = max === min ? 0.5 : (value - min) / (max - min);
+        const y = height - padding - ratio * (height - padding * 2);
+        return `${x},${y}`;
+      })
+      .filter(Boolean)
+      .join(' ');
+  }
+  return (
+    <div className="body-chart">
+      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Body composition trend">
+        <polyline className="weight-line" points={points(ordered.map((item) => item.weight_kg))} />
+        <polyline className="fat-line" points={points(ordered.map((item) => item.body_fat_pct))} />
+      </svg>
+      <div>
+        <span>
+          <i className="weight" /> Weight
+        </span>
+        <span>
+          <i className="fat" /> Body fat
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function HistoryScreen({
   workouts,
+  measurements,
   onDelete,
   onImport,
   onExport,
   onDeleteSamples,
 }: {
   workouts: TrackedWorkout[];
+  measurements: BodyMeasurement[];
   onDelete: (workout: TrackedWorkout) => void;
   onImport: (file: File) => Promise<void>;
   onExport: () => Promise<void>;
@@ -1390,6 +1852,12 @@ function HistoryScreen({
       )}
       {workouts.map((workout) => {
         const open = openId === workout.id;
+        const workoutBodyweight =
+          bodyweightForDate(measurements, workout.workout_date) ??
+          workout.movements
+            .flatMap((movement) => movement.sets)
+            .find((item) => item.bodyweight_kg !== null)?.bodyweight_kg ??
+          null;
         return (
           <article className={`history-card panel ${open ? 'open' : ''}`} key={workout.id}>
             <button
@@ -1413,19 +1881,11 @@ function HistoryScreen({
               <div className="history-detail">
                 {workout.movements.map((movement) => (
                   <div className="history-movement" key={movement.id}>
-                    <strong>{movement.exercise.name}</strong>
-                    <span>
-                      {movement.sets
-                        .filter((item) => item.completed)
-                        .map((item) =>
-                          item.weight_kg !== null
-                            ? `${item.weight_kg} × ${item.reps ?? '–'}`
-                            : item.duration_seconds
-                              ? `${Math.round(item.duration_seconds / 60)} min`
-                              : `${item.reps ?? '–'} reps`,
-                        )
-                        .join(' · ')}
-                    </span>
+                    <strong>
+                      {movement.exercise.name}
+                      {workoutBodyweight !== null && ` @ ${workoutBodyweight} kg`}
+                    </strong>
+                    <HistorySetFlow sets={movement.sets.filter((item) => item.completed)} />
                     {movement.sets
                       .filter((item) => item.notes)
                       .map((item) => (
@@ -1433,6 +1893,7 @@ function HistoryScreen({
                           Set {item.order_index + 1}: {item.notes}
                         </small>
                       ))}
+                    {movement.notes && <MovementNotes notes={movement.notes} />}
                   </div>
                 ))}
                 {workout.notes && <p>{workout.notes}</p>}
@@ -1445,6 +1906,63 @@ function HistoryScreen({
         );
       })}
     </section>
+  );
+}
+
+function HistorySetFlow({ sets }: { sets: TrackedSet[] }) {
+  return (
+    <div className="history-set-flow">
+      {sets.map((item, index) => (
+        <Fragment key={item.id}>
+          <div className="history-set-pill">
+            <b>Set {item.order_index + 1}</b>
+            <span>{setResult(item)}</span>
+            {item.rpe !== null && <small>RPE {item.rpe}</small>}
+          </div>
+          {index < sets.length - 1 && (
+            <div className="history-rest-gap">
+              <i />
+              <span>
+                {item.rest_seconds !== null
+                  ? `${formatDuration(item.rest_seconds)} rest`
+                  : 'Rest not set'}
+              </span>
+              <i />
+            </div>
+          )}
+        </Fragment>
+      ))}
+    </div>
+  );
+}
+
+function setResult(item: TrackedSet): string {
+  if (item.weight_kg !== null) return `${item.weight_kg} kg × ${item.reps ?? '–'}`;
+  if (item.duration_seconds) {
+    const distance = item.distance_km !== null ? ` · ${item.distance_km} km` : '';
+    return `${formatDuration(item.duration_seconds)}${distance}`;
+  }
+  return `${item.reps ?? '–'} reps`;
+}
+
+function MovementNotes({ notes }: { notes: string }) {
+  return (
+    <div className="movement-notes-display">
+      {notes.split('\n').map((line, index) => {
+        const video = line.match(/^Video - (.+?) @ ([0-9:]+): (https:\/\/\S+)$/);
+        return video ? (
+          <a key={`${line}-${index}`} href={video[3]} target="_blank" rel="noreferrer">
+            <span aria-hidden="true">▶</span>
+            <span>
+              <b>{video[1]}</b>
+              <small>Watch from {video[2]}</small>
+            </span>
+          </a>
+        ) : (
+          <p key={`${line}-${index}`}>{line}</p>
+        );
+      })}
+    </div>
   );
 }
 
