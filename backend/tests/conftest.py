@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import uuid
 from pathlib import Path
 
@@ -10,11 +11,12 @@ from fastapi.testclient import TestClient
 # Test imports below create the application's database engine. Point them at an
 # isolated, ignored location before importing any application module so tests
 # can never reset a user's live data/gym-video-logger.db database.
-TEST_DATA_DIR = Path(__file__).parent / ".test-data"
+TEST_DATA_DIR = Path(__file__).parent / ".test-data" / f"pytest-{os.getpid()}"
 os.environ["GYM_DATA_DIR"] = str(TEST_DATA_DIR)
 os.environ["GYM_DATABASE_PATH"] = str(TEST_DATA_DIR / "gym-video-logger-test.db")
 os.environ["GYM_SEED_SAMPLE_DATA"] = "false"
 
+from app.config import get_settings  # noqa: E402
 from app.database import Base, engine  # noqa: E402
 from app.main import create_app  # noqa: E402
 from app.storage import StoredUpload, original_filename  # noqa: E402
@@ -22,10 +24,14 @@ from app.storage import StoredUpload, original_filename  # noqa: E402
 
 @pytest.fixture(autouse=True)
 def reset_database():
+    photo_dir = get_settings().machine_photos_dir
+    shutil.rmtree(photo_dir, ignore_errors=True)
+    photo_dir.mkdir(parents=True, exist_ok=True)
     Base.metadata.drop_all(engine)
     Base.metadata.create_all(engine)
     yield
     Base.metadata.drop_all(engine)
+    shutil.rmtree(photo_dir, ignore_errors=True)
 
 
 @pytest.fixture

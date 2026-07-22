@@ -411,10 +411,6 @@ export function VideoUpload() {
           <div className="intro">
             <p className="eyebrow">Private workout batch</p>
             <h1>Upload your sets together.</h1>
-            <p>
-              Review every clip first. Nothing is uploaded until you choose{' '}
-              <strong>Upload session</strong>.
-            </p>
           </div>
           <div className="card form-card">
             <label>

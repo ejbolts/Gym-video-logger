@@ -7,6 +7,7 @@ from datetime import UTC, date, datetime
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
+    Column,
     Date,
     DateTime,
     Enum,
@@ -14,6 +15,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     String,
+    Table,
     Text,
     UniqueConstraint,
 )
@@ -59,12 +61,36 @@ class ExerciseKind(enum.StrEnum):
     CARDIO = "cardio"
 
 
+class TrainingMode(enum.StrEnum):
+    CUT = "cut"
+    MAINTENANCE = "maintenance"
+    BULK = "bulk"
+
+
 def new_uuid() -> str:
     return str(uuid.uuid4())
 
 
 def utc_now() -> datetime:
     return datetime.now(UTC)
+
+
+movement_machine_photos = Table(
+    "movement_machine_photos",
+    Base.metadata,
+    Column(
+        "movement_id",
+        String(36),
+        ForeignKey("workout_movements.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column(
+        "machine_photo_id",
+        String(36),
+        ForeignKey("machine_photos.id", ondelete="RESTRICT"),
+        primary_key=True,
+    ),
+)
 
 
 class WorkoutSession(Base):
@@ -205,6 +231,49 @@ class Exercise(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     movements: Mapped[list[WorkoutMovement]] = relationship(back_populates="exercise")
+    machine_photos: Mapped[list[MachinePhoto]] = relationship(
+        back_populates="exercise", cascade="all, delete-orphan"
+    )
+
+
+class MachinePhoto(Base):
+    __tablename__ = "machine_photos"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    exercise_id: Mapped[str] = mapped_column(
+        ForeignKey("exercises.id", ondelete="CASCADE"), index=True
+    )
+    caption: Mapped[str] = mapped_column(String(160))
+    original_filename: Mapped[str] = mapped_column(String(500))
+    full_filename: Mapped[str] = mapped_column(String(200), unique=True)
+    thumbnail_filename: Mapped[str] = mapped_column(String(200), unique=True)
+    media_type: Mapped[str] = mapped_column(String(100), default="image/webp")
+    file_size: Mapped[int] = mapped_column(Integer)
+    width: Mapped[int] = mapped_column(Integer)
+    height: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, server_default=func.now()
+    )
+
+    exercise: Mapped[Exercise] = relationship(back_populates="machine_photos")
+    movements: Mapped[list[WorkoutMovement]] = relationship(
+        secondary=movement_machine_photos,
+        back_populates="machine_photos",
+    )
+
+    @property
+    def thumbnail_url(self) -> str:
+        return f"/api/machine-photos/{self.id}/image?variant=thumbnail"
+
+    @property
+    def full_url(self) -> str:
+        return f"/api/machine-photos/{self.id}/image?variant=full"
+
+    __table_args__ = (
+        CheckConstraint("file_size > 0", name="machine_photo_file_size_positive"),
+        CheckConstraint("width > 0", name="machine_photo_width_positive"),
+        CheckConstraint("height > 0", name="machine_photo_height_positive"),
+    )
 
 
 class TrainingWorkout(Base):
@@ -251,6 +320,11 @@ class WorkoutMovement(Base):
     exercise: Mapped[Exercise] = relationship(back_populates="movements")
     sets: Mapped[list[WorkoutSet]] = relationship(
         back_populates="movement", cascade="all, delete-orphan", order_by="WorkoutSet.order_index"
+    )
+    machine_photos: Mapped[list[MachinePhoto]] = relationship(
+        secondary=movement_machine_photos,
+        back_populates="movements",
+        order_by="MachinePhoto.created_at",
     )
 
     __table_args__ = (

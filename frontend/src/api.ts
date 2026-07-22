@@ -6,10 +6,12 @@ import type {
   Exercise,
   ExerciseProgress,
   Health,
+  MachinePhoto,
   PushConfig,
   TrackedWorkout,
   WorkoutInput,
   WorkoutSession,
+  TrainingMode,
 } from './types';
 
 export class ApiError extends Error {
@@ -68,7 +70,32 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     }),
+  listMachinePhotos: (exerciseId: string) =>
+    request<MachinePhoto[]>(`/api/exercises/${exerciseId}/machine-photos`),
+  uploadMachinePhoto: (exerciseId: string, file: File, caption: string) => {
+    const form = new FormData();
+    form.append('caption', caption);
+    form.append('file', file, file.name);
+    return request<MachinePhoto>(`/api/exercises/${exerciseId}/machine-photos`, {
+      method: 'POST',
+      body: form,
+    });
+  },
+  updateMachinePhoto: (photoId: string, caption: string) =>
+    request<MachinePhoto>(`/api/machine-photos/${photoId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ caption }),
+    }),
+  deleteMachinePhoto: (photoId: string) =>
+    request<void>(`/api/machine-photos/${photoId}`, { method: 'DELETE' }),
   dashboard: () => request<DashboardData>('/api/dashboard'),
+  updateTrainingMode: (mode: TrainingMode) =>
+    request<void>('/api/training-mode', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode }),
+    }),
   listWorkouts: () => request<TrackedWorkout[]>('/api/workouts'),
   listBodyMeasurements: () => request<BodyMeasurement[]>('/api/body-measurements'),
   saveBodyMeasurement: (payload: {

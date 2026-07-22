@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from .models import ExerciseKind, WorkoutCategory
+from .models import ExerciseKind, TrainingMode, WorkoutCategory
 
 
 class ExerciseCreate(BaseModel):
@@ -32,6 +33,28 @@ class ExerciseRead(BaseModel):
     is_custom: bool
 
 
+class MachinePhotoCaptionUpdate(BaseModel):
+    caption: str = Field(min_length=1, max_length=160)
+
+    @field_validator("caption", mode="before")
+    @classmethod
+    def clean_caption(cls, value: str) -> str:
+        return value.strip() if isinstance(value, str) else value
+
+
+class MachinePhotoRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    exercise_id: str
+    caption: str
+    thumbnail_url: str
+    full_url: str
+    width: int
+    height: int
+    created_at: datetime
+
+
 class WorkoutSetCreate(BaseModel):
     reps: int | None = Field(default=None, ge=0, le=10_000)
     weight_kg: float | None = Field(default=None, ge=0, le=10_000)
@@ -54,12 +77,20 @@ class WorkoutSetCreate(BaseModel):
 class WorkoutMovementCreate(BaseModel):
     exercise_id: str
     notes: str | None = Field(default=None, max_length=2_000)
+    machine_photo_ids: list[str] = Field(default_factory=list, max_length=20)
     sets: list[WorkoutSetCreate] = Field(min_length=1, max_length=100)
 
     @field_validator("notes", mode="before")
     @classmethod
     def clean_notes(cls, value: str | None) -> str | None:
         return value.strip() or None if isinstance(value, str) else value
+
+    @field_validator("machine_photo_ids")
+    @classmethod
+    def unique_machine_photos(cls, value: list[str]) -> list[str]:
+        if len(value) != len(set(value)):
+            raise ValueError("Machine photos cannot be pinned more than once.")
+        return value
 
 
 class TrainingWorkoutCreate(BaseModel):
@@ -107,6 +138,7 @@ class WorkoutMovementRead(BaseModel):
     order_index: int
     notes: str | None
     exercise: ExerciseRead
+    machine_photos: list[MachinePhotoRead] = []
     sets: list[WorkoutSetRead] = []
 
 
@@ -180,6 +212,38 @@ class WorkoutRecommendationRead(BaseModel):
     muscle_frequency: list[MuscleFrequencyRead]
 
 
+class TrainingModeUpdate(BaseModel):
+    mode: TrainingMode
+
+
+class TrainingModeRead(BaseModel):
+    mode: TrainingMode
+
+
+class WeeklyMuscleGoalRead(BaseModel):
+    muscle_group: str
+    raw_sets: float
+    effective_sets: float
+    target_sets: int
+    average_rpe: float | None
+    status: Literal["below", "on_target", "above"]
+
+
+class WeeklyGoalRead(BaseModel):
+    mode: TrainingMode
+    week_start: date
+    week_end: date
+    target_sets_per_muscle: int
+    raw_sets: int
+    effective_sets: float
+    unrated_sets: int
+    low_rpe_sets: int
+    rpe_logging_percent: float
+    overall_percent: float
+    days_remaining: int
+    muscle_groups: list[WeeklyMuscleGoalRead]
+
+
 class BodyMeasurementCreate(BaseModel):
     measurement_date: date
     weight_kg: float = Field(gt=0, le=500)
@@ -212,6 +276,8 @@ class DashboardRead(BaseModel):
     heatmap: list[HeatmapDay]
     weekly_days: list[WeeklyDayBreakdown]
     recommendation: WorkoutRecommendationRead
+    training_mode: TrainingMode
+    weekly_goal: WeeklyGoalRead
     recent_workouts: list[TrainingWorkoutRead]
 
 

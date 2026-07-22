@@ -76,6 +76,8 @@ export type WorkoutCategory =
 
 export type ExerciseKind = 'strength' | 'cardio';
 
+export type TrainingMode = 'cut' | 'maintenance' | 'bulk';
+
 export interface Exercise {
   id: string;
   name: string;
@@ -84,6 +86,17 @@ export interface Exercise {
   muscle_group: string;
   equipment: string | null;
   is_custom: boolean;
+}
+
+export interface MachinePhoto {
+  id: string;
+  exercise_id: string;
+  caption: string;
+  thumbnail_url: string;
+  full_url: string;
+  width: number;
+  height: number;
+  created_at: string;
 }
 
 export interface TrackedSet {
@@ -108,6 +121,7 @@ export interface TrackedMovement {
   notes: string | null;
   exercise: Exercise;
   sets: TrackedSet[];
+  machine_photos: MachinePhoto[];
 }
 
 export interface TrackedWorkout {
@@ -146,6 +160,7 @@ export interface WorkoutInput {
   movements: Array<{
     exercise_id: string;
     notes: string | null;
+    machine_photo_ids: string[];
     sets: WorkoutSetInput[];
   }>;
 }
@@ -211,6 +226,30 @@ export interface WorkoutRecommendation {
   muscle_frequency: MuscleFrequency[];
 }
 
+export interface MuscleGoalProgress {
+  muscle_group: string;
+  raw_sets: number;
+  effective_sets: number;
+  target_sets: number;
+  average_rpe: number | null;
+  status: 'below' | 'on_target' | 'above';
+}
+
+export interface WeeklyGoal {
+  mode: TrainingMode;
+  week_start: string;
+  week_end: string;
+  target_sets_per_muscle: number;
+  raw_sets: number;
+  effective_sets: number;
+  unrated_sets: number;
+  low_rpe_sets: number;
+  rpe_logging_percent: number;
+  overall_percent: number;
+  days_remaining: number;
+  muscle_groups: MuscleGoalProgress[];
+}
+
 export interface DashboardData {
   workouts_this_week: number;
   sets_this_week: number;
@@ -219,6 +258,8 @@ export interface DashboardData {
   heatmap: HeatmapDay[];
   weekly_days: WeeklyDayBreakdown[];
   recommendation: WorkoutRecommendation;
+  training_mode: TrainingMode;
+  weekly_goal: WeeklyGoal;
   recent_workouts: TrackedWorkout[];
 }
 

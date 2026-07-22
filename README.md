@@ -2,7 +2,9 @@
 
 A private, single-user mobile PWA for batching individual gym-set videos, stitching them locally, and uploading one unlisted workout video to YouTube. It intentionally has **no application authentication**: access is restricted by a private Tailscale network, not a login page.
 
-The app also includes a structured, dark, mobile-first workout tracker: an exercise library, set/reps/weight logging, RPE and rest tracking, per-set notes, a live rest timer, workout history, colour-coded training heatmap, weekly totals, and per-exercise progression charts. Workout records live in the local SQLite database independently of the optional video workflow.
+The app also includes a structured, dark, mobile-first workout tracker: an exercise library, set/reps/weight logging, RPE and rest tracking, per-set notes, a live rest timer, workout history, colour-coded training heatmap, weekly goals, and per-exercise progression charts. Reusable machine photos can be captured from a phone, captioned, pinned to an exercise in a particular workout, and expanded from History. Workout records and photo metadata live in the local SQLite database independently of the optional video workflow; processed photo files live under `data/machine-photos/`.
+
+The weekly goal card has Cut, Maintenance, and Bulk modes with evidence-informed defaults of 10, 12, and 14 hard sets per active muscle group. It excludes warmups and cardio, counts sets at RPE 7–10, gives no extra credit for training to failure, and shows unrated/lower-effort sets separately. These are adjustable product estimates based on group-level research rather than individualized medical advice.
 
 Workout history can be imported and exported from the History screen using CSV. The round-trip format uses these exact columns: `Date Lifted`, `Exercise`, `Weight (kg)`, `Weight (lb)`, `Reps`, `Bodyweight (kg)`, `Bodyweight (lb)`, `Percentile (%)`, and `Warmup`. Imports accept both comma-separated CSV and tab-separated text copied from a spreadsheet. Missing exercises are added to the local exercise library automatically.
 
@@ -23,7 +25,7 @@ Phone PWA ── private Tailnet HTTPS ── Tailscale Serve ── 127.0.0.1:8
 - `frontend/`: React, TypeScript, Vite and `vite-plugin-pwa`; the default screen is the upload workflow.
 - `backend/app/`: FastAPI API, SQLite/SQLAlchemy models, streamed multipart storage, in-process processor, and YouTube uploader interface.
 - `backend/migrations/`: Alembic initial schema migration.
-- `data/` (ignored by Git): SQLite database, original uploads, normalized temp files, and stitched outputs.
+- `data/` (ignored by Git): SQLite database, reusable machine photos, original uploads, normalized temp files, and stitched outputs.
 
 The backend serves the built PWA from the same origin when `frontend/dist/` exists. No cookies, bearer tokens, account models, login endpoints, authorization middleware, cloud storage, Redis, Celery, AI recognition, or rep counting are present.
 
@@ -164,6 +166,7 @@ Google currently restricts uploads from unaudited API projects created after Jul
 See `.env.example` for all supported variables:
 
 - storage/database paths and upload limits
+- 15 MB machine-photo limit (`GYM_MAX_PHOTO_SIZE_BYTES`)
 - frontend upload-concurrency hint
 - ffmpeg/ffprobe executable paths
 - YouTube OAuth paths, privacy, mock mode, title/description templates

@@ -4,21 +4,31 @@ from collections import defaultdict
 from datetime import date, timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
-from fastapi.responses import Response
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse, Response
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
+from .config import Settings, get_settings
 from .database import get_db
 from .models import (
+    AppSetting,
     BodyMeasurement,
     Exercise,
     ExerciseKind,
+    MachinePhoto,
+    TrainingMode,
     TrainingWorkout,
     WorkoutCategory,
     WorkoutMovement,
     WorkoutSet,
+    movement_machine_photos,
+)
+from .photo_storage import (
+    PhotoValidationError,
+    delete_machine_photo_files,
+    store_machine_photo,
 )
 from .processing import backfill_completed_video_links
 from .tracker_csv import CsvImportError, export_workouts, import_workouts
@@ -33,17 +43,24 @@ from .tracker_schemas import (
     ExerciseProgressRead,
     ExerciseRead,
     HeatmapDay,
+    MachinePhotoCaptionUpdate,
+    MachinePhotoRead,
     MuscleFrequencyRead,
     ProgressPoint,
+    TrainingModeRead,
+    TrainingModeUpdate,
     TrainingWorkoutCreate,
     TrainingWorkoutRead,
     WeeklyDayBreakdown,
     WeeklyExerciseBreakdown,
+    WeeklyGoalRead,
+    WeeklyMuscleGoalRead,
     WorkoutRecommendationRead,
 )
 
 router = APIRouter(prefix="/api", tags=["workout tracking"])
 DbSession = Annotated[Session, Depends(get_db)]
+SettingsDependency = Annotated[Settings, Depends(get_settings)]
 
 
 DEFAULT_EXERCISES = (
@@ -102,13 +119,18 @@ SESSION_NAMES = {
     WorkoutCategory.LOWER: "Legs",
     WorkoutCategory.CARDIO: "Cardio",
 }
+TRAINING_MODE_SETTING_KEY = "training_mode"
+WEEKLY_SET_TARGETS = {
+    TrainingMode.CUT: 10,
+    TrainingMode.MAINTENANCE: 12,
+    TrainingMode.BULK: 14,
+}
 
 
-def exercise_coverage_groups(exercise: Exercise) -> set[str]:
+def exercise_muscle_credits(exercise: Exercise) -> list[tuple[str, float]]:
     if exercise.category == WorkoutCategory.CARDIO or exercise.kind == ExerciseKind.CARDIO:
-        return {"Cardio"}
+        return []
     label = exercise.muscle_group.casefold()
-    groups: set[str] = set()
     aliases = {
         "chest": "Chest",
         "shoulder": "Shoulders",
@@ -122,19 +144,131 @@ def exercise_coverage_groups(exercise: Exercise) -> set[str]:
         "glute": "Glutes",
         "calf": "Calves",
     }
+    matches: list[tuple[int, str]] = []
     for needle, group in aliases.items():
-        if needle in label:
-            groups.add(group)
+        position = label.find(needle)
+        if position >= 0 and group not in {item[1] for item in matches}:
+            matches.append((position, group))
+    groups = [group for _, group in sorted(matches)]
     if "posterior chain" in label:
-        groups.update(("Hamstrings", "Glutes"))
-    return groups
+        groups = ["Hamstrings", "Glutes"]
+    if not groups and exercise.muscle_group.strip():
+        groups = [exercise.muscle_group.strip()]
+    return [(group, 1.0 if index == 0 else 0.5) for index, group in enumerate(groups)]
+
+
+def exercise_coverage_groups(exercise: Exercise) -> set[str]:
+    if exercise.category == WorkoutCategory.CARDIO or exercise.kind == ExerciseKind.CARDIO:
+        return {"Cardio"}
+    return {group for group, _ in exercise_muscle_credits(exercise)}
+
+
+def current_training_mode(db: Session) -> TrainingMode:
+    setting = db.get(AppSetting, TRAINING_MODE_SETTING_KEY)
+    if not setting:
+        return TrainingMode.MAINTENANCE
+    try:
+        return TrainingMode(setting.value)
+    except ValueError:
+        return TrainingMode.MAINTENANCE
+
+
+def weekly_goal(workouts: list[TrainingWorkout], today: date, mode: TrainingMode) -> WeeklyGoalRead:
+    week_start = today - timedelta(days=today.weekday())
+    week_end = week_start + timedelta(days=6)
+    active_start = today - timedelta(days=27)
+    active_groups: set[str] = set()
+    raw_by_group: dict[str, float] = defaultdict(float)
+    effective_by_group: dict[str, float] = defaultdict(float)
+    rpes_by_group: dict[str, list[float]] = defaultdict(list)
+    raw_sets = 0
+    rated_sets = 0
+    unrated_sets = 0
+    low_rpe_sets = 0
+
+    for workout in workouts:
+        if not active_start <= workout.workout_date <= today:
+            continue
+        in_current_week = week_start <= workout.workout_date <= today
+        for movement in workout.movements:
+            credits = exercise_muscle_credits(movement.exercise)
+            if not credits:
+                continue
+            work_sets = [item for item in movement.sets if item.completed and not item.warmup]
+            if work_sets:
+                active_groups.update(group for group, _ in credits)
+            if not in_current_week:
+                continue
+            for item in work_sets:
+                raw_sets += 1
+                is_effective = item.rpe is None or item.rpe >= 7
+                if item.rpe is None:
+                    unrated_sets += 1
+                else:
+                    rated_sets += 1
+                    if item.rpe < 7:
+                        low_rpe_sets += 1
+                for group, contribution in credits:
+                    raw_by_group[group] += contribution
+                    if is_effective:
+                        effective_by_group[group] += contribution
+                    if item.rpe is not None:
+                        rpes_by_group[group].append(item.rpe)
+
+    target = WEEKLY_SET_TARGETS[mode]
+    muscle_groups: list[WeeklyMuscleGoalRead] = []
+    for group in sorted(active_groups):
+        effective = round(effective_by_group[group], 1)
+        if effective < target:
+            status = "below"
+        elif effective <= target * 1.15:
+            status = "on_target"
+        else:
+            status = "above"
+        group_rpes = rpes_by_group[group]
+        muscle_groups.append(
+            WeeklyMuscleGoalRead(
+                muscle_group=group,
+                raw_sets=round(raw_by_group[group], 1),
+                effective_sets=effective,
+                target_sets=target,
+                average_rpe=(round(sum(group_rpes) / len(group_rpes), 1) if group_rpes else None),
+                status=status,
+            )
+        )
+
+    overall_percent = (
+        round(
+            sum(min(item.effective_sets / target, 1) for item in muscle_groups)
+            / len(muscle_groups)
+            * 100,
+            1,
+        )
+        if muscle_groups
+        else 0.0
+    )
+    return WeeklyGoalRead(
+        mode=mode,
+        week_start=week_start,
+        week_end=week_end,
+        target_sets_per_muscle=target,
+        raw_sets=raw_sets,
+        effective_sets=round(sum(item.effective_sets for item in muscle_groups), 1),
+        unrated_sets=unrated_sets,
+        low_rpe_sets=low_rpe_sets,
+        rpe_logging_percent=round(rated_sets / raw_sets * 100, 1) if raw_sets else 0.0,
+        overall_percent=overall_percent,
+        days_remaining=max(0, (week_end - today).days),
+        muscle_groups=muscle_groups,
+    )
 
 
 def workout_recommendation(
-    workouts: list[TrainingWorkout], today: date
+    workouts: list[TrainingWorkout], today: date, mode: TrainingMode = TrainingMode.MAINTENANCE
 ) -> WorkoutRecommendationRead:
     recent_start = today - timedelta(days=6)
     group_dates: dict[str, set[date]] = defaultdict(set)
+    group_effective_sets: dict[str, float] = defaultdict(float)
     for workout in workouts:
         if not recent_start <= workout.workout_date <= today:
             continue
@@ -143,6 +277,11 @@ def workout_recommendation(
                 continue
             for group in exercise_coverage_groups(movement.exercise):
                 group_dates[group].add(workout.workout_date)
+            for item in movement.sets:
+                if not item.completed or item.warmup or (item.rpe is not None and item.rpe < 7):
+                    continue
+                for group, contribution in exercise_muscle_credits(movement.exercise):
+                    group_effective_sets[group] += contribution
 
     last_rotation = next(
         (workout.category for workout in workouts if workout.category in TRAINING_ROTATION),
@@ -166,8 +305,17 @@ def workout_recommendation(
         ]
         coverage_need = sum(deficits) / len(groups)
         recovery_readiness = sum(days_since) / len(days_since) / 7
+        set_target = WEEKLY_SET_TARGETS[mode]
+        volume_need = (
+            0.0
+            if category == WorkoutCategory.CARDIO
+            else sum(
+                max(0.0, set_target - group_effective_sets[group]) / set_target for group in groups
+            )
+            / len(groups)
+        )
         rotation_bonus = 0.8 if category == rotation_next else 0
-        return coverage_need * 2 + recovery_readiness + rotation_bonus
+        return coverage_need * 2 + recovery_readiness + volume_need + rotation_bonus
 
     recommended = max(TRAINING_ROTATION, key=candidate_score)
     target = 1 if recommended == WorkoutCategory.CARDIO else 2
@@ -189,6 +337,14 @@ def workout_recommendation(
         reason = (
             f"{SESSION_NAMES[recommended]} moves ahead of {SESSION_NAMES[rotation_next]} because "
             f"{overdue_text or 'its muscle groups'} have the largest 7-day frequency gap."
+        )
+    strength_groups = SESSION_MUSCLE_GROUPS[recommended]
+    if recommended != WorkoutCategory.CARDIO:
+        lowest_group = min(strength_groups, key=lambda group: group_effective_sets[group])
+        reason += (
+            f" {mode.value.title()} goal: {lowest_group} has "
+            f"{group_effective_sets[lowest_group]:g} of "
+            f"{WEEKLY_SET_TARGETS[mode]} effective sets."
         )
     return WorkoutRecommendationRead(
         category=recommended,
@@ -235,6 +391,7 @@ def workout_options():
     return (
         selectinload(TrainingWorkout.movements).selectinload(WorkoutMovement.exercise),
         selectinload(TrainingWorkout.movements).selectinload(WorkoutMovement.sets),
+        selectinload(TrainingWorkout.movements).selectinload(WorkoutMovement.machine_photos),
     )
 
 
@@ -269,6 +426,30 @@ def replace_workout_contents(
             order_index=movement_index,
             notes=movement_payload.notes,
         )
+        if movement_payload.machine_photo_ids:
+            photos = list(
+                db.scalars(
+                    select(MachinePhoto).where(
+                        MachinePhoto.id.in_(movement_payload.machine_photo_ids)
+                    )
+                )
+            )
+            photos_by_id = {photo.id: photo for photo in photos}
+            missing = [
+                photo_id
+                for photo_id in movement_payload.machine_photo_ids
+                if photo_id not in photos_by_id
+            ]
+            if missing:
+                raise HTTPException(status_code=422, detail="A pinned machine photo was not found.")
+            if any(photo.exercise_id != exercise.id for photo in photos):
+                raise HTTPException(
+                    status_code=422,
+                    detail="Machine photos must belong to the movement's exercise.",
+                )
+            movement.machine_photos = [
+                photos_by_id[photo_id] for photo_id in movement_payload.machine_photo_ids
+            ]
         for set_index, set_payload in enumerate(movement_payload.sets):
             movement.sets.append(WorkoutSet(order_index=set_index, **set_payload.model_dump()))
         workout.movements.append(movement)
@@ -332,6 +513,131 @@ def create_exercise(payload: ExerciseCreate, db: DbSession) -> Exercise:
         raise HTTPException(
             status_code=409, detail="An exercise with that name already exists."
         ) from error
+
+
+@router.get("/exercises/{exercise_id}/machine-photos", response_model=list[MachinePhotoRead])
+def list_machine_photos(exercise_id: str, db: DbSession) -> list[MachinePhoto]:
+    if not db.get(Exercise, exercise_id):
+        raise HTTPException(status_code=404, detail="Exercise was not found.")
+    return list(
+        db.scalars(
+            select(MachinePhoto)
+            .where(MachinePhoto.exercise_id == exercise_id)
+            .order_by(MachinePhoto.created_at.desc())
+        )
+    )
+
+
+@router.post(
+    "/exercises/{exercise_id}/machine-photos",
+    response_model=MachinePhotoRead,
+    status_code=201,
+)
+async def upload_machine_photo(
+    exercise_id: str,
+    db: DbSession,
+    settings: SettingsDependency,
+    file: Annotated[UploadFile, File(...)],
+    caption: Annotated[str, Form(min_length=1, max_length=160)],
+) -> MachinePhoto:
+    if not db.get(Exercise, exercise_id):
+        raise HTTPException(status_code=404, detail="Exercise was not found.")
+    cleaned_caption = caption.strip()
+    if not cleaned_caption:
+        raise HTTPException(status_code=422, detail="Enter a machine name.")
+    try:
+        stored = await store_machine_photo(upload=file, settings=settings)
+    except PhotoValidationError as error:
+        raise HTTPException(status_code=error.status_code, detail=error.message) from error
+
+    photo = MachinePhoto(
+        exercise_id=exercise_id,
+        caption=cleaned_caption,
+        original_filename=stored.original_filename,
+        full_filename=stored.full_filename,
+        thumbnail_filename=stored.thumbnail_filename,
+        media_type="image/webp",
+        file_size=stored.file_size,
+        width=stored.width,
+        height=stored.height,
+    )
+    try:
+        db.add(photo)
+        db.commit()
+        db.refresh(photo)
+        return photo
+    except Exception:
+        db.rollback()
+        delete_machine_photo_files(settings, stored.full_filename, stored.thumbnail_filename)
+        raise
+
+
+@router.patch("/machine-photos/{photo_id}", response_model=MachinePhotoRead)
+def update_machine_photo_caption(
+    photo_id: str, payload: MachinePhotoCaptionUpdate, db: DbSession
+) -> MachinePhoto:
+    photo = db.get(MachinePhoto, photo_id)
+    if not photo:
+        raise HTTPException(status_code=404, detail="Machine photo was not found.")
+    photo.caption = payload.caption
+    db.commit()
+    db.refresh(photo)
+    return photo
+
+
+@router.get("/machine-photos/{photo_id}/image")
+def get_machine_photo_image(
+    photo_id: str,
+    db: DbSession,
+    settings: SettingsDependency,
+    variant: str = Query(default="full", pattern="^(thumbnail|full)$"),
+) -> FileResponse:
+    photo = db.get(MachinePhoto, photo_id)
+    if not photo:
+        raise HTTPException(status_code=404, detail="Machine photo was not found.")
+    filename = photo.thumbnail_filename if variant == "thumbnail" else photo.full_filename
+    root = settings.machine_photos_dir.resolve()
+    path = (root / filename).resolve()
+    if root not in path.parents or not path.is_file():
+        raise HTTPException(status_code=404, detail="Machine photo file was not found.")
+    return FileResponse(
+        path,
+        media_type=photo.media_type,
+        headers={"Cache-Control": "private, max-age=31536000, immutable"},
+    )
+
+
+@router.delete("/machine-photos/{photo_id}", status_code=204)
+def delete_machine_photo(photo_id: str, db: DbSession, settings: SettingsDependency) -> None:
+    photo = db.get(MachinePhoto, photo_id)
+    if not photo:
+        raise HTTPException(status_code=404, detail="Machine photo was not found.")
+    reference = db.scalar(
+        select(movement_machine_photos.c.movement_id)
+        .where(movement_machine_photos.c.machine_photo_id == photo_id)
+        .limit(1)
+    )
+    if reference:
+        raise HTTPException(
+            status_code=409,
+            detail="Remove this photo from its workouts before deleting it.",
+        )
+    full_filename = photo.full_filename
+    thumbnail_filename = photo.thumbnail_filename
+    db.delete(photo)
+    db.commit()
+    delete_machine_photo_files(settings, full_filename, thumbnail_filename)
+
+
+@router.put("/training-mode", response_model=TrainingModeRead)
+def update_training_mode(payload: TrainingModeUpdate, db: DbSession) -> TrainingModeRead:
+    setting = db.get(AppSetting, TRAINING_MODE_SETTING_KEY)
+    if setting:
+        setting.value = payload.mode.value
+    else:
+        db.add(AppSetting(key=TRAINING_MODE_SETTING_KEY, value=payload.mode.value))
+    db.commit()
+    return TrainingModeRead(mode=payload.mode)
 
 
 @router.get("/workouts", response_model=list[TrainingWorkoutRead])
@@ -445,11 +751,10 @@ def delete_sample_data(db: DbSession) -> None:
 @router.get("/dashboard", response_model=DashboardRead)
 def dashboard(db: DbSession) -> DashboardRead:
     today = date.today()
-    start = today - timedelta(days=364)
+    training_mode = current_training_mode(db)
     workouts = list(
         db.scalars(
             select(TrainingWorkout)
-            .where(TrainingWorkout.workout_date >= start)
             .options(*workout_options())
             .order_by(TrainingWorkout.workout_date.desc(), TrainingWorkout.created_at.desc())
         )
@@ -618,7 +923,9 @@ def dashboard(db: DbSession) -> DashboardRead:
         current_streak=streak,
         heatmap=heatmap,
         weekly_days=weekly_days,
-        recommendation=workout_recommendation(workouts, today),
+        recommendation=workout_recommendation(workouts, today, training_mode),
+        training_mode=training_mode,
+        weekly_goal=weekly_goal(workouts, today, training_mode),
         recent_workouts=workouts[:5],
     )
 

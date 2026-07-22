@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     database_path: Path = Field(default=Path("data/gym-video-logger.db"))
     max_file_size_bytes: int = Field(default=20 * 1024 * 1024 * 1024, gt=0)
     max_session_size_bytes: int = Field(default=100 * 1024 * 1024 * 1024, gt=0)
+    max_photo_size_bytes: int = Field(default=15 * 1024 * 1024, gt=0)
     upload_concurrency: int = Field(default=2, ge=1, le=8)
     ffmpeg_path: str = "ffmpeg"
     ffprobe_path: str = "ffprobe"
@@ -65,8 +66,18 @@ class Settings(BaseSettings):
     def output_dir(self) -> Path:
         return self.data_dir / "outputs"
 
+    @property
+    def machine_photos_dir(self) -> Path:
+        return self.data_dir / "machine-photos"
+
     def ensure_directories(self) -> None:
-        for directory in (self.data_dir, self.uploads_dir, self.normalized_dir, self.output_dir):
+        for directory in (
+            self.data_dir,
+            self.uploads_dir,
+            self.normalized_dir,
+            self.output_dir,
+            self.machine_photos_dir,
+        ):
             directory.mkdir(parents=True, exist_ok=True)
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
 

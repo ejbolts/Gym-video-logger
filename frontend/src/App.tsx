@@ -5,25 +5,29 @@ import type {
   DashboardData,
   Exercise,
   ExerciseProgress,
+  MachinePhoto,
   TrackedSet,
   TrackedWorkout,
+  TrainingMode,
   WorkoutCategory,
   WorkoutInput,
   WorkoutRecommendation,
   WorkoutSetInput,
+  WeeklyGoal,
 } from './types';
 import { localDate } from './utils';
 import { VideoUpload } from './VideoUpload';
 
-type AppTab = 'dashboard' | 'log' | 'progress' | 'body' | 'history' | 'videos';
+type AppTab = 'dashboard' | 'log' | 'body' | 'history' | 'videos';
 type ProgressMetric = 'estimated_1rm' | 'best_weight_kg' | 'volume_kg';
-type DashboardMetric = 'workouts' | 'sets' | 'volume' | 'streak';
+type DashboardMetric = 'workouts' | 'sets' | 'streak';
 
 type DraftSet = WorkoutSetInput & { key: string };
 type DraftMovement = {
   key: string;
   exercise: Exercise;
   notes: string;
+  machinePhotoIds: string[];
   sets: DraftSet[];
 };
 
@@ -91,7 +95,7 @@ function bodyweightForDate(measurements: BodyMeasurement[], workoutDate: string)
 export function App() {
   const [tab, setTab] = useState<AppTab>(() => {
     const requested = window.location.hash.slice(1) as AppTab;
-    return ['dashboard', 'log', 'progress', 'body', 'history', 'videos'].includes(requested)
+    return ['dashboard', 'log', 'body', 'history', 'videos'].includes(requested)
       ? requested
       : 'dashboard';
   });
@@ -100,6 +104,7 @@ export function App() {
   const [workouts, setWorkouts] = useState<TrackedWorkout[]>([]);
   const [measurements, setMeasurements] = useState<BodyMeasurement[]>([]);
   const [workoutStartDate, setWorkoutStartDate] = useState(localDate());
+  const [editingWorkout, setEditingWorkout] = useState<TrackedWorkout | null>(null);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -132,10 +137,12 @@ export function App() {
   }, [tab]);
 
   async function saveWorkout(payload: WorkoutInput) {
-    await api.createWorkout(payload);
+    if (editingWorkout) await api.updateWorkout(editingWorkout.id, payload);
+    else await api.createWorkout(payload);
     await refreshData();
-    setTab('dashboard');
-    setMessage('Workout saved. Nice work.');
+    setTab(editingWorkout ? 'history' : 'dashboard');
+    setMessage(editingWorkout ? 'Workout changes saved.' : 'Workout saved. Nice work.');
+    setEditingWorkout(null);
   }
 
   async function deleteWorkout(workout: TrackedWorkout) {
@@ -192,7 +199,15 @@ export function App() {
   }
 
   function startWorkout(workoutDate = localDate()) {
+    if (!window.confirm('Start a new workout now?')) return;
+    setEditingWorkout(null);
     setWorkoutStartDate(workoutDate);
+    setTab('log');
+  }
+
+  function editWorkout(workout: TrackedWorkout) {
+    setEditingWorkout(workout);
+    setWorkoutStartDate(workout.workout_date);
     setTab('log');
   }
 
@@ -213,32 +228,18 @@ export function App() {
     setMessage('Body measurement deleted.');
   }
 
-  const titles: Record<AppTab, string> = {
-    dashboard: 'Overview',
-    log: 'Log workout',
-    progress: 'Progress',
-    body: 'Body composition',
-    history: 'History',
-    videos: 'Workout videos',
-  };
+  async function updateTrainingMode(mode: TrainingMode) {
+    try {
+      await api.updateTrainingMode(mode);
+      await refreshData();
+      setMessage(`Training mode changed to ${mode}.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Could not update the training mode.');
+    }
+  }
 
   return (
     <div className="tracker-app">
-      <header className="app-header">
-        <div>
-          <span className="brand-mark">GL</span>
-          <div>
-            <small>GYM LOGGER</small>
-            <strong>{titles[tab]}</strong>
-          </div>
-        </div>
-        {tab !== 'log' && (
-          <button className="header-start" onClick={() => startWorkout()}>
-            <span>＋</span> Start workout
-          </button>
-        )}
-      </header>
-
       {message && (
         <button className="toast-message" onClick={() => setMessage(null)}>
           {message}
@@ -248,22 +249,30 @@ export function App() {
       <main className={`tracker-content ${tab === 'videos' ? 'video-content' : ''}`}>
         {loading && <LoadingState />}
         {!loading && tab === 'dashboard' && dashboard && (
-          <DashboardScreen data={dashboard} onStart={startWorkout} />
+          <DashboardScreen
+            data={dashboard}
+            currentBodyweight={measurements[0]?.weight_kg ?? null}
+            onStart={startWorkout}
+            onBody={() => setTab('body')}
+            onEditWorkout={(id) => {
+              const workout = workouts.find((item) => item.id === id);
+              if (workout) editWorkout(workout);
+            }}
+            onTrainingMode={updateTrainingMode}
+          />
         )}
         {!loading && tab === 'log' && (
           <WorkoutLogger
             exercises={exercises}
             recommendation={dashboard?.recommendation ?? null}
             initialDate={workoutStartDate}
+            initialWorkout={editingWorkout}
             currentBodyweight={measurements[0]?.weight_kg ?? null}
             onSave={saveWorkout}
-            onCancel={() => setTab('dashboard')}
-          />
-        )}
-        {!loading && tab === 'progress' && (
-          <ProgressScreen
-            exercises={exercises}
-            currentBodyweight={measurements[0]?.weight_kg ?? null}
+            onCancel={() => {
+              setTab(editingWorkout ? 'history' : 'dashboard');
+              setEditingWorkout(null);
+            }}
           />
         )}
         {!loading && tab === 'body' && (
@@ -277,6 +286,9 @@ export function App() {
           <HistoryScreen
             workouts={workouts}
             measurements={measurements}
+            exercises={exercises}
+            currentBodyweight={measurements[0]?.weight_kg ?? null}
+            onEdit={editWorkout}
             onDelete={deleteWorkout}
             onImport={importWorkoutCsv}
             onExport={exportWorkoutCsv}
@@ -293,12 +305,7 @@ export function App() {
           icon="⌂"
           onClick={() => setTab('dashboard')}
         />
-        <NavButton
-          active={tab === 'progress'}
-          label="Progress"
-          icon="↗"
-          onClick={() => setTab('progress')}
-        />
+        <NavButton active={tab === 'body'} label="Body" icon="◒" onClick={() => setTab('body')} />
         <button
           className={`nav-log ${tab === 'log' ? 'active' : ''}`}
           onClick={() => startWorkout()}
@@ -306,7 +313,6 @@ export function App() {
           <span>＋</span>
           Log
         </button>
-        <NavButton active={tab === 'body'} label="Body" icon="◒" onClick={() => setTab('body')} />
         <NavButton
           active={tab === 'history'}
           label="History"
@@ -354,13 +360,21 @@ function LoadingState() {
 
 function DashboardScreen({
   data,
+  currentBodyweight,
   onStart,
+  onBody,
+  onEditWorkout,
+  onTrainingMode,
 }: {
   data: DashboardData;
+  currentBodyweight: number | null;
   onStart: (workoutDate?: string) => void;
+  onBody: () => void;
+  onEditWorkout: (workoutId: string) => void;
+  onTrainingMode: (mode: TrainingMode) => Promise<void>;
 }) {
   const [activeMetric, setActiveMetric] = useState<DashboardMetric | null>(null);
-  const [calendarMonths, setCalendarMonths] = useState(6);
+  const [calendarMonths, setCalendarMonths] = useState<number | 'all'>(6);
   const [selectedDay, setSelectedDay] = useState<DashboardData['heatmap'][number] | null>(null);
 
   return (
@@ -369,11 +383,7 @@ function DashboardScreen({
         <div>
           <p className="section-kicker">TRAINING DASHBOARD</p>
           <h1>Keep the momentum.</h1>
-          <p>Your week at a glance, with every set adding to the story.</p>
         </div>
-        <button className="quick-start" onClick={() => onStart()}>
-          Start
-        </button>
       </div>
 
       <div className="metric-grid">
@@ -390,10 +400,10 @@ function DashboardScreen({
           onClick={() => setActiveMetric('sets')}
         />
         <MetricCard
-          value={Math.round(data.volume_this_week_kg).toLocaleString()}
-          label="Volume"
-          suffix="kg this week"
-          onClick={() => setActiveMetric('volume')}
+          value={currentBodyweight !== null ? `${currentBodyweight} kg` : '–'}
+          label="Body weight"
+          suffix="latest check-in"
+          onClick={onBody}
         />
         <MetricCard
           value={data.current_streak}
@@ -402,6 +412,8 @@ function DashboardScreen({
           onClick={() => setActiveMetric('streak')}
         />
       </div>
+
+      <WeeklyGoalCard goal={data.weekly_goal} onModeChange={onTrainingMode} />
 
       <section className="panel heatmap-panel">
         <div className="panel-heading">
@@ -413,11 +425,14 @@ function DashboardScreen({
             Range
             <select
               value={calendarMonths}
-              onChange={(event) => setCalendarMonths(Number(event.target.value))}
+              onChange={(event) =>
+                setCalendarMonths(event.target.value === 'all' ? 'all' : Number(event.target.value))
+              }
             >
               <option value={3}>3 months</option>
               <option value={6}>6 months</option>
               <option value={12}>12 months</option>
+              <option value="all">All history</option>
             </select>
           </label>
         </div>
@@ -464,7 +479,13 @@ function DashboardScreen({
       {activeMetric && (
         <WeeklyInsight data={data} metric={activeMetric} onClose={() => setActiveMetric(null)} />
       )}
-      {selectedDay && <CalendarDayDetail day={selectedDay} onClose={() => setSelectedDay(null)} />}
+      {selectedDay && (
+        <CalendarDayDetail
+          day={selectedDay}
+          onClose={() => setSelectedDay(null)}
+          onEditWorkout={onEditWorkout}
+        />
+      )}
     </section>
   );
 }
@@ -495,6 +516,203 @@ function MetricCard({
   ) : (
     <article className="metric-card">{content}</article>
   );
+}
+
+const trainingModeLabels: Record<TrainingMode, string> = {
+  cut: 'Cut',
+  maintenance: 'Maintenance',
+  bulk: 'Bulk',
+};
+
+function WeeklyGoalCard({
+  goal,
+  onModeChange,
+}: {
+  goal: WeeklyGoal;
+  onModeChange: (mode: TrainingMode) => Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [changing, setChanging] = useState(false);
+  const targetTotal = goal.target_sets_per_muscle * goal.muscle_groups.length;
+  const belowTarget = goal.muscle_groups.filter((item) => item.status === 'below').length;
+  const displayedPercent = Math.min(goal.overall_percent, 100);
+
+  async function changeMode(mode: TrainingMode) {
+    if (mode === goal.mode || changing) return;
+    setChanging(true);
+    try {
+      await onModeChange(mode);
+    } finally {
+      setChanging(false);
+    }
+  }
+
+  return (
+    <>
+      <section className={`panel weekly-goal-card goal-mode-${goal.mode}`}>
+        <div className="weekly-goal-topline">
+          <div>
+            <p className="section-kicker">WEEKLY GOAL</p>
+            <h2>{trainingModeLabels[goal.mode]} phase</h2>
+          </div>
+          <div className="goal-mode-tabs" aria-label="Training phase">
+            {(Object.keys(trainingModeLabels) as TrainingMode[]).map((mode) => (
+              <button
+                type="button"
+                className={goal.mode === mode ? 'active' : ''}
+                disabled={changing}
+                onClick={() => void changeMode(mode)}
+                key={mode}
+              >
+                {trainingModeLabels[mode]}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="weekly-goal-number">
+          <strong>{Math.round(goal.overall_percent)}%</strong>
+          <span>
+            {formatGoalSets(goal.effective_sets)} effective sets
+            {targetTotal > 0 && ` · ${targetTotal} combined target`}
+          </span>
+        </div>
+        <div
+          className="goal-progress-track"
+          role="progressbar"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(displayedPercent)}
+          aria-label="Weekly muscle volume progress"
+        >
+          <i style={{ width: `${displayedPercent}%` }} />
+          <b style={{ left: `${displayedPercent}%` }} />
+        </div>
+        <div className="weekly-goal-summary">
+          <span>
+            {belowTarget
+              ? `${belowTarget} muscle ${belowTarget === 1 ? 'group needs' : 'groups need'} attention`
+              : 'Every active muscle group is on target'}
+          </span>
+          <span>{goal.days_remaining} days left</span>
+        </div>
+        <button className="goal-details-button" type="button" onClick={() => setOpen(true)}>
+          View muscle breakdown <span>→</span>
+        </button>
+      </section>
+      {open && (
+        <WeeklyGoalDetail
+          goal={goal}
+          changing={changing}
+          onModeChange={changeMode}
+          onClose={() => setOpen(false)}
+        />
+      )}
+    </>
+  );
+}
+
+function WeeklyGoalDetail({
+  goal,
+  changing,
+  onModeChange,
+  onClose,
+}: {
+  goal: WeeklyGoal;
+  changing: boolean;
+  onModeChange: (mode: TrainingMode) => Promise<void>;
+  onClose: () => void;
+}) {
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        className="weekly-goal-detail"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Weekly training goal"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header>
+          <div>
+            <p className="section-kicker">TRAINING PHASE</p>
+            <h2>Your weekly target</h2>
+          </div>
+          <button type="button" className="icon-button" onClick={onClose} aria-label="Close">
+            ×
+          </button>
+        </header>
+        <div className="goal-mode-tabs goal-mode-tabs-large" aria-label="Training phase">
+          {(Object.keys(trainingModeLabels) as TrainingMode[]).map((mode) => (
+            <button
+              type="button"
+              className={goal.mode === mode ? 'active' : ''}
+              disabled={changing}
+              onClick={() => void onModeChange(mode)}
+              key={mode}
+            >
+              {trainingModeLabels[mode]}
+              <small>{mode === 'cut' ? 10 : mode === 'maintenance' ? 12 : 14} sets / muscle</small>
+            </button>
+          ))}
+        </div>
+        <div className="goal-explainer">
+          <strong>{goal.target_sets_per_muscle} hard sets per active muscle</strong>
+          <p>
+            Completed strength sets at RPE 7–10 count. Warmups, cardio, and lower-effort sets do not
+            fill the bar; secondary muscles receive half credit.
+          </p>
+        </div>
+        <div className="muscle-goal-list">
+          {goal.muscle_groups.map((item) => {
+            const percent = Math.min(
+              (item.effective_sets / Math.max(item.target_sets, 1)) * 100,
+              100,
+            );
+            return (
+              <article key={item.muscle_group}>
+                <div>
+                  <strong>{item.muscle_group}</strong>
+                  <span className={`goal-status ${item.status}`}>
+                    {item.status === 'below'
+                      ? 'Building'
+                      : item.status === 'on_target'
+                        ? 'On target'
+                        : 'Above range'}
+                  </span>
+                </div>
+                <div className="muscle-progress-track">
+                  <i style={{ width: `${percent}%` }} />
+                </div>
+                <p>
+                  <b>{formatGoalSets(item.effective_sets)}</b> / {item.target_sets} effective sets
+                  <span>
+                    {formatGoalSets(item.raw_sets)} logged
+                    {item.average_rpe !== null && ` · avg RPE ${item.average_rpe}`}
+                  </span>
+                </p>
+              </article>
+            );
+          })}
+          {!goal.muscle_groups.length && (
+            <p className="goal-empty">Log a strength workout to establish your active muscles.</p>
+          )}
+        </div>
+        <footer className="goal-data-quality">
+          <div>
+            <strong>{Math.round(goal.rpe_logging_percent)}%</strong>
+            <span>RPE coverage</span>
+          </div>
+          <p>
+            {goal.unrated_sets} unrated and {goal.low_rpe_sets} lower-effort sets this week. Targets
+            are evidence-informed estimates and can’t account for recovery, sleep, or injury.
+          </p>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
+function formatGoalSets(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
 
 function WeeklyInsight({
@@ -537,7 +755,6 @@ function WeeklyInsight({
   const title = {
     workouts: 'This week’s workouts',
     sets: 'Weekly sets by muscle',
-    volume: 'Weekly training volume',
     streak: 'Training streak',
   }[metric];
 
@@ -567,23 +784,6 @@ function WeeklyInsight({
             <MuscleGroupBreakdown groups={muscleGroups} />
           ) : metric === 'workouts' ? (
             data.weekly_days.map((day) => <WeeklyWorkoutDay key={day.workout_date} day={day} />)
-          ) : metric === 'volume' ? (
-            data.weekly_days.map((day) => (
-              <article className="weekly-day-card" key={day.workout_date}>
-                <div className="weekly-day-heading">
-                  <strong>{weekday(day.workout_date)}</strong>
-                  <b>{Math.round(day.volume_kg).toLocaleString()} kg</b>
-                </div>
-                {day.exercises
-                  .filter((exercise) => exercise.volume_kg > 0)
-                  .map((exercise) => (
-                    <div className="weekly-exercise-line" key={exercise.exercise_id}>
-                      <span>{exercise.exercise_name}</span>
-                      <small>{Math.round(exercise.volume_kg).toLocaleString()} kg</small>
-                    </div>
-                  ))}
-              </article>
-            ))
           ) : (
             <StreakBreakdown data={data} />
           )}
@@ -699,14 +899,21 @@ function WorkoutHeatmap({
   onDayClick,
 }: {
   entries: DashboardData['heatmap'];
-  monthCount: number;
+  monthCount: number | 'all';
   onDayClick: (workoutDate: string, entry: DashboardData['heatmap'][number] | undefined) => void;
 }) {
   const map = new Map(entries.map((entry) => [entry.workout_date, entry]));
   const months = useMemo(() => {
     const today = new Date();
     today.setHours(12, 0, 0, 0);
-    return Array.from({ length: monthCount }, (_, offset) => {
+    const earliest = entries[0] ? new Date(`${entries[0].workout_date}T12:00:00`) : today;
+    const allMonthCount =
+      (today.getFullYear() - earliest.getFullYear()) * 12 +
+      today.getMonth() -
+      earliest.getMonth() +
+      1;
+    const resolvedMonthCount = monthCount === 'all' ? Math.max(allMonthCount, 1) : monthCount;
+    return Array.from({ length: resolvedMonthCount }, (_, offset) => {
       const first = new Date(today.getFullYear(), today.getMonth() - offset, 1, 12);
       const dayCount = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate();
       const leading = (first.getDay() + 6) % 7;
@@ -724,7 +931,7 @@ function WorkoutHeatmap({
         cells,
       };
     });
-  }, [monthCount]);
+  }, [entries, monthCount]);
   const todayKey = localCalendarDate(new Date());
 
   return (
@@ -776,9 +983,11 @@ function WorkoutHeatmap({
 function CalendarDayDetail({
   day,
   onClose,
+  onEditWorkout,
 }: {
   day: DashboardData['heatmap'][number];
   onClose: () => void;
+  onEditWorkout: (workoutId: string) => void;
 }) {
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
@@ -819,6 +1028,13 @@ function CalendarDayDetail({
                   <b>{exercise.set_count} sets</b>
                 </p>
               ))}
+              <button
+                type="button"
+                className="calendar-edit-workout"
+                onClick={() => onEditWorkout(workout.id)}
+              >
+                Edit workout
+              </button>
             </article>
           ))}
         </div>
@@ -864,6 +1080,7 @@ function WorkoutLogger({
   exercises,
   recommendation,
   initialDate,
+  initialWorkout,
   currentBodyweight,
   onSave,
   onCancel,
@@ -871,29 +1088,56 @@ function WorkoutLogger({
   exercises: Exercise[];
   recommendation: WorkoutRecommendation | null;
   initialDate: string;
+  initialWorkout: TrackedWorkout | null;
   currentBodyweight: number | null;
   onSave: (payload: WorkoutInput) => Promise<void>;
   onCancel: () => void;
 }) {
-  const [name, setName] = useState('');
+  const [name, setName] = useState(initialWorkout?.name ?? '');
   const [workoutDate, setWorkoutDate] = useState(initialDate);
-  const [category, setCategory] = useState<WorkoutCategory>(recommendation?.category ?? 'push');
-  const [notes, setNotes] = useState('');
-  const [movements, setMovements] = useState<DraftMovement[]>([]);
+  const [category, setCategory] = useState<WorkoutCategory>(
+    initialWorkout?.category ?? recommendation?.category ?? 'push',
+  );
+  const [notes, setNotes] = useState(initialWorkout?.notes ?? '');
+  const [movements, setMovements] = useState<DraftMovement[]>(() =>
+    initialWorkout
+      ? initialWorkout.movements.map((movement) => ({
+          key: crypto.randomUUID(),
+          exercise: movement.exercise,
+          notes: movement.notes ?? '',
+          machinePhotoIds: movement.machine_photos.map((photo) => photo.id),
+          sets: movement.sets.map((item) => ({
+            key: crypto.randomUUID(),
+            reps: item.reps,
+            weight_kg: item.weight_kg,
+            rpe: item.rpe,
+            rest_seconds: item.rest_seconds,
+            duration_seconds: item.duration_seconds,
+            distance_km: item.distance_km,
+            bodyweight_kg: item.bodyweight_kg,
+            percentile: item.percentile,
+            warmup: item.warmup,
+            notes: item.notes,
+            completed: item.completed,
+          })),
+        }))
+      : [],
+  );
   const [pickerOpen, setPickerOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [elapsed, setElapsed] = useState(0);
+  const [elapsed, setElapsed] = useState((initialWorkout?.duration_minutes ?? 0) * 60);
   const [restLeft, setRestLeft] = useState(0);
   const startedAt = useState(() => Date.now())[0];
 
   useEffect(() => {
+    if (initialWorkout) return;
     const timer = window.setInterval(
       () => setElapsed(Math.floor((Date.now() - startedAt) / 1000)),
       1000,
     );
     return () => window.clearInterval(timer);
-  }, [startedAt]);
+  }, [initialWorkout, startedAt]);
 
   useEffect(() => {
     if (restLeft <= 0) return;
@@ -907,7 +1151,13 @@ function WorkoutLogger({
   function addExercise(exercise: Exercise) {
     setMovements((current) => [
       ...current,
-      { key: crypto.randomUUID(), exercise, notes: '', sets: [emptySet(exercise.kind)] },
+      {
+        key: crypto.randomUUID(),
+        exercise,
+        notes: '',
+        machinePhotoIds: [],
+        sets: [emptySet(exercise.kind)],
+      },
     ]);
     if (!name) setName(`${categoryNames[category]} workout`);
     setPickerOpen(false);
@@ -964,10 +1214,11 @@ function WorkoutLogger({
         workout_date: workoutDate,
         category,
         notes: notes.trim() || null,
-        duration_minutes: Math.max(1, Math.round(elapsed / 60)),
+        duration_minutes: initialWorkout?.duration_minutes ?? Math.max(1, Math.round(elapsed / 60)),
         movements: movements.map((movement) => ({
           exercise_id: movement.exercise.id,
           notes: movement.notes.trim() || null,
+          machine_photo_ids: movement.machinePhotoIds,
           sets: movement.sets.map((item) => ({
             reps: item.reps,
             weight_kg: item.weight_kg,
@@ -975,6 +1226,9 @@ function WorkoutLogger({
             rest_seconds: item.rest_seconds,
             duration_seconds: item.duration_seconds,
             distance_km: item.distance_km,
+            bodyweight_kg: item.bodyweight_kg,
+            percentile: item.percentile,
+            warmup: item.warmup,
             notes: item.notes,
             completed: item.completed,
           })),
@@ -991,14 +1245,15 @@ function WorkoutLogger({
       <div className="live-workout-bar">
         <button onClick={onCancel}>Cancel</button>
         <div>
-          <span className="live-dot" /> LIVE · {formatDuration(elapsed)}
+          {!initialWorkout && <span className="live-dot" />}
+          {initialWorkout ? 'EDIT WORKOUT' : ` LIVE · ${formatDuration(elapsed)}`}
         </div>
         <button className="finish-button" disabled={saving} onClick={() => void finishWorkout()}>
-          {saving ? 'Saving…' : 'Finish'}
+          {saving ? 'Saving…' : initialWorkout ? 'Save' : 'Finish'}
         </button>
       </div>
 
-      {recommendation && (
+      {recommendation && !initialWorkout && (
         <section className="workout-recommendation panel">
           <div className="recommendation-heading">
             <div>
@@ -1080,6 +1335,13 @@ function WorkoutLogger({
             onToggleSet={(item) => toggleSet(movement, item)}
             onAddSet={() => addSet(movement)}
             onRemove={() => removeMovement(movement.key)}
+            onMachinePhotos={(machinePhotoIds) =>
+              setMovements((current) =>
+                current.map((item) =>
+                  item.key === movement.key ? { ...item, machinePhotoIds } : item,
+                ),
+              )
+            }
             onMovementNotes={(value) =>
               setMovements((current) =>
                 current.map((item) =>
@@ -1131,6 +1393,7 @@ function MovementCard({
   onToggleSet,
   onAddSet,
   onRemove,
+  onMachinePhotos,
   onMovementNotes,
 }: {
   movement: DraftMovement;
@@ -1140,6 +1403,7 @@ function MovementCard({
   onToggleSet: (item: DraftSet) => void;
   onAddSet: () => void;
   onRemove: () => void;
+  onMachinePhotos: (photoIds: string[]) => void;
   onMovementNotes: (value: string) => void;
 }) {
   const cardio = movement.exercise.kind === 'cardio';
@@ -1162,6 +1426,14 @@ function MovementCard({
           ×
         </button>
       </header>
+
+      {!cardio && (
+        <MachinePhotoChooser
+          exercise={movement.exercise}
+          selectedIds={movement.machinePhotoIds}
+          onChange={onMachinePhotos}
+        />
+      )}
 
       <div className={`set-grid set-grid-${cardio ? 'cardio' : 'strength'}`}>
         <div className="set-grid-head">
@@ -1309,6 +1581,286 @@ function MovementCard({
   );
 }
 
+function MachinePhotoChooser({
+  exercise,
+  selectedIds,
+  onChange,
+}: {
+  exercise: Exercise;
+  selectedIds: string[];
+  onChange: (photoIds: string[]) => void;
+}) {
+  const [photos, setPhotos] = useState<MachinePhoto[]>([]);
+  const [pending, setPending] = useState<{ file: File; previewUrl: string } | null>(null);
+  const [caption, setCaption] = useState('');
+  const [expanded, setExpanded] = useState<MachinePhoto | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void api
+      .listMachinePhotos(exercise.id)
+      .then((items) => {
+        if (active) setPhotos(items);
+      })
+      .catch((loadError) => {
+        if (active)
+          setError(
+            loadError instanceof Error ? loadError.message : 'Could not load machine photos.',
+          );
+      });
+    return () => {
+      active = false;
+    };
+  }, [exercise.id]);
+
+  useEffect(
+    () => () => {
+      if (pending) URL.revokeObjectURL(pending.previewUrl);
+    },
+    [pending],
+  );
+
+  function stagePhoto(file: File | undefined) {
+    if (!file) return;
+    setError(null);
+    setCaption('');
+    setPending({ file, previewUrl: URL.createObjectURL(file) });
+  }
+
+  async function uploadPhoto() {
+    if (!pending || !caption.trim()) {
+      setError('Enter the machine name before saving the photo.');
+      return;
+    }
+    setUploading(true);
+    setError(null);
+    try {
+      const photo = await api.uploadMachinePhoto(exercise.id, pending.file, caption.trim());
+      setPhotos((current) => [photo, ...current]);
+      onChange([...new Set([...selectedIds, photo.id])]);
+      setPending(null);
+      setCaption('');
+    } catch (uploadError) {
+      setError(uploadError instanceof Error ? uploadError.message : 'Could not save that photo.');
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  function togglePhoto(photoId: string) {
+    onChange(
+      selectedIds.includes(photoId)
+        ? selectedIds.filter((current) => current !== photoId)
+        : [...selectedIds, photoId],
+    );
+  }
+
+  async function updatePhoto(photo: MachinePhoto, nextCaption: string) {
+    const updated = await api.updateMachinePhoto(photo.id, nextCaption);
+    setPhotos((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+    setExpanded(updated);
+  }
+
+  async function deletePhoto(photo: MachinePhoto) {
+    await api.deleteMachinePhoto(photo.id);
+    setPhotos((current) => current.filter((item) => item.id !== photo.id));
+    onChange(selectedIds.filter((id) => id !== photo.id));
+    setExpanded(null);
+  }
+
+  return (
+    <section className="machine-photo-picker" aria-label={`Machine photos for ${exercise.name}`}>
+      <div className="machine-photo-heading">
+        <div>
+          <strong>Machine used</strong>
+          <small>Pin one or more photos to every set in this exercise.</small>
+        </div>
+        {selectedIds.length > 0 && <span>{selectedIds.length} pinned</span>}
+      </div>
+      <div className="machine-photo-actions">
+        <label>
+          <span aria-hidden="true">⌁</span>
+          Take photo
+          <input
+            className="sr-only"
+            type="file"
+            accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
+            capture="environment"
+            onChange={(event) => {
+              stagePhoto(event.target.files?.[0]);
+              event.target.value = '';
+            }}
+          />
+        </label>
+        <label>
+          <span aria-hidden="true">＋</span>
+          Choose photo
+          <input
+            className="sr-only"
+            type="file"
+            accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
+            onChange={(event) => {
+              stagePhoto(event.target.files?.[0]);
+              event.target.value = '';
+            }}
+          />
+        </label>
+      </div>
+      {photos.length > 0 && (
+        <div className="machine-photo-rail">
+          {photos.map((photo) => {
+            const selected = selectedIds.includes(photo.id);
+            return (
+              <article className={selected ? 'selected' : ''} key={photo.id}>
+                <button
+                  type="button"
+                  className="machine-thumbnail"
+                  onClick={() => setExpanded(photo)}
+                  aria-label={`Expand ${photo.caption}`}
+                >
+                  <img src={photo.thumbnail_url} alt={photo.caption} loading="lazy" />
+                </button>
+                <strong title={photo.caption}>{photo.caption}</strong>
+                <button type="button" className="machine-pin" onClick={() => togglePhoto(photo.id)}>
+                  {selected ? '✓ Pinned' : 'Pin to sets'}
+                </button>
+              </article>
+            );
+          })}
+        </div>
+      )}
+      {error && <p className="machine-photo-error">{error}</p>}
+
+      {pending && (
+        <div className="modal-backdrop photo-modal-backdrop" role="presentation">
+          <section className="photo-caption-dialog" role="dialog" aria-modal="true">
+            <img src={pending.previewUrl} alt="New machine preview" />
+            <div>
+              <p className="section-kicker">NEW MACHINE PHOTO</p>
+              <h2>Name this machine</h2>
+              <p>For example: Hammer Strength lying leg curl.</p>
+              <input
+                autoFocus
+                value={caption}
+                maxLength={160}
+                onChange={(event) => setCaption(event.target.value)}
+                placeholder="Machine name"
+              />
+              <div className="photo-dialog-actions">
+                <button type="button" onClick={() => setPending(null)} disabled={uploading}>
+                  Cancel
+                </button>
+                <button type="button" onClick={() => void uploadPhoto()} disabled={uploading}>
+                  {uploading ? 'Saving…' : 'Save and pin'}
+                </button>
+              </div>
+            </div>
+          </section>
+        </div>
+      )}
+      {expanded && (
+        <MachinePhotoLightbox
+          photo={expanded}
+          onClose={() => setExpanded(null)}
+          onUpdate={updatePhoto}
+          onDelete={deletePhoto}
+        />
+      )}
+    </section>
+  );
+}
+
+function MachinePhotoLightbox({
+  photo,
+  onClose,
+  onUpdate,
+  onDelete,
+}: {
+  photo: MachinePhoto;
+  onClose: () => void;
+  onUpdate?: (photo: MachinePhoto, caption: string) => Promise<void>;
+  onDelete?: (photo: MachinePhoto) => Promise<void>;
+}) {
+  const [caption, setCaption] = useState(photo.caption);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function saveCaption() {
+    if (!onUpdate || !caption.trim() || caption.trim() === photo.caption) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await onUpdate(photo, caption.trim());
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : 'Could not update the caption.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function removePhoto() {
+    if (!onDelete || !window.confirm(`Delete “${photo.caption}” from the machine library?`)) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await onDelete(photo);
+    } catch (deleteError) {
+      setError(
+        deleteError instanceof Error
+          ? deleteError.message
+          : 'Could not delete a photo that is used by a workout.',
+      );
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div
+      className="photo-lightbox"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <section role="dialog" aria-modal="true" aria-label={photo.caption}>
+        <button className="photo-lightbox-close" type="button" onClick={onClose} aria-label="Close">
+          ×
+        </button>
+        <img src={photo.full_url} alt={photo.caption} />
+        <div className="photo-lightbox-caption">
+          {onUpdate ? (
+            <input
+              value={caption}
+              maxLength={160}
+              onChange={(event) => setCaption(event.target.value)}
+            />
+          ) : (
+            <strong>{photo.caption}</strong>
+          )}
+          {onUpdate && (
+            <button type="button" onClick={() => void saveCaption()} disabled={saving}>
+              Save name
+            </button>
+          )}
+          {onDelete && (
+            <button
+              className="photo-delete"
+              type="button"
+              onClick={() => void removePhoto()}
+              disabled={saving}
+            >
+              Delete
+            </button>
+          )}
+          {error && <p>{error}</p>}
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function ExercisePicker({
   exercises,
   currentBodyweight,
@@ -1415,9 +1967,11 @@ function RestTimer({
 function ProgressScreen({
   exercises,
   currentBodyweight,
+  embedded = false,
 }: {
   exercises: Exercise[];
   currentBodyweight: number | null;
+  embedded?: boolean;
 }) {
   const strengthExercises = exercises.filter((exercise) => exercise.kind === 'strength');
   const [exerciseId, setExerciseId] = useState(strengthExercises[0]?.id ?? '');
@@ -1435,11 +1989,10 @@ function ProgressScreen({
   }, [exerciseId]);
 
   return (
-    <section className="progress-screen content-page">
+    <section className={`progress-screen ${embedded ? '' : 'content-page'}`}>
       <div className="screen-intro">
         <p className="section-kicker">PERFORMANCE</p>
         <h1>Movement progress</h1>
-        <p>Follow your best work over time and spot the trend.</p>
       </div>
       <section className="panel progress-controls">
         <label>
@@ -1544,16 +2097,21 @@ function ProgressChart({
   const maximum = Math.max(...values, 1);
   const minimum = Math.min(...values, 0);
   const width = 340;
-  const height = 170;
-  const padding = 18;
+  const height = 190;
+  const left = 42;
+  const right = 10;
+  const top = 12;
+  const bottom = 34;
   const points = values.map((value, index) => {
-    const x = padding + (index / Math.max(values.length - 1, 1)) * (width - padding * 2);
+    const x = left + (index / Math.max(values.length - 1, 1)) * (width - left - right);
     const y =
       height -
-      padding -
-      ((value - minimum) / Math.max(maximum - minimum, 1)) * (height - padding * 2);
+      bottom -
+      ((value - minimum) / Math.max(maximum - minimum, 1)) * (height - top - bottom);
     return { x, y, value };
   });
+  const yTicks = [minimum, (minimum + maximum) / 2, maximum];
+  const xIndexes = [...new Set([0, Math.floor((values.length - 1) / 2), values.length - 1])];
   return (
     <div className="chart-wrap">
       <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Exercise progress chart">
@@ -1563,19 +2121,54 @@ function ProgressChart({
             <stop offset="1" stopColor="#e14a3b" stopOpacity="0" />
           </linearGradient>
         </defs>
+        {yTicks.map((tick) => {
+          const y =
+            height -
+            bottom -
+            ((tick - minimum) / Math.max(maximum - minimum, 1)) * (height - top - bottom);
+          return (
+            <g className="chart-axis" key={tick}>
+              <line x1={left} x2={width - right} y1={y} y2={y} />
+              <text x={left - 5} y={y + 3} textAnchor="end">
+                {metric === 'volume_kg' ? Math.round(tick).toLocaleString() : tick.toFixed(1)}
+              </text>
+            </g>
+          );
+        })}
+        <line className="chart-axis-line" x1={left} x2={left} y1={top} y2={height - bottom} />
+        <line
+          className="chart-axis-line"
+          x1={left}
+          x2={width - right}
+          y1={height - bottom}
+          y2={height - bottom}
+        />
         <path
           className="chart-area"
-          d={`M ${points[0].x} ${height - padding} ${points.map((point) => `L ${point.x} ${point.y}`).join(' ')} L ${points.at(-1)!.x} ${height - padding} Z`}
+          d={`M ${points[0].x} ${height - bottom} ${points.map((point) => `L ${point.x} ${point.y}`).join(' ')} L ${points.at(-1)!.x} ${height - bottom} Z`}
         />
         <polyline points={points.map((point) => `${point.x},${point.y}`).join(' ')} />
         {points.map((point, index) => (
           <circle key={index} cx={point.x} cy={point.y} r="4" />
         ))}
+        {xIndexes.map((index) => (
+          <text
+            className="chart-x-label"
+            key={index}
+            x={points[index].x}
+            y={height - 11}
+            textAnchor={index === 0 ? 'start' : index === values.length - 1 ? 'end' : 'middle'}
+          >
+            {new Date(`${progress.points[index].workout_date}T12:00:00`).toLocaleDateString(
+              undefined,
+              { month: 'short', day: 'numeric' },
+            )}
+          </text>
+        ))}
+        <text className="chart-y-title" x="4" y="10">
+          {metric === 'volume_kg' ? 'Volume (kg)' : 'Weight (kg)'}
+        </text>
       </svg>
-      <div className="chart-labels">
-        <span>{prettyDate(progress.points[0].workout_date)}</span>
-        <span>{prettyDate(progress.points.at(-1)!.workout_date)}</span>
-      </div>
     </div>
   );
 }
@@ -1632,7 +2225,6 @@ function BodyCompositionScreen({
       <div className="screen-intro">
         <p className="section-kicker">BODY COMPOSITION</p>
         <h1>Track the change.</h1>
-        <p>Log consistently under similar conditions to make the trend more useful.</p>
       </div>
 
       <div className="body-current-grid">
@@ -1756,29 +2348,104 @@ function BodyCompositionScreen({
 function BodyTrendChart({ measurements }: { measurements: BodyMeasurement[] }) {
   const ordered = measurements.slice().reverse();
   const width = 340;
-  const height = 140;
-  const padding = 14;
-  function points(values: Array<number | null>): string {
+  const height = 190;
+  const left = 42;
+  const right = 38;
+  const top = 18;
+  const bottom = 34;
+  const weightValues = ordered.map((item) => item.weight_kg);
+  const fatValues = ordered.map((item) => item.body_fat_pct);
+
+  function range(values: Array<number | null>): { min: number; max: number } | null {
     const present = values.filter((value): value is number => value !== null);
-    if (!present.length) return '';
-    const min = Math.min(...present);
-    const max = Math.max(...present);
+    if (!present.length) return null;
+    const rawMin = Math.min(...present);
+    const rawMax = Math.max(...present);
+    const spread = Math.max(rawMax - rawMin, rawMax * 0.02, 1);
+    return { min: rawMin - spread * 0.15, max: rawMax + spread * 0.15 };
+  }
+
+  function points(
+    values: Array<number | null>,
+    valueRange: { min: number; max: number } | null,
+  ): string {
+    if (!valueRange) return '';
     return values
       .map((value, index) => {
         if (value === null) return null;
-        const x = padding + (index / Math.max(ordered.length - 1, 1)) * (width - padding * 2);
-        const ratio = max === min ? 0.5 : (value - min) / (max - min);
-        const y = height - padding - ratio * (height - padding * 2);
+        const x = left + (index / Math.max(ordered.length - 1, 1)) * (width - left - right);
+        const ratio = (value - valueRange.min) / Math.max(valueRange.max - valueRange.min, 1);
+        const y = height - bottom - ratio * (height - top - bottom);
         return `${x},${y}`;
       })
       .filter(Boolean)
       .join(' ');
   }
+
+  const weightRange = range(weightValues)!;
+  const fatRange = range(fatValues);
+  const yFractions = [0, 0.5, 1];
+  const xIndexes = [...new Set([0, Math.floor((ordered.length - 1) / 2), ordered.length - 1])];
+
   return (
     <div className="body-chart">
       <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Body composition trend">
-        <polyline className="weight-line" points={points(ordered.map((item) => item.weight_kg))} />
-        <polyline className="fat-line" points={points(ordered.map((item) => item.body_fat_pct))} />
+        {yFractions.map((fraction) => {
+          const y = height - bottom - fraction * (height - top - bottom);
+          const weightTick = weightRange.min + fraction * (weightRange.max - weightRange.min);
+          const fatTick = fatRange ? fatRange.min + fraction * (fatRange.max - fatRange.min) : null;
+          return (
+            <g className="chart-axis" key={fraction}>
+              <line x1={left} x2={width - right} y1={y} y2={y} />
+              <text x={left - 5} y={y + 3} textAnchor="end">
+                {weightTick.toFixed(1)}
+              </text>
+              {fatTick !== null && (
+                <text className="fat-axis-label" x={width - right + 5} y={y + 3} textAnchor="start">
+                  {fatTick.toFixed(1)}
+                </text>
+              )}
+            </g>
+          );
+        })}
+        <line className="chart-axis-line" x1={left} x2={left} y1={top} y2={height - bottom} />
+        <line
+          className="chart-axis-line"
+          x1={left}
+          x2={width - right}
+          y1={height - bottom}
+          y2={height - bottom}
+        />
+        <polyline className="weight-line" points={points(weightValues, weightRange)} />
+        <polyline className="fat-line" points={points(fatValues, fatRange)} />
+        {xIndexes.map((index) => {
+          const x = left + (index / Math.max(ordered.length - 1, 1)) * (width - left - right);
+          return (
+            <text
+              className="chart-x-label"
+              key={index}
+              x={x}
+              y={height - 11}
+              textAnchor={index === 0 ? 'start' : index === ordered.length - 1 ? 'end' : 'middle'}
+            >
+              {new Date(`${ordered[index].measurement_date}T12:00:00`).toLocaleDateString(
+                undefined,
+                {
+                  month: 'short',
+                  day: 'numeric',
+                },
+              )}
+            </text>
+          );
+        })}
+        <text className="chart-y-title weight-axis-title" x="4" y="11">
+          Weight kg
+        </text>
+        {fatRange && (
+          <text className="chart-y-title fat-axis-title" x={width - 3} y="11" textAnchor="end">
+            Body fat %
+          </text>
+        )}
       </svg>
       <div>
         <span>
@@ -1795,6 +2462,9 @@ function BodyTrendChart({ measurements }: { measurements: BodyMeasurement[] }) {
 function HistoryScreen({
   workouts,
   measurements,
+  exercises,
+  currentBodyweight,
+  onEdit,
   onDelete,
   onImport,
   onExport,
@@ -1802,109 +2472,155 @@ function HistoryScreen({
 }: {
   workouts: TrackedWorkout[];
   measurements: BodyMeasurement[];
+  exercises: Exercise[];
+  currentBodyweight: number | null;
+  onEdit: (workout: TrackedWorkout) => void;
   onDelete: (workout: TrackedWorkout) => void;
   onImport: (file: File) => Promise<void>;
   onExport: () => Promise<void>;
   onDeleteSamples: () => Promise<void>;
 }) {
   const [openId, setOpenId] = useState<string | null>(null);
+  const [section, setSection] = useState<'history' | 'progress'>('history');
   const [importing, setImporting] = useState(false);
+  const [expandedPhoto, setExpandedPhoto] = useState<MachinePhoto | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   return (
     <section className="history-screen content-page">
-      <div className="screen-intro history-intro">
-        <div>
-          <p className="section-kicker">TRAINING LOG</p>
-          <h1>Workout history</h1>
-          <p>
-            {workouts.length} saved {workouts.length === 1 ? 'session' : 'sessions'}.
-          </p>
-        </div>
-        <div className="data-actions">
-          <button onClick={() => fileInput.current?.click()} disabled={importing}>
-            {importing ? 'Importing…' : '↑ Import CSV'}
-          </button>
-          <button onClick={() => void onExport()}>↓ Export CSV</button>
-          {workouts.some((workout) => workout.is_sample) && (
-            <button className="sample-clear" onClick={() => void onDeleteSamples()}>
-              Remove samples
-            </button>
-          )}
-          <input
-            ref={fileInput}
-            className="sr-only"
-            type="file"
-            accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values"
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              if (!file) return;
-              setImporting(true);
-              void onImport(file).finally(() => {
-                setImporting(false);
-                event.target.value = '';
-              });
-            }}
-          />
-        </div>
+      <div className="history-section-tabs">
+        <button
+          className={section === 'history' ? 'active' : ''}
+          onClick={() => setSection('history')}
+        >
+          Workout history
+        </button>
+        <button
+          className={section === 'progress' ? 'active' : ''}
+          onClick={() => setSection('progress')}
+        >
+          Exercise progress
+        </button>
       </div>
-      {!workouts.length && (
-        <EmptyState title="Your log is empty" body="Your completed workouts will show up here." />
-      )}
-      {workouts.map((workout) => {
-        const open = openId === workout.id;
-        const workoutBodyweight =
-          bodyweightForDate(measurements, workout.workout_date) ??
-          workout.movements
-            .flatMap((movement) => movement.sets)
-            .find((item) => item.bodyweight_kg !== null)?.bodyweight_kg ??
-          null;
-        return (
-          <article className={`history-card panel ${open ? 'open' : ''}`} key={workout.id}>
-            <button
-              className="history-card-summary"
-              onClick={() => setOpenId(open ? null : workout.id)}
-            >
-              <i style={{ background: categoryColors[workout.category] }} />
-              <div>
-                <span>
-                  {categoryNames[workout.category]}
-                  {workout.is_sample ? ' · SAMPLE' : ''}
-                </span>
-                <strong>{workout.name}</strong>
-                <small>
-                  {prettyDate(workout.workout_date)} · {workout.duration_minutes ?? '–'} min
-                </small>
-              </div>
-              <b>{open ? '−' : '+'}</b>
-            </button>
-            {open && (
-              <div className="history-detail">
-                {workout.movements.map((movement) => (
-                  <div className="history-movement" key={movement.id}>
-                    <strong>
-                      {movement.exercise.name}
-                      {workoutBodyweight !== null && ` @ ${workoutBodyweight} kg`}
-                    </strong>
-                    <HistorySetFlow sets={movement.sets.filter((item) => item.completed)} />
-                    {movement.sets
-                      .filter((item) => item.notes)
-                      .map((item) => (
-                        <small key={item.id}>
-                          Set {item.order_index + 1}: {item.notes}
-                        </small>
-                      ))}
-                    {movement.notes && <MovementNotes notes={movement.notes} />}
-                  </div>
-                ))}
-                {workout.notes && <p>{workout.notes}</p>}
-                <button className="delete-workout" onClick={() => onDelete(workout)}>
-                  Delete workout
+      {section === 'progress' ? (
+        <ProgressScreen exercises={exercises} currentBodyweight={currentBodyweight} embedded />
+      ) : (
+        <>
+          <div className="screen-intro history-intro">
+            <div>
+              <p className="section-kicker">TRAINING LOG</p>
+              <h1>Workout history</h1>
+            </div>
+            <div className="data-actions">
+              <button onClick={() => fileInput.current?.click()} disabled={importing}>
+                {importing ? 'Importing…' : '↑ Import CSV'}
+              </button>
+              <button onClick={() => void onExport()}>↓ Export CSV</button>
+              {workouts.some((workout) => workout.is_sample) && (
+                <button className="sample-clear" onClick={() => void onDeleteSamples()}>
+                  Remove samples
                 </button>
-              </div>
-            )}
-          </article>
-        );
-      })}
+              )}
+              <input
+                ref={fileInput}
+                className="sr-only"
+                type="file"
+                accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (!file) return;
+                  setImporting(true);
+                  void onImport(file).finally(() => {
+                    setImporting(false);
+                    event.target.value = '';
+                  });
+                }}
+              />
+            </div>
+          </div>
+          {!workouts.length && (
+            <EmptyState
+              title="Your log is empty"
+              body="Your completed workouts will show up here."
+            />
+          )}
+          {workouts.map((workout) => {
+            const open = openId === workout.id;
+            const workoutBodyweight =
+              bodyweightForDate(measurements, workout.workout_date) ??
+              workout.movements
+                .flatMap((movement) => movement.sets)
+                .find((item) => item.bodyweight_kg !== null)?.bodyweight_kg ??
+              null;
+            return (
+              <article className={`history-card panel ${open ? 'open' : ''}`} key={workout.id}>
+                <button
+                  className="history-card-summary"
+                  onClick={() => setOpenId(open ? null : workout.id)}
+                >
+                  <i style={{ background: categoryColors[workout.category] }} />
+                  <div>
+                    <span>
+                      {categoryNames[workout.category]}
+                      {workout.is_sample ? ' · SAMPLE' : ''}
+                    </span>
+                    <strong>{workout.name}</strong>
+                    <small>
+                      {prettyDate(workout.workout_date)} · {workout.duration_minutes ?? '–'} min
+                    </small>
+                  </div>
+                  <b>{open ? '−' : '+'}</b>
+                </button>
+                {open && (
+                  <div className="history-detail">
+                    {workout.movements.map((movement) => (
+                      <div className="history-movement" key={movement.id}>
+                        <strong>
+                          {movement.exercise.name}
+                          {workoutBodyweight !== null && ` @ ${workoutBodyweight} kg`}
+                        </strong>
+                        {movement.machine_photos.length > 0 && (
+                          <div className="history-machine-photos">
+                            {movement.machine_photos.map((photo) => (
+                              <button
+                                type="button"
+                                key={photo.id}
+                                onClick={() => setExpandedPhoto(photo)}
+                                aria-label={`Expand ${photo.caption}`}
+                              >
+                                <img src={photo.thumbnail_url} alt={photo.caption} loading="lazy" />
+                                <span>{photo.caption}</span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                        <HistorySetFlow sets={movement.sets.filter((item) => item.completed)} />
+                        {movement.sets
+                          .filter((item) => item.notes)
+                          .map((item) => (
+                            <small key={item.id}>
+                              Set {item.order_index + 1}: {item.notes}
+                            </small>
+                          ))}
+                        {movement.notes && <MovementNotes notes={movement.notes} />}
+                      </div>
+                    ))}
+                    {workout.notes && <p>{workout.notes}</p>}
+                    <div className="workout-actions">
+                      <button onClick={() => onEdit(workout)}>Edit workout</button>
+                      <button className="delete-workout" onClick={() => onDelete(workout)}>
+                        Delete workout
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </article>
+            );
+          })}
+        </>
+      )}
+      {expandedPhoto && (
+        <MachinePhotoLightbox photo={expandedPhoto} onClose={() => setExpandedPhoto(null)} />
+      )}
     </section>
   );
 }

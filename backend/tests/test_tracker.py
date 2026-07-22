@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 from datetime import date
+from io import BytesIO
+
+from PIL import Image
+from pillow_heif import from_pillow
 
 
 def workout_payload(exercise_id: str) -> dict:
     return {
         "name": "Friday push",
-        "workout_date": "2026-07-17",
+        "workout_date": date.today().isoformat(),
         "category": "push",
         "notes": "Strong session",
         "duration_minutes": 62,
@@ -232,3 +236,151 @@ def test_sample_seed_creates_one_week_once(client):
     with SessionLocal() as db:
         assert seed_sample_workouts(db) == 0
     assert client.get("/api/workouts").json() == []
+
+
+def test_machine_photos_are_processed_pinned_and_protected_while_referenced(client):
+    exercise = next(
+        item for item in client.get("/api/exercises").json() if item["name"] == "Leg Curl"
+    )
+    image_buffer = BytesIO()
+    source = Image.new("RGB", (1200, 2400), "#e86f35")
+    exif = source.getexif()
+    exif[274] = 6  # Rotate a portrait sensor image into landscape display orientation.
+    source.save(image_buffer, format="JPEG", exif=exif)
+
+    uploaded = client.post(
+        f"/api/exercises/{exercise['id']}/machine-photos",
+        data={"caption": "Hammer Strength lying leg curl"},
+        files={"file": ("../../machine.jpg", image_buffer.getvalue(), "image/jpeg")},
+    )
+
+    assert uploaded.status_code == 201
+    photo = uploaded.json()
+    assert photo["caption"] == "Hammer Strength lying leg curl"
+    assert (photo["width"], photo["height"]) == (1800, 900)
+    assert photo["thumbnail_url"].endswith("variant=thumbnail")
+    assert client.get(f"/api/exercises/{exercise['id']}/machine-photos").json() == [photo]
+
+    full = client.get(photo["full_url"])
+    thumbnail = client.get(photo["thumbnail_url"])
+    assert full.status_code == thumbnail.status_code == 200
+    assert full.headers["content-type"] == "image/webp"
+    with Image.open(BytesIO(full.content)) as decoded_full:
+        assert decoded_full.size == (1800, 900)
+        assert decoded_full.format == "WEBP"
+    with Image.open(BytesIO(thumbnail.content)) as decoded_thumbnail:
+        assert max(decoded_thumbnail.size) == 360
+
+    renamed = client.patch(
+        f"/api/machine-photos/{photo['id']}",
+        json={"caption": "Life Fitness lying leg curl"},
+    )
+    assert renamed.status_code == 200
+    assert renamed.json()["caption"] == "Life Fitness lying leg curl"
+
+    payload = workout_payload(exercise["id"])
+    payload["movements"][0]["machine_photo_ids"] = [photo["id"]]
+    workout = client.post("/api/workouts", json=payload)
+    assert workout.status_code == 201
+    assert workout.json()["movements"][0]["machine_photos"][0]["id"] == photo["id"]
+
+    updated = client.put(f"/api/workouts/{workout.json()['id']}", json=payload)
+    assert updated.status_code == 200
+    assert updated.json()["movements"][0]["machine_photos"][0]["id"] == photo["id"]
+    assert client.delete(f"/api/machine-photos/{photo['id']}").status_code == 409
+
+    assert client.delete(f"/api/workouts/{workout.json()['id']}").status_code == 204
+    assert client.delete(f"/api/machine-photos/{photo['id']}").status_code == 204
+    assert client.get(photo["full_url"]).status_code == 404
+
+
+def test_machine_photo_rejects_invalid_images_and_cross_exercise_pins(client):
+    exercises = client.get("/api/exercises").json()
+    bench = next(item for item in exercises if item["name"] == "Barbell Bench Press")
+    squat = next(item for item in exercises if item["name"] == "Back Squat")
+    invalid = client.post(
+        f"/api/exercises/{bench['id']}/machine-photos",
+        data={"caption": "Not really a machine"},
+        files={"file": ("fake.jpg", b"not an image", "image/jpeg")},
+    )
+    assert invalid.status_code == 422
+
+    image_buffer = BytesIO()
+    Image.new("RGB", (50, 50), "black").save(image_buffer, format="PNG")
+    photo = client.post(
+        f"/api/exercises/{bench['id']}/machine-photos",
+        data={"caption": "Bench station"},
+        files={"file": ("bench.png", image_buffer.getvalue(), "image/png")},
+    ).json()
+    payload = workout_payload(squat["id"])
+    payload["movements"][0]["machine_photo_ids"] = [photo["id"]]
+    response = client.post("/api/workouts", json=payload)
+    assert response.status_code == 422
+    assert "must belong" in response.json()["error"]["message"]
+
+
+def test_iphone_heic_machine_photo_is_accepted_and_converted_to_webp(client):
+    exercise = next(
+        item for item in client.get("/api/exercises").json() if item["name"] == "Leg Press"
+    )
+    heic_buffer = BytesIO()
+    from_pillow(Image.new("RGB", (800, 1200), "#263242")).save(heic_buffer)
+
+    uploaded = client.post(
+        f"/api/exercises/{exercise['id']}/machine-photos",
+        data={"caption": "Life Fitness leg press"},
+        files={"file": ("IMG_1234.HEIC", heic_buffer.getvalue(), "image/heic")},
+    )
+
+    assert uploaded.status_code == 201
+    image = client.get(uploaded.json()["full_url"])
+    assert image.status_code == 200
+    assert image.headers["content-type"] == "image/webp"
+    with Image.open(BytesIO(image.content)) as decoded:
+        assert decoded.format == "WEBP"
+        assert decoded.size == (800, 1200)
+
+
+def test_training_mode_changes_rpe_aware_weekly_goal(client):
+    exercise = next(
+        item
+        for item in client.get("/api/exercises").json()
+        if item["name"] == "Barbell Bench Press"
+    )
+    payload = workout_payload(exercise["id"])
+    payload["movements"][0]["sets"] = [
+        {"reps": 8, "weight_kg": 80, "rpe": 8, "completed": True},
+        {"reps": 8, "weight_kg": 80, "rpe": 6, "completed": True},
+        {"reps": 8, "weight_kg": 80, "rpe": None, "completed": True},
+        {"reps": 5, "weight_kg": 20, "rpe": 8, "warmup": True, "completed": True},
+    ]
+    assert client.post("/api/workouts", json=payload).status_code == 201
+
+    dashboard = client.get("/api/dashboard").json()
+    goal = dashboard["weekly_goal"]
+    assert dashboard["training_mode"] == "maintenance"
+    assert goal["target_sets_per_muscle"] == 12
+    assert goal["raw_sets"] == 3
+    assert goal["effective_sets"] == 2
+    assert goal["unrated_sets"] == 1
+    assert goal["low_rpe_sets"] == 1
+    assert goal["rpe_logging_percent"] == 66.7
+    assert goal["overall_percent"] == 16.7
+    assert goal["muscle_groups"] == [
+        {
+            "muscle_group": "Chest",
+            "raw_sets": 3.0,
+            "effective_sets": 2.0,
+            "target_sets": 12,
+            "average_rpe": 7.0,
+            "status": "below",
+        }
+    ]
+
+    changed = client.put("/api/training-mode", json={"mode": "cut"})
+    assert changed.status_code == 200
+    assert changed.json() == {"mode": "cut"}
+    cut_dashboard = client.get("/api/dashboard").json()
+    assert cut_dashboard["weekly_goal"]["target_sets_per_muscle"] == 10
+    assert cut_dashboard["weekly_goal"]["overall_percent"] == 20.0
+    assert "Cut goal" in cut_dashboard["recommendation"]["reason"]
