@@ -77,6 +77,15 @@ export type WorkoutCategory =
 export type ExerciseKind = 'strength' | 'cardio';
 
 export type TrainingMode = 'cut' | 'maintenance' | 'bulk';
+export type SetType = 'warmup' | 'normal' | 'drop';
+export type PersonalRecordType =
+  'weight' | 'reps_at_weight' | 'estimated_1rm' | 'duration' | 'distance';
+
+export interface MuscleContribution {
+  muscle_name: string;
+  role: 'primary' | 'secondary';
+  contribution_factor: number;
+}
 
 export interface Exercise {
   id: string;
@@ -86,6 +95,7 @@ export interface Exercise {
   muscle_group: string;
   equipment: string | null;
   is_custom: boolean;
+  muscle_contributions: MuscleContribution[];
 }
 
 export interface MachinePhoto {
@@ -111,6 +121,9 @@ export interface TrackedSet {
   bodyweight_kg: number | null;
   percentile: number | null;
   warmup: boolean;
+  set_type: SetType;
+  failed: boolean;
+  target_reps: number | null;
   notes: string | null;
   completed: boolean;
 }
@@ -122,6 +135,8 @@ export interface TrackedMovement {
   exercise: Exercise;
   sets: TrackedSet[];
   machine_photos: MachinePhoto[];
+  superset_group_id: string | null;
+  superset_name: string | null;
 }
 
 export interface TrackedWorkout {
@@ -147,6 +162,9 @@ export interface WorkoutSetInput {
   bodyweight_kg?: number | null;
   percentile?: number | null;
   warmup?: boolean;
+  set_type?: SetType;
+  failed?: boolean;
+  target_reps?: number | null;
   notes: string | null;
   completed: boolean;
 }
@@ -161,6 +179,7 @@ export interface WorkoutInput {
     exercise_id: string;
     notes: string | null;
     machine_photo_ids: string[];
+    superset_key?: string | null;
     sets: WorkoutSetInput[];
   }>;
 }
@@ -260,7 +279,81 @@ export interface DashboardData {
   recommendation: WorkoutRecommendation;
   training_mode: TrainingMode;
   weekly_goal: WeeklyGoal;
+  muscle_volume: MuscleVolume[];
+  zone2: Zone2Week;
   recent_workouts: TrackedWorkout[];
+}
+
+export interface MuscleVolume {
+  muscle_name: string;
+  set_total: number;
+}
+
+export interface PersonalRecord {
+  id: string;
+  exercise_id: string;
+  workout_id: string;
+  set_id: string;
+  achieved_date: string;
+  record_type: PersonalRecordType;
+  value: number;
+  unit: string;
+  normalized_weight: number | null;
+  formula: string | null;
+  exercise_name: string | null;
+}
+
+export interface TrainingPreferences {
+  preferred_weight_unit: 'kg' | 'lb';
+  week_start: 'monday' | 'sunday' | 'saturday';
+  zone2_goal_minutes: number;
+}
+
+export interface Zone2Week {
+  week_start: string;
+  week_end: string;
+  goal_minutes: number;
+  completed_minutes: number;
+  remaining_minutes: number;
+  percentage: number;
+  complete: boolean;
+}
+
+export interface CardioSessionInput {
+  session_date: string;
+  activity_type: string;
+  duration_minutes: number;
+  intensity: string | null;
+  zone: string | null;
+  qualifies_zone2: boolean;
+  notes: string | null;
+}
+
+export interface CardioSession extends CardioSessionInput {
+  id: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CardioOverview {
+  preferences: TrainingPreferences;
+  current_week: Zone2Week;
+  previous_weeks: Zone2Week[];
+  sessions: CardioSession[];
+}
+
+export interface BodyWeightGoalInput {
+  start_date: string;
+  target_date: string;
+  start_weight_kg: number;
+  target_weight_kg: number;
+  mode: TrainingMode;
+  active: boolean;
+}
+
+export interface BodyWeightGoal extends BodyWeightGoalInput {
+  id: string;
+  created_at: string;
 }
 
 export interface ProgressPoint {

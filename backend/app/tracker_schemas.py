@@ -5,7 +5,22 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from .models import ExerciseKind, TrainingMode, WorkoutCategory
+from .models import (
+    ExerciseKind,
+    MuscleRole,
+    PersonalRecordType,
+    SetType,
+    TrainingMode,
+    WorkoutCategory,
+)
+
+
+class MuscleContributionRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    muscle_name: str
+    role: MuscleRole
+    contribution_factor: float
 
 
 class ExerciseCreate(BaseModel):
@@ -31,6 +46,7 @@ class ExerciseRead(BaseModel):
     muscle_group: str
     equipment: str | None
     is_custom: bool
+    muscle_contributions: list[MuscleContributionRead] = []
 
 
 class MachinePhotoCaptionUpdate(BaseModel):
@@ -65,6 +81,9 @@ class WorkoutSetCreate(BaseModel):
     bodyweight_kg: float | None = Field(default=None, ge=0, le=1_000)
     percentile: float | None = Field(default=None, ge=0, le=100)
     warmup: bool = False
+    set_type: SetType = SetType.NORMAL
+    failed: bool = False
+    target_reps: int | None = Field(default=None, ge=0, le=10_000)
     notes: str | None = Field(default=None, max_length=2_000)
     completed: bool = True
 
@@ -73,11 +92,19 @@ class WorkoutSetCreate(BaseModel):
     def clean_notes(cls, value: str | None) -> str | None:
         return value.strip() or None if isinstance(value, str) else value
 
+    @model_validator(mode="after")
+    def synchronize_warmup(self) -> WorkoutSetCreate:
+        if self.warmup:
+            self.set_type = SetType.WARMUP
+        self.warmup = self.set_type == SetType.WARMUP
+        return self
+
 
 class WorkoutMovementCreate(BaseModel):
     exercise_id: str
     notes: str | None = Field(default=None, max_length=2_000)
     machine_photo_ids: list[str] = Field(default_factory=list, max_length=20)
+    superset_key: str | None = Field(default=None, max_length=50)
     sets: list[WorkoutSetCreate] = Field(min_length=1, max_length=100)
 
     @field_validator("notes", mode="before")
@@ -110,6 +137,9 @@ class TrainingWorkoutCreate(BaseModel):
     def require_completed_set(self) -> TrainingWorkoutCreate:
         if not any(item.completed for movement in self.movements for item in movement.sets):
             raise ValueError("A workout must contain at least one completed set.")
+        exercise_ids = [movement.exercise_id for movement in self.movements]
+        if len(exercise_ids) != len(set(exercise_ids)):
+            raise ValueError("An exercise can only be added once per workout.")
         return self
 
 
@@ -127,6 +157,9 @@ class WorkoutSetRead(BaseModel):
     bodyweight_kg: float | None
     percentile: float | None
     warmup: bool
+    set_type: SetType
+    failed: bool
+    target_reps: int | None
     notes: str | None
     completed: bool
 
@@ -139,6 +172,8 @@ class WorkoutMovementRead(BaseModel):
     notes: str | None
     exercise: ExerciseRead
     machine_photos: list[MachinePhotoRead] = []
+    superset_group_id: str | None
+    superset_name: str | None = None
     sets: list[WorkoutSetRead] = []
 
 
@@ -268,6 +303,99 @@ class BodyMeasurementRead(BaseModel):
     created_at: datetime
 
 
+class BodyWeightGoalCreate(BaseModel):
+    start_date: date
+    target_date: date
+    start_weight_kg: float = Field(gt=0, le=500)
+    target_weight_kg: float = Field(gt=0, le=500)
+    mode: TrainingMode
+    active: bool = True
+
+    @model_validator(mode="after")
+    def dates_are_ordered(self) -> BodyWeightGoalCreate:
+        if self.target_date < self.start_date:
+            raise ValueError("Target date must be on or after the start date.")
+        return self
+
+
+class BodyWeightGoalRead(BodyWeightGoalCreate):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    created_at: datetime
+
+
+class PersonalRecordRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    exercise_id: str
+    workout_id: str
+    set_id: str
+    achieved_date: date
+    record_type: PersonalRecordType
+    value: float
+    unit: str
+    normalized_weight: float | None
+    formula: str | None
+    exercise_name: str | None = None
+
+
+class MuscleVolumeRead(BaseModel):
+    muscle_name: str
+    set_total: float
+
+
+class CardioSessionCreate(BaseModel):
+    session_date: date
+    activity_type: str = Field(min_length=1, max_length=100)
+    duration_minutes: int = Field(gt=0, le=1_440)
+    intensity: str | None = Field(default=None, max_length=100)
+    zone: str | None = Field(default=None, max_length=30)
+    qualifies_zone2: bool = False
+    notes: str | None = Field(default=None, max_length=2_000)
+
+    @field_validator("activity_type", "intensity", "zone", "notes", mode="before")
+    @classmethod
+    def clean_cardio_strings(cls, value: str | None) -> str | None:
+        return value.strip() or None if isinstance(value, str) else value
+
+
+class CardioSessionRead(CardioSessionCreate):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class TrainingPreferencesUpdate(BaseModel):
+    preferred_weight_unit: Literal["kg", "lb"]
+    week_start: Literal["monday", "sunday", "saturday"]
+    zone2_goal_minutes: int = Field(ge=1, le=10_080)
+
+
+class TrainingPreferencesRead(TrainingPreferencesUpdate):
+    pass
+
+
+class Zone2WeekRead(BaseModel):
+    week_start: date
+    week_end: date
+    goal_minutes: int
+    completed_minutes: int
+    remaining_minutes: int
+    percentage: float
+    complete: bool
+
+
+class CardioOverviewRead(BaseModel):
+    preferences: TrainingPreferencesRead
+    current_week: Zone2WeekRead
+    previous_weeks: list[Zone2WeekRead]
+    sessions: list[CardioSessionRead]
+
+
 class DashboardRead(BaseModel):
     workouts_this_week: int
     sets_this_week: int
@@ -278,6 +406,8 @@ class DashboardRead(BaseModel):
     recommendation: WorkoutRecommendationRead
     training_mode: TrainingMode
     weekly_goal: WeeklyGoalRead
+    muscle_volume: list[MuscleVolumeRead]
+    zone2: Zone2WeekRead
     recent_workouts: list[TrainingWorkoutRead]
 
 

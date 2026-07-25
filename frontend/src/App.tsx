@@ -1,11 +1,16 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import type { CSSProperties } from 'react';
 import { api } from './api';
 import type {
   BodyMeasurement,
+  BodyWeightGoal,
+  CardioOverview,
+  CardioSessionInput,
   DashboardData,
   Exercise,
   ExerciseProgress,
   MachinePhoto,
+  PersonalRecord,
   TrackedSet,
   TrackedWorkout,
   TrainingMode,
@@ -15,7 +20,7 @@ import type {
   WorkoutSetInput,
   WeeklyGoal,
 } from './types';
-import { localDate } from './utils';
+import { localDate, mergeUniqueById, reorder } from './utils';
 import { VideoUpload } from './VideoUpload';
 
 type AppTab = 'dashboard' | 'log' | 'body' | 'history' | 'videos';
@@ -28,6 +33,7 @@ type DraftMovement = {
   exercise: Exercise;
   notes: string;
   machinePhotoIds: string[];
+  supersetKey: string | null;
   sets: DraftSet[];
 };
 
@@ -63,12 +69,135 @@ function emptySet(kind: Exercise['kind'], previous?: DraftSet): DraftSet {
     duration_seconds: kind === 'cardio' ? (previous?.duration_seconds ?? null) : null,
     distance_km: kind === 'cardio' ? (previous?.distance_km ?? null) : null,
     notes: null,
+    set_type: previous?.set_type ?? 'normal',
+    failed: false,
+    target_reps: previous?.target_reps ?? null,
+    warmup: false,
     completed: false,
   };
 }
 
 function numberOrNull(value: string): number | null {
   return value === '' ? null : Number(value);
+}
+
+function moveItem<T>(items: T[], from: number, to: number): T[] {
+  return reorder(items, from, to);
+}
+
+function calculateDraftPrs(
+  movements: DraftMovement[],
+  records: PersonalRecord[],
+  historicalWorkouts: TrackedWorkout[],
+  excludedWorkoutId: string | null,
+): Map<string, Map<string, string[]>> {
+  type State = {
+    weight: number;
+    e1rm: number;
+    duration: number;
+    distance: number;
+    reps: Map<number, number>;
+    unit: 'kg' | 'lb';
+  };
+  const states = new Map<string, State>();
+  for (const record of records.filter((item) => item.workout_id !== excludedWorkoutId)) {
+    const state = states.get(record.exercise_id) ?? {
+      weight: -1,
+      e1rm: -1,
+      duration: -1,
+      distance: -1,
+      reps: new Map(),
+      unit: record.unit === 'lb' ? 'lb' : 'kg',
+    };
+    if (record.record_type === 'weight') state.weight = Math.max(state.weight, record.value);
+    if (record.record_type === 'estimated_1rm') state.e1rm = Math.max(state.e1rm, record.value);
+    if (record.record_type === 'duration') state.duration = Math.max(state.duration, record.value);
+    if (record.record_type === 'distance') state.distance = Math.max(state.distance, record.value);
+    if (record.record_type === 'reps_at_weight' && record.normalized_weight !== null)
+      state.reps.set(
+        record.normalized_weight,
+        Math.max(state.reps.get(record.normalized_weight) ?? -1, record.value),
+      );
+    states.set(record.exercise_id, state);
+  }
+  for (const workout of historicalWorkouts.filter((item) => item.id !== excludedWorkoutId)) {
+    for (const movement of workout.movements) {
+      const state = states.get(movement.exercise.id) ?? {
+        weight: -1,
+        e1rm: -1,
+        duration: -1,
+        distance: -1,
+        reps: new Map(),
+        unit: 'kg' as const,
+      };
+      for (const item of movement.sets) {
+        if (!item.completed || item.set_type === 'warmup' || item.warmup) continue;
+        if (item.failed && (item.target_reps === null || (item.reps ?? 0) < item.target_reps))
+          continue;
+        if (item.weight_kg !== null && item.reps !== null) {
+          const weight =
+            Math.round(item.weight_kg * (state.unit === 'lb' ? 2.2046226218 : 1) * 10) / 10;
+          state.reps.set(weight, Math.max(state.reps.get(weight) ?? 0, item.reps));
+        }
+      }
+      states.set(movement.exercise.id, state);
+    }
+  }
+  const result = new Map<string, Map<string, string[]>>();
+  for (const movement of movements) {
+    const state = states.get(movement.exercise.id) ?? {
+      weight: -1,
+      e1rm: -1,
+      duration: -1,
+      distance: -1,
+      reps: new Map(),
+      unit: 'kg' as const,
+    };
+    const badges = new Map<string, string[]>();
+    for (const item of movement.sets) {
+      const labels: string[] = [];
+      const eligible =
+        item.completed &&
+        item.set_type !== 'warmup' &&
+        !item.warmup &&
+        (!item.failed || (item.target_reps != null && (item.reps ?? 0) >= item.target_reps));
+      if (!eligible) continue;
+      const weight =
+        item.weight_kg === null
+          ? null
+          : Math.round(item.weight_kg * (state.unit === 'lb' ? 2.2046226218 : 1) * 10) / 10;
+      if (weight !== null && weight > state.weight) {
+        state.weight = weight;
+        labels.push('Weight PR');
+      }
+      if (weight !== null && item.reps !== null) {
+        const previousReps = state.reps.get(weight);
+        if (previousReps !== undefined && item.reps > previousReps) {
+          labels.push(`Rep PR @ ${weight} ${state.unit}`);
+        }
+        state.reps.set(weight, Math.max(previousReps ?? 0, item.reps));
+        if (item.reps >= 1 && item.reps <= 30) {
+          const e1rm = Math.round(weight * (1 + item.reps / 30) * 10) / 10;
+          if (e1rm > state.e1rm) {
+            state.e1rm = e1rm;
+            labels.push('Estimated 1RM PR');
+          }
+        }
+      }
+      if ((item.duration_seconds ?? -1) > state.duration) {
+        state.duration = item.duration_seconds ?? -1;
+        labels.push('Duration PR');
+      }
+      if ((item.distance_km ?? -1) > state.distance) {
+        state.distance = item.distance_km ?? -1;
+        labels.push('Distance PR');
+      }
+      if (labels.length) badges.set(item.key, labels);
+    }
+    states.set(movement.exercise.id, state);
+    result.set(movement.key, badges);
+  }
+  return result;
 }
 
 function formatDuration(totalSeconds: number): string {
@@ -83,6 +212,16 @@ function prettyDate(value: string): string {
     day: 'numeric',
     year: 'numeric',
   }).format(new Date(`${value}T12:00:00`));
+}
+
+function recordTypeLabel(type: PersonalRecord['record_type']): string {
+  return {
+    weight: 'weight PR',
+    reps_at_weight: 'rep PR',
+    estimated_1rm: 'estimated 1RM PR',
+    duration: 'duration PR',
+    distance: 'distance PR',
+  }[type];
 }
 
 function bodyweightForDate(measurements: BodyMeasurement[], workoutDate: string): number | null {
@@ -103,6 +242,8 @@ export function App() {
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [workouts, setWorkouts] = useState<TrackedWorkout[]>([]);
   const [measurements, setMeasurements] = useState<BodyMeasurement[]>([]);
+  const [personalRecords, setPersonalRecords] = useState<PersonalRecord[]>([]);
+  const [completionRecords, setCompletionRecords] = useState<PersonalRecord[]>([]);
   const [workoutStartDate, setWorkoutStartDate] = useState(localDate());
   const [editingWorkout, setEditingWorkout] = useState<TrackedWorkout | null>(null);
   const [loading, setLoading] = useState(true);
@@ -110,16 +251,19 @@ export function App() {
 
   async function refreshData() {
     try {
-      const [nextDashboard, nextExercises, nextWorkouts, nextMeasurements] = await Promise.all([
-        api.dashboard(),
-        api.listExercises(),
-        api.listWorkouts(),
-        api.listBodyMeasurements(),
-      ]);
+      const [nextDashboard, nextExercises, nextWorkouts, nextMeasurements, nextRecords] =
+        await Promise.all([
+          api.dashboard(),
+          api.listExercises(),
+          api.listWorkouts(),
+          api.listBodyMeasurements(),
+          api.listPersonalRecords(),
+        ]);
       setDashboard(nextDashboard);
       setExercises(nextExercises);
       setWorkouts(nextWorkouts);
       setMeasurements(nextMeasurements);
+      setPersonalRecords(nextRecords);
       setMessage(null);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Could not load your training data.');
@@ -137,12 +281,22 @@ export function App() {
   }, [tab]);
 
   async function saveWorkout(payload: WorkoutInput) {
-    if (editingWorkout) await api.updateWorkout(editingWorkout.id, payload);
-    else await api.createWorkout(payload);
+    const saved = editingWorkout
+      ? await api.updateWorkout(editingWorkout.id, payload)
+      : await api.createWorkout(payload);
+    const newRecords = await api.listPersonalRecords({ workoutId: saved.id });
     await refreshData();
     setTab(editingWorkout ? 'history' : 'dashboard');
-    setMessage(editingWorkout ? 'Workout changes saved.' : 'Workout saved. Nice work.');
+    setMessage(
+      newRecords.length
+        ? `Workout saved — ${newRecords.length} PR${newRecords.length === 1 ? '' : 's'}! ${newRecords.map((record) => recordTypeLabel(record.record_type)).join(', ')}`
+        : editingWorkout
+          ? 'Workout changes saved.'
+          : 'Workout saved. Nice work.',
+    );
     setEditingWorkout(null);
+    setCompletionRecords(newRecords);
+    return newRecords;
   }
 
   async function deleteWorkout(workout: TrackedWorkout) {
@@ -245,6 +399,34 @@ export function App() {
           {message}
         </button>
       )}
+      {completionRecords.length > 0 && (
+        <div className="modal-backdrop pr-summary-backdrop">
+          <section
+            className="pr-summary panel"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Workout personal records"
+          >
+            <span className="pr-trophy">🏆</span>
+            <p className="section-kicker">WORKOUT COMPLETE</p>
+            <h2>
+              {completionRecords.length} new PR{completionRecords.length === 1 ? '' : 's'}
+            </h2>
+            {completionRecords.map((record) => (
+              <div key={record.id}>
+                <strong>{record.exercise_name}</strong>
+                <span>
+                  {recordTypeLabel(record.record_type)} · {record.value} {record.unit}
+                  {record.record_type === 'reps_at_weight' && record.normalized_weight !== null
+                    ? ` @ ${record.normalized_weight} ${personalRecords.find((item) => item.exercise_id === record.exercise_id && (item.record_type === 'weight' || item.record_type === 'estimated_1rm'))?.unit ?? 'kg'}`
+                    : ''}
+                </span>
+              </div>
+            ))}
+            <button onClick={() => setCompletionRecords([])}>Done</button>
+          </section>
+        </div>
+      )}
 
       <main className={`tracker-content ${tab === 'videos' ? 'video-content' : ''}`}>
         {loading && <LoadingState />}
@@ -268,6 +450,8 @@ export function App() {
             initialDate={workoutStartDate}
             initialWorkout={editingWorkout}
             currentBodyweight={measurements[0]?.weight_kg ?? null}
+            personalRecords={personalRecords}
+            historicalWorkouts={workouts}
             onSave={saveWorkout}
             onCancel={() => {
               setTab(editingWorkout ? 'history' : 'dashboard');
@@ -293,6 +477,8 @@ export function App() {
             onImport={importWorkoutCsv}
             onExport={exportWorkoutCsv}
             onDeleteSamples={deleteSampleData}
+            personalRecords={personalRecords}
+            onDataChange={refreshData}
           />
         )}
         {tab === 'videos' && <VideoUpload />}
@@ -414,6 +600,49 @@ function DashboardScreen({
       </div>
 
       <WeeklyGoalCard goal={data.weekly_goal} onModeChange={onTrainingMode} />
+
+      <section className={`panel dashboard-zone2 ${data.zone2.complete ? 'complete' : ''}`}>
+        <div>
+          <p className="section-kicker">ZONE 2</p>
+          <h2>
+            {data.zone2.completed_minutes} / {data.zone2.goal_minutes} minutes
+          </h2>
+          <small>
+            {data.zone2.complete
+              ? 'Goal complete'
+              : `${data.zone2.remaining_minutes} min remaining this week`}
+          </small>
+        </div>
+        <div
+          className="zone2-ring"
+          style={{ '--progress': `${data.zone2.percentage * 3.6}deg` } as CSSProperties}
+        >
+          <strong>{Math.round(data.zone2.percentage)}%</strong>
+        </div>
+      </section>
+
+      <section className="panel muscle-volume-panel">
+        <div className="panel-heading">
+          <div>
+            <p className="section-kicker">MUSCLE VOLUME</p>
+            <h2>Weekly credited sets</h2>
+          </div>
+          <small>Primary 1.0 · secondary 0.5</small>
+        </div>
+        <div className="muscle-volume-grid">
+          {data.muscle_volume.map((item) => (
+            <div key={item.muscle_name}>
+              <span>{item.muscle_name}</span>
+              <strong>
+                {Number.isInteger(item.set_total) ? item.set_total : item.set_total.toFixed(1)} sets
+              </strong>
+            </div>
+          ))}
+          {!data.muscle_volume.length && (
+            <p className="muted-empty">Complete a working set to see muscle volume.</p>
+          )}
+        </div>
+      </section>
 
       <section className="panel heatmap-panel">
         <div className="panel-heading">
@@ -1082,6 +1311,8 @@ function WorkoutLogger({
   initialDate,
   initialWorkout,
   currentBodyweight,
+  personalRecords,
+  historicalWorkouts,
   onSave,
   onCancel,
 }: {
@@ -1090,7 +1321,9 @@ function WorkoutLogger({
   initialDate: string;
   initialWorkout: TrackedWorkout | null;
   currentBodyweight: number | null;
-  onSave: (payload: WorkoutInput) => Promise<void>;
+  personalRecords: PersonalRecord[];
+  historicalWorkouts: TrackedWorkout[];
+  onSave: (payload: WorkoutInput) => Promise<PersonalRecord[]>;
   onCancel: () => void;
 }) {
   const [name, setName] = useState(initialWorkout?.name ?? '');
@@ -1106,6 +1339,7 @@ function WorkoutLogger({
           exercise: movement.exercise,
           notes: movement.notes ?? '',
           machinePhotoIds: movement.machine_photos.map((photo) => photo.id),
+          supersetKey: movement.superset_group_id,
           sets: movement.sets.map((item) => ({
             key: crypto.randomUUID(),
             reps: item.reps,
@@ -1117,6 +1351,9 @@ function WorkoutLogger({
             bodyweight_kg: item.bodyweight_kg,
             percentile: item.percentile,
             warmup: item.warmup,
+            set_type: item.set_type,
+            failed: item.failed,
+            target_reps: item.target_reps,
             notes: item.notes,
             completed: item.completed,
           })),
@@ -1148,19 +1385,104 @@ function WorkoutLogger({
     return () => window.clearInterval(timer);
   }, [restLeft]);
 
-  function addExercise(exercise: Exercise) {
-    setMovements((current) => [
-      ...current,
-      {
-        key: crypto.randomUUID(),
-        exercise,
-        notes: '',
-        machinePhotoIds: [],
-        sets: [emptySet(exercise.kind)],
-      },
-    ]);
+  const [undoDeletion, setUndoDeletion] = useState<{
+    movementKey: string;
+    set: DraftSet;
+    index: number;
+  } | null>(null);
+  const prBadges = useMemo(
+    () =>
+      calculateDraftPrs(movements, personalRecords, historicalWorkouts, initialWorkout?.id ?? null),
+    [movements, personalRecords, historicalWorkouts, initialWorkout?.id],
+  );
+
+  function addExercises(selected: Exercise[]) {
+    setMovements((current) => {
+      const merged = mergeUniqueById(
+        current.map((item) => item.exercise),
+        selected,
+      );
+      const additions = merged.slice(current.length);
+      return [
+        ...current,
+        ...additions.map((exercise) => ({
+          key: crypto.randomUUID(),
+          exercise,
+          notes: '',
+          machinePhotoIds: [],
+          supersetKey: null,
+          sets: [emptySet(exercise.kind)],
+        })),
+      ];
+    });
     if (!name) setName(`${categoryNames[category]} workout`);
     setPickerOpen(false);
+  }
+
+  function moveMovement(index: number, direction: -1 | 1) {
+    setMovements((current) => moveItem(current, index, index + direction));
+  }
+
+  function moveSet(movementKey: string, index: number, direction: -1 | 1) {
+    setMovements((current) =>
+      current.map((movement) =>
+        movement.key === movementKey
+          ? { ...movement, sets: moveItem(movement.sets, index, index + direction) }
+          : movement,
+      ),
+    );
+  }
+
+  function deleteSet(movement: DraftMovement, index: number) {
+    if (movement.sets.length === 1) {
+      setError('An exercise needs at least one set. Remove the exercise instead.');
+      return;
+    }
+    const deleted = movement.sets[index];
+    setMovements((current) =>
+      current.map((item) =>
+        item.key === movement.key
+          ? { ...item, sets: item.sets.filter((_, setIndex) => setIndex !== index) }
+          : item,
+      ),
+    );
+    setUndoDeletion({ movementKey: movement.key, set: deleted, index });
+  }
+
+  function undoSetDeletion() {
+    if (!undoDeletion) return;
+    setMovements((current) =>
+      current.map((movement) => {
+        if (movement.key !== undoDeletion.movementKey) return movement;
+        const sets = [...movement.sets];
+        sets.splice(undoDeletion.index, 0, undoDeletion.set);
+        return { ...movement, sets };
+      }),
+    );
+    setUndoDeletion(null);
+  }
+
+  function toggleSuperset(movementKey: string) {
+    const current = movements.find((item) => item.key === movementKey);
+    if (!current) return;
+    if (current.supersetKey) {
+      const key = current.supersetKey;
+      setMovements((items) =>
+        items.map((item) => (item.supersetKey === key ? { ...item, supersetKey: null } : item)),
+      );
+      return;
+    }
+    const partner = movements.find((item) => item.key !== movementKey && !item.supersetKey);
+    if (!partner) {
+      setError('Add another ungrouped exercise before creating a superset.');
+      return;
+    }
+    const key = crypto.randomUUID();
+    setMovements((items) =>
+      items.map((item) =>
+        item.key === movementKey || item.key === partner.key ? { ...item, supersetKey: key } : item,
+      ),
+    );
   }
 
   function updateSet(movementKey: string, setKey: string, update: Partial<DraftSet>) {
@@ -1229,9 +1551,13 @@ function WorkoutLogger({
             bodyweight_kg: item.bodyweight_kg,
             percentile: item.percentile,
             warmup: item.warmup,
+            set_type: item.set_type,
+            failed: item.failed,
+            target_reps: item.target_reps,
             notes: item.notes,
             completed: item.completed,
           })),
+          superset_key: movement.supersetKey,
         })),
       });
     } catch (saveError) {
@@ -1330,11 +1656,27 @@ function WorkoutLogger({
             key={movement.key}
             movement={movement}
             number={movementIndex + 1}
+            prBadges={prBadges.get(movement.key) ?? new Map()}
+            supersetLabel={
+              movement.supersetKey
+                ? `Superset ${movements
+                    .filter((item) => item.supersetKey === movement.supersetKey)
+                    .map((item) => item.exercise.name)
+                    .join(' + ')}`
+                : null
+            }
             currentBodyweight={currentBodyweight}
             onUpdateSet={(setKey, update) => updateSet(movement.key, setKey, update)}
             onToggleSet={(item) => toggleSet(movement, item)}
             onAddSet={() => addSet(movement)}
             onRemove={() => removeMovement(movement.key)}
+            onMoveUp={() => moveMovement(movementIndex, -1)}
+            onMoveDown={() => moveMovement(movementIndex, 1)}
+            canMoveUp={movementIndex > 0}
+            canMoveDown={movementIndex < movements.length - 1}
+            onMoveSet={(index, direction) => moveSet(movement.key, index, direction)}
+            onDeleteSet={(index) => deleteSet(movement, index)}
+            onSuperset={() => toggleSuperset(movement.key)}
             onMachinePhotos={(machinePhotoIds) =>
               setMovements((current) =>
                 current.map((item) =>
@@ -1370,7 +1712,8 @@ function WorkoutLogger({
         <ExercisePicker
           exercises={exercises}
           currentBodyweight={currentBodyweight}
-          onChoose={addExercise}
+          excludedIds={movements.map((item) => item.exercise.id)}
+          onChoose={addExercises}
           onClose={() => setPickerOpen(false)}
         />
       )}
@@ -1381,7 +1724,57 @@ function WorkoutLogger({
           onSkip={() => setRestLeft(0)}
         />
       )}
+      {undoDeletion && (
+        <div className="undo-toast" role="status">
+          Set deleted <button onClick={undoSetDeletion}>Undo</button>
+        </div>
+      )}
     </section>
+  );
+}
+
+function ExerciseIcon({ exercise, number }: { exercise: Exercise; number?: number }) {
+  const label = `${exercise.name} ${exercise.muscle_group}`.toLowerCase();
+  const kind =
+    exercise.kind === 'cardio'
+      ? 'cardio'
+      : label.includes('squat') || label.includes('leg')
+        ? 'lower'
+        : label.includes('press') || label.includes('fly')
+          ? 'press'
+          : label.includes('row') || label.includes('pull')
+            ? 'pull'
+            : 'strength';
+  return (
+    <span className={`exercise-icon exercise-icon-${kind}`} aria-hidden="true">
+      <svg viewBox="0 0 32 32" focusable="false">
+        {kind === 'cardio' ? (
+          <>
+            <path d="M7 24c4-7 6-10 9-10s4 4 9 4" />
+            <circle cx="16" cy="7" r="3" />
+          </>
+        ) : kind === 'lower' ? (
+          <>
+            <path d="M8 8h16M10 6v4M22 6v4M12 11l4 6 6 3M16 17l-4 9M17 18l5 8" />
+          </>
+        ) : kind === 'press' ? (
+          <>
+            <path d="M5 9v14M27 9v14M5 16h22M10 13v6M22 13v6" />
+            <circle cx="16" cy="23" r="3" />
+          </>
+        ) : kind === 'pull' ? (
+          <>
+            <path d="M5 7h22M8 5v4M24 5v4M16 8v8M16 16l-6 8M16 16l6 8" />
+            <circle cx="16" cy="13" r="3" />
+          </>
+        ) : (
+          <>
+            <path d="M5 16h22M8 12v8M24 12v8M12 14v4M20 14v4" />
+          </>
+        )}
+      </svg>
+      {number !== undefined && <b>{number}</b>}
+    </span>
   );
 }
 
@@ -1395,6 +1788,15 @@ function MovementCard({
   onRemove,
   onMachinePhotos,
   onMovementNotes,
+  prBadges,
+  supersetLabel,
+  onMoveUp,
+  onMoveDown,
+  canMoveUp,
+  canMoveDown,
+  onMoveSet,
+  onDeleteSet,
+  onSuperset,
 }: {
   movement: DraftMovement;
   number: number;
@@ -1405,12 +1807,22 @@ function MovementCard({
   onRemove: () => void;
   onMachinePhotos: (photoIds: string[]) => void;
   onMovementNotes: (value: string) => void;
+  prBadges: Map<string, string[]>;
+  supersetLabel: string | null;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+  canMoveUp: boolean;
+  canMoveDown: boolean;
+  onMoveSet: (index: number, direction: -1 | 1) => void;
+  onDeleteSet: (index: number) => void;
+  onSuperset: () => void;
 }) {
   const cardio = movement.exercise.kind === 'cardio';
   return (
-    <article className="movement-card panel">
+    <article className={`movement-card panel ${supersetLabel ? 'superset-card' : ''}`}>
+      {supersetLabel && <div className="superset-ribbon">{supersetLabel}</div>}
       <header>
-        <span className="movement-number">{number}</span>
+        <ExerciseIcon exercise={movement.exercise} number={number} />
         <div>
           <h2>{movement.exercise.name}</h2>
           <p>
@@ -1418,13 +1830,20 @@ function MovementCard({
             {currentBodyweight !== null && ` · @ ${currentBodyweight} kg`}
           </p>
         </div>
-        <button
-          className="icon-button"
-          onClick={onRemove}
-          aria-label={`Remove ${movement.exercise.name}`}
-        >
-          ×
-        </button>
+        <div className="movement-actions">
+          <button disabled={!canMoveUp} onClick={onMoveUp} aria-label="Move exercise up">
+            ↑
+          </button>
+          <button disabled={!canMoveDown} onClick={onMoveDown} aria-label="Move exercise down">
+            ↓
+          </button>
+          <button onClick={onSuperset} aria-label="Toggle superset">
+            S
+          </button>
+          <button onClick={onRemove} aria-label={`Remove ${movement.exercise.name}`}>
+            ×
+          </button>
+        </div>
       </header>
 
       {!cardio && (
@@ -1454,8 +1873,17 @@ function MovementCard({
         </div>
         {movement.sets.map((item, index) => (
           <Fragment key={item.key}>
-            <div className={`set-row ${item.completed ? 'completed' : ''}`}>
-              <span className="set-index">{index + 1}</span>
+            <div
+              className={`set-row ${item.completed ? 'completed' : ''} ${item.failed ? 'failed-set' : ''} set-type-${item.set_type ?? 'normal'}`}
+            >
+              <span className="set-index">
+                {index + 1}
+                {prBadges.has(item.key) && (
+                  <b className="pr-badge" title={prBadges.get(item.key)?.join(', ')}>
+                    PR
+                  </b>
+                )}
+              </span>
               {cardio ? (
                 <>
                   <input
@@ -1535,6 +1963,22 @@ function MovementCard({
               </button>
               <div className="set-extras">
                 <label>
+                  Type
+                  <select
+                    value={item.set_type ?? (item.warmup ? 'warmup' : 'normal')}
+                    onChange={(event) =>
+                      onUpdateSet(item.key, {
+                        set_type: event.target.value as DraftSet['set_type'],
+                        warmup: event.target.value === 'warmup',
+                      })
+                    }
+                  >
+                    <option value="normal">Working</option>
+                    <option value="warmup">Warm-up</option>
+                    <option value="drop">Drop set</option>
+                  </select>
+                </label>
+                <label>
                   Rest
                   <select
                     value={item.rest_seconds ?? 120}
@@ -1549,12 +1993,62 @@ function MovementCard({
                     ))}
                   </select>
                 </label>
+                <label className="failed-toggle">
+                  <input
+                    type="checkbox"
+                    checked={item.failed ?? false}
+                    onChange={(event) => onUpdateSet(item.key, { failed: event.target.checked })}
+                  />
+                  Failed
+                </label>
+                {item.failed && !cardio && (
+                  <label>
+                    Target reps
+                    <input
+                      type="number"
+                      min="0"
+                      inputMode="numeric"
+                      value={item.target_reps ?? ''}
+                      onChange={(event) =>
+                        onUpdateSet(item.key, { target_reps: numberOrNull(event.target.value) })
+                      }
+                    />
+                  </label>
+                )}
                 <input
                   value={item.notes ?? ''}
                   onChange={(event) => onUpdateSet(item.key, { notes: event.target.value || null })}
                   placeholder="Set note (optional)"
                 />
+                <div className="set-order-actions">
+                  <button
+                    disabled={index === 0}
+                    onClick={() => onMoveSet(index, -1)}
+                    aria-label="Move set up"
+                  >
+                    ↑
+                  </button>
+                  <button
+                    disabled={index === movement.sets.length - 1}
+                    onClick={() => onMoveSet(index, 1)}
+                    aria-label="Move set down"
+                  >
+                    ↓
+                  </button>
+                  <button
+                    className="danger"
+                    onClick={() => onDeleteSet(index)}
+                    aria-label="Delete set"
+                  >
+                    Delete
+                  </button>
+                </div>
               </div>
+              {prBadges.has(item.key) && (
+                <div className="pr-callout" role="status">
+                  🏆 {prBadges.get(item.key)?.join(' · ')}
+                </div>
+              )}
             </div>
             {index < movement.sets.length - 1 && (
               <div className="rest-between" aria-label={`Rest after set ${index + 1}`}>
@@ -1864,18 +2358,22 @@ function MachinePhotoLightbox({
 function ExercisePicker({
   exercises,
   currentBodyweight,
+  excludedIds,
   onChoose,
   onClose,
 }: {
   exercises: Exercise[];
   currentBodyweight: number | null;
-  onChoose: (exercise: Exercise) => void;
+  excludedIds: string[];
+  onChoose: (exercises: Exercise[]) => void;
   onClose: () => void;
 }) {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<WorkoutCategory | 'all'>('all');
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const filtered = exercises.filter(
     (exercise) =>
+      !excludedIds.includes(exercise.id) &&
       (filter === 'all' || exercise.category === filter) &&
       `${exercise.name} ${exercise.muscle_group}`.toLowerCase().includes(search.toLowerCase()),
   );
@@ -1895,7 +2393,8 @@ function ExercisePicker({
         <header>
           <div>
             <p className="section-kicker">EXERCISE LIBRARY</p>
-            <h2>Add movement</h2>
+            <h2>Add exercises</h2>
+            <small>{selectedIds.length} selected</small>
           </div>
           <button className="icon-button" onClick={onClose}>
             ×
@@ -1924,8 +2423,19 @@ function ExercisePicker({
         </div>
         <div className="exercise-list">
           {filtered.map((exercise) => (
-            <button key={exercise.id} onClick={() => onChoose(exercise)}>
-              <i style={{ background: categoryColors[exercise.category] }} />
+            <button
+              key={exercise.id}
+              className={selectedIds.includes(exercise.id) ? 'selected' : ''}
+              aria-pressed={selectedIds.includes(exercise.id)}
+              onClick={() =>
+                setSelectedIds((current) =>
+                  current.includes(exercise.id)
+                    ? current.filter((id) => id !== exercise.id)
+                    : [...current, exercise.id],
+                )
+              }
+            >
+              <ExerciseIcon exercise={exercise} />
               <span>
                 <strong>{exercise.name}</strong>
                 <small>
@@ -1933,11 +2443,20 @@ function ExercisePicker({
                   {currentBodyweight !== null && ` · @ ${currentBodyweight} kg`}
                 </small>
               </span>
-              <b>＋</b>
+              <b>{selectedIds.includes(exercise.id) ? '✓' : '＋'}</b>
             </button>
           ))}
           {!filtered.length && <p className="muted-empty">No exercises match that search.</p>}
         </div>
+        <button
+          className="add-selected-button"
+          disabled={!selectedIds.length}
+          onClick={() =>
+            onChoose(exercises.filter((exercise) => selectedIds.includes(exercise.id)))
+          }
+        >
+          Add selected exercises ({selectedIds.length})
+        </button>
       </section>
     </div>
   );
@@ -2026,6 +2545,11 @@ function ProgressScreen({
           </button>
         </div>
       </section>
+      {metric === 'estimated_1rm' && (
+        <p className="metric-note">
+          Estimated 1RM uses the Epley formula: weight × (1 + reps ÷ 30), for sets of 1–30 reps.
+        </p>
+      )}
       {loading && <LoadingState />}
       {!loading && progress && (
         <>
@@ -2193,7 +2717,34 @@ function BodyCompositionScreen({
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [goals, setGoals] = useState<BodyWeightGoal[]>([]);
+  const [goalTarget, setGoalTarget] = useState('');
+  const [goalDate, setGoalDate] = useState('');
+  const [goalMode, setGoalMode] = useState<TrainingMode>('cut');
   const latest = measurements[0];
+  const activeGoal = goals.find((goal) => goal.active) ?? null;
+
+  useEffect(() => {
+    void api.listBodyWeightGoals().then(setGoals);
+  }, []);
+
+  async function saveGoal() {
+    if (!latest || !goalTarget || !goalDate) {
+      setError('Log a current weight, target weight, and target date first.');
+      return;
+    }
+    const goal = await api.createBodyWeightGoal({
+      start_date: localDate(),
+      target_date: goalDate,
+      start_weight_kg: latest.weight_kg,
+      target_weight_kg: Number(goalTarget),
+      mode: goalMode,
+      active: true,
+    });
+    setGoals((current) => [goal, ...current.map((item) => ({ ...item, active: false }))]);
+    setGoalTarget('');
+    setGoalDate('');
+  }
 
   async function submitMeasurement() {
     const weightValue = Number(weight);
@@ -2239,6 +2790,63 @@ function BodyCompositionScreen({
           suffix={latest ? 'latest estimate' : 'optional'}
         />
       </div>
+
+      <section className="panel body-goal-panel">
+        <div className="panel-heading">
+          <div>
+            <p className="section-kicker">GOAL</p>
+            <h2>Body-weight target</h2>
+          </div>
+        </div>
+        {activeGoal && latest && (
+          <div className="body-goal-progress">
+            <div>
+              <strong>{latest.weight_kg} kg</strong>
+              <span>
+                → {activeGoal.target_weight_kg} kg by {prettyDate(activeGoal.target_date)}
+              </span>
+            </div>
+            <div className="zone2-track">
+              <i
+                style={{
+                  width: `${Math.min(100, Math.max(0, (Math.abs(latest.weight_kg - activeGoal.start_weight_kg) / Math.max(Math.abs(activeGoal.target_weight_kg - activeGoal.start_weight_kg), 0.1)) * 100))}%`,
+                }}
+              />
+            </div>
+          </div>
+        )}
+        <div className="goal-entry-fields">
+          <label>
+            Mode
+            <select
+              value={goalMode}
+              onChange={(event) => setGoalMode(event.target.value as TrainingMode)}
+            >
+              <option value="cut">Cut</option>
+              <option value="maintenance">Maintenance</option>
+              <option value="bulk">Bulk</option>
+            </select>
+          </label>
+          <label>
+            Target kg
+            <input
+              type="number"
+              step="0.1"
+              value={goalTarget}
+              onChange={(event) => setGoalTarget(event.target.value)}
+            />
+          </label>
+          <label>
+            Target date
+            <input
+              type="date"
+              value={goalDate}
+              onChange={(event) => setGoalDate(event.target.value)}
+            />
+          </label>
+          <button onClick={() => void saveGoal()}>Set goal</button>
+        </div>
+      </section>
 
       <section className="panel body-entry-panel">
         <div className="panel-heading">
@@ -2303,7 +2911,7 @@ function BodyCompositionScreen({
               <h2>Body composition</h2>
             </div>
           </div>
-          <BodyTrendChart measurements={measurements} />
+          <BodyTrendChart measurements={measurements} goal={activeGoal} />
         </section>
       )}
 
@@ -2345,7 +2953,13 @@ function BodyCompositionScreen({
   );
 }
 
-function BodyTrendChart({ measurements }: { measurements: BodyMeasurement[] }) {
+function BodyTrendChart({
+  measurements,
+  goal,
+}: {
+  measurements: BodyMeasurement[];
+  goal: BodyWeightGoal | null;
+}) {
   const ordered = measurements.slice().reverse();
   const width = 340;
   const height = 190;
@@ -2382,7 +2996,7 @@ function BodyTrendChart({ measurements }: { measurements: BodyMeasurement[] }) {
       .join(' ');
   }
 
-  const weightRange = range(weightValues)!;
+  const weightRange = range(goal ? [...weightValues, goal.target_weight_kg] : weightValues)!;
   const fatRange = range(fatValues);
   const yFractions = [0, 0.5, 1];
   const xIndexes = [...new Set([0, Math.floor((ordered.length - 1) / 2), ordered.length - 1])];
@@ -2417,6 +3031,21 @@ function BodyTrendChart({ measurements }: { measurements: BodyMeasurement[] }) {
           y2={height - bottom}
         />
         <polyline className="weight-line" points={points(weightValues, weightRange)} />
+        {goal &&
+          (() => {
+            const ratio =
+              (goal.target_weight_kg - weightRange.min) /
+              Math.max(weightRange.max - weightRange.min, 1);
+            const y = height - bottom - ratio * (height - top - bottom);
+            return (
+              <>
+                <line className="goal-line" x1={left} x2={width - right} y1={y} y2={y} />
+                <text className="goal-line-label" x={width - right} y={y - 4} textAnchor="end">
+                  Goal {goal.target_weight_kg} kg
+                </text>
+              </>
+            );
+          })()}
         <polyline className="fat-line" points={points(fatValues, fatRange)} />
         {xIndexes.map((index) => {
           const x = left + (index / Math.max(ordered.length - 1, 1)) * (width - left - right);
@@ -2459,6 +3088,239 @@ function BodyTrendChart({ measurements }: { measurements: BodyMeasurement[] }) {
   );
 }
 
+function CardioScreen({ onDataChange }: { onDataChange: () => Promise<void> }) {
+  const empty: CardioSessionInput = {
+    session_date: localDate(),
+    activity_type: 'Walking',
+    duration_minutes: 30,
+    intensity: 'Conversational pace',
+    zone: 'Zone 2',
+    qualifies_zone2: true,
+    notes: null,
+  };
+  const [overview, setOverview] = useState<CardioOverview | null>(null);
+  const [draft, setDraft] = useState<CardioSessionInput>(empty);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const load = () =>
+    api
+      .cardioOverview()
+      .then(setOverview)
+      .catch((reason) =>
+        setError(reason instanceof Error ? reason.message : 'Could not load cardio.'),
+      );
+  useEffect(() => {
+    void load();
+  }, []);
+  async function save() {
+    try {
+      if (editingId) await api.updateCardio(editingId, draft);
+      else await api.createCardio(draft);
+      setDraft(empty);
+      setEditingId(null);
+      await load();
+      await onDataChange();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Could not save cardio.');
+    }
+  }
+  async function remove(id: string) {
+    if (!window.confirm('Delete this cardio session?')) return;
+    await api.deleteCardio(id);
+    await load();
+    await onDataChange();
+  }
+  if (!overview) return <LoadingState />;
+  const week = overview.current_week;
+  return (
+    <div className="cardio-screen">
+      {error && <p className="inline-error">{error}</p>}
+      <section className={`panel zone2-card ${week.complete ? 'complete' : ''}`}>
+        <div className="panel-heading">
+          <div>
+            <p className="section-kicker">THIS WEEK</p>
+            <h2>Zone 2 cardio</h2>
+          </div>
+          <strong>
+            {week.completed_minutes} / {week.goal_minutes} min
+          </strong>
+        </div>
+        <div className="zone2-track">
+          <i style={{ width: `${week.percentage}%` }} />
+        </div>
+        <p>
+          {week.complete ? 'Weekly goal complete.' : `${week.remaining_minutes} minutes remaining.`}
+        </p>
+        <div className="training-preferences-grid">
+          <label>
+            Weekly Zone 2 goal
+            <input
+              type="number"
+              min="1"
+              value={overview.preferences.zone2_goal_minutes}
+              onChange={(event) =>
+                setOverview({
+                  ...overview,
+                  preferences: {
+                    ...overview.preferences,
+                    zone2_goal_minutes: Number(event.target.value),
+                  },
+                })
+              }
+            />
+          </label>
+          <label>
+            Weight unit
+            <select
+              value={overview.preferences.preferred_weight_unit}
+              onChange={(event) =>
+                setOverview({
+                  ...overview,
+                  preferences: {
+                    ...overview.preferences,
+                    preferred_weight_unit: event.target.value as 'kg' | 'lb',
+                  },
+                })
+              }
+            >
+              <option value="kg">Kilograms</option>
+              <option value="lb">Pounds</option>
+            </select>
+          </label>
+          <label>
+            Week starts
+            <select
+              value={overview.preferences.week_start}
+              onChange={(event) =>
+                setOverview({
+                  ...overview,
+                  preferences: {
+                    ...overview.preferences,
+                    week_start: event.target.value as 'monday' | 'sunday' | 'saturday',
+                  },
+                })
+              }
+            >
+              <option value="monday">Monday</option>
+              <option value="sunday">Sunday</option>
+              <option value="saturday">Saturday</option>
+            </select>
+          </label>
+          <button
+            onClick={() =>
+              void api.updateTrainingPreferences(overview.preferences).then(load).then(onDataChange)
+            }
+          >
+            Save preferences
+          </button>
+        </div>
+      </section>
+      <section className="panel cardio-form">
+        <h2>{editingId ? 'Edit cardio session' : 'Log cardio session'}</h2>
+        <div className="cardio-fields">
+          <label>
+            Date
+            <input
+              type="date"
+              value={draft.session_date}
+              onChange={(event) => setDraft({ ...draft, session_date: event.target.value })}
+            />
+          </label>
+          <label>
+            Activity
+            <input
+              value={draft.activity_type}
+              onChange={(event) => setDraft({ ...draft, activity_type: event.target.value })}
+            />
+          </label>
+          <label>
+            Minutes
+            <input
+              type="number"
+              min="1"
+              inputMode="numeric"
+              value={draft.duration_minutes}
+              onChange={(event) =>
+                setDraft({ ...draft, duration_minutes: Number(event.target.value) })
+              }
+            />
+          </label>
+          <label>
+            Intensity
+            <input
+              value={draft.intensity ?? ''}
+              onChange={(event) => setDraft({ ...draft, intensity: event.target.value || null })}
+            />
+          </label>
+          <label>
+            Zone
+            <select
+              value={draft.zone ?? ''}
+              onChange={(event) => setDraft({ ...draft, zone: event.target.value || null })}
+            >
+              <option value="">Not set</option>
+              {[1, 2, 3, 4, 5].map((zone) => (
+                <option key={zone} value={`Zone ${zone}`}>
+                  Zone {zone}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="zone2-check">
+            <input
+              type="checkbox"
+              checked={draft.qualifies_zone2}
+              onChange={(event) => setDraft({ ...draft, qualifies_zone2: event.target.checked })}
+            />
+            Qualifies as Zone 2
+          </label>
+        </div>
+        <textarea
+          value={draft.notes ?? ''}
+          onChange={(event) => setDraft({ ...draft, notes: event.target.value || null })}
+          placeholder="Notes"
+        />
+        <button className="primary-action" onClick={() => void save()}>
+          {editingId ? 'Save changes' : 'Add cardio session'}
+        </button>
+      </section>
+      <section className="panel cardio-history">
+        <h2>Cardio history</h2>
+        {overview.sessions.map((session) => (
+          <article key={session.id}>
+            <div>
+              <strong>{session.activity_type}</strong>
+              <small>
+                {prettyDate(session.session_date)} · {session.duration_minutes} min ·{' '}
+                {session.zone ?? session.intensity ?? 'Unspecified'}
+                {session.qualifies_zone2 ? ' · Zone 2 ✓' : ''}
+              </small>
+            </div>
+            <button
+              onClick={() => {
+                setEditingId(session.id);
+                setDraft(session);
+              }}
+            >
+              Edit
+            </button>
+            <button onClick={() => void remove(session.id)}>Delete</button>
+          </article>
+        ))}
+      </section>
+      <section className="panel previous-zone2">
+        <h2>Previous weeks</h2>
+        {overview.previous_weeks.map((item) => (
+          <div key={item.week_start}>
+            <span>{prettyDate(item.week_start)}</span>
+            <strong>{item.completed_minutes} min</strong>
+          </div>
+        ))}
+      </section>
+    </div>
+  );
+}
+
 function HistoryScreen({
   workouts,
   measurements,
@@ -2469,6 +3331,8 @@ function HistoryScreen({
   onImport,
   onExport,
   onDeleteSamples,
+  personalRecords,
+  onDataChange,
 }: {
   workouts: TrackedWorkout[];
   measurements: BodyMeasurement[];
@@ -2479,9 +3343,11 @@ function HistoryScreen({
   onImport: (file: File) => Promise<void>;
   onExport: () => Promise<void>;
   onDeleteSamples: () => Promise<void>;
+  personalRecords: PersonalRecord[];
+  onDataChange: () => Promise<void>;
 }) {
   const [openId, setOpenId] = useState<string | null>(null);
-  const [section, setSection] = useState<'history' | 'progress'>('history');
+  const [section, setSection] = useState<'history' | 'progress' | 'cardio'>('history');
   const [importing, setImporting] = useState(false);
   const [expandedPhoto, setExpandedPhoto] = useState<MachinePhoto | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -2500,9 +3366,17 @@ function HistoryScreen({
         >
           Exercise progress
         </button>
+        <button
+          className={section === 'cardio' ? 'active' : ''}
+          onClick={() => setSection('cardio')}
+        >
+          Cardio
+        </button>
       </div>
       {section === 'progress' ? (
         <ProgressScreen exercises={exercises} currentBodyweight={currentBodyweight} embedded />
+      ) : section === 'cardio' ? (
+        <CardioScreen onDataChange={onDataChange} />
       ) : (
         <>
           <div className="screen-intro history-intro">
@@ -2593,7 +3467,10 @@ function HistoryScreen({
                             ))}
                           </div>
                         )}
-                        <HistorySetFlow sets={movement.sets.filter((item) => item.completed)} />
+                        <HistorySetFlow
+                          sets={movement.sets.filter((item) => item.completed)}
+                          personalRecords={personalRecords}
+                        />
                         {movement.sets
                           .filter((item) => item.notes)
                           .map((item) => (
@@ -2625,15 +3502,33 @@ function HistoryScreen({
   );
 }
 
-function HistorySetFlow({ sets }: { sets: TrackedSet[] }) {
+function HistorySetFlow({
+  sets,
+  personalRecords,
+}: {
+  sets: TrackedSet[];
+  personalRecords: PersonalRecord[];
+}) {
   return (
     <div className="history-set-flow">
       {sets.map((item, index) => (
         <Fragment key={item.id}>
-          <div className="history-set-pill">
+          <div className={`history-set-pill ${item.failed ? 'failed-set' : ''}`}>
             <b>Set {item.order_index + 1}</b>
             <span>{setResult(item)}</span>
             {item.rpe !== null && <small>RPE {item.rpe}</small>}
+            <em>
+              {item.set_type === 'warmup'
+                ? 'Warm-up'
+                : item.set_type === 'drop'
+                  ? 'Drop'
+                  : item.failed
+                    ? 'Failed'
+                    : ''}
+            </em>
+            {personalRecords.some((record) => record.set_id === item.id) && (
+              <strong className="pr-badge">PR</strong>
+            )}
           </div>
           {index < sets.length - 1 && (
             <div className="history-rest-gap">

@@ -3561,3 +3561,455 @@ body,
     flex: 1;
   }
 }
+
+/* Advanced training workflow */
+.exercise-icon {
+  position: relative;
+  width: 2.45rem;
+  height: 2.45rem;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border: 1px solid #35403b;
+  border-radius: 11px;
+  background: #101613;
+  color: var(--accent-dark);
+}
+
+.exercise-icon svg {
+  width: 1.7rem;
+  height: 1.7rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.exercise-icon b {
+  position: absolute;
+  right: -0.25rem;
+  bottom: -0.25rem;
+  min-width: 1rem;
+  border-radius: 999px;
+  padding: 0.1rem;
+  background: var(--accent);
+  color: white;
+  font-size: 0.52rem;
+  text-align: center;
+}
+
+.movement-actions,
+.set-order-actions {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.movement-actions button,
+.set-order-actions button {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 0.35rem 0.45rem;
+  background: #101513;
+  color: var(--ink);
+  font-weight: 800;
+}
+
+.movement-actions button:disabled,
+.set-order-actions button:disabled {
+  opacity: 0.3;
+}
+
+.set-order-actions .danger {
+  color: #ff9187;
+}
+.superset-card {
+  border-left: 4px solid #a78bfa;
+}
+.superset-ribbon {
+  padding: 0.45rem 0.85rem;
+  background: rgb(167 139 250 / 12%);
+  color: #c4b5fd;
+  font-size: 0.63rem;
+  font-weight: 850;
+}
+.failed-set {
+  border-color: #8f4139 !important;
+  background: rgb(197 70 58 / 9%) !important;
+}
+.set-type-warmup {
+  opacity: 0.72;
+}
+.set-type-drop {
+  border-left: 3px solid #f59e0b;
+}
+
+.pr-badge {
+  display: inline-block;
+  margin-left: 0.25rem;
+  border-radius: 999px;
+  padding: 0.13rem 0.28rem;
+  background: #f5b942;
+  color: #241800;
+  font-size: 0.48rem;
+  font-style: normal;
+  font-weight: 950;
+  line-height: 1;
+}
+
+.pr-callout {
+  grid-column: 2 / -1;
+  color: #f6ca68;
+  font-size: 0.62rem;
+  font-weight: 850;
+}
+
+.set-extras {
+  grid-template-columns: minmax(5rem, 0.7fr) minmax(5rem, 0.7fr) auto minmax(7rem, 1fr);
+}
+
+.set-extras > input {
+  grid-column: 1 / -2;
+}
+.set-extras .failed-toggle input {
+  width: auto;
+}
+
+.undo-toast {
+  position: fixed;
+  z-index: 90;
+  right: 1rem;
+  bottom: calc(6rem + env(safe-area-inset-bottom));
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.7rem 1rem;
+  background: #1b2320;
+  box-shadow: 0 12px 35px rgb(0 0 0 / 40%);
+}
+.undo-toast button {
+  border: 0;
+  background: transparent;
+  color: var(--accent-dark);
+  font-weight: 900;
+}
+
+.exercise-picker {
+  grid-template-rows: auto auto auto 1fr auto;
+}
+.exercise-picker header small {
+  color: var(--accent-dark);
+  font-weight: 800;
+}
+.exercise-list > button.selected {
+  background: rgb(255 99 84 / 10%);
+}
+.add-selected-button,
+.primary-action {
+  width: 100%;
+  border: 0;
+  border-radius: 11px;
+  padding: 0.85rem;
+  background: var(--accent);
+  color: white;
+  font-weight: 900;
+}
+.add-selected-button:disabled {
+  opacity: 0.38;
+}
+
+.dashboard-zone2 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem;
+}
+.dashboard-zone2 h2,
+.dashboard-zone2 p {
+  margin: 0.15rem 0;
+}
+.dashboard-zone2 small {
+  color: var(--muted-ink);
+}
+.zone2-ring {
+  --progress: 0deg;
+  width: 4.5rem;
+  height: 4.5rem;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle, var(--card) 57%, transparent 59%),
+    conic-gradient(var(--green) var(--progress), #29322e 0);
+}
+.zone2-ring strong {
+  font-size: 0.8rem;
+}
+.zone2-track {
+  height: 0.65rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #29322e;
+}
+.zone2-track i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--green);
+}
+.muscle-volume-panel {
+  padding: 1rem;
+}
+.muscle-volume-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.45rem;
+}
+.muscle-volume-grid div {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  border-radius: 9px;
+  padding: 0.55rem 0.65rem;
+  background: #101513;
+  font-size: 0.67rem;
+}
+.muscle-volume-grid span {
+  color: var(--muted-ink);
+}
+
+.history-section-tabs {
+  grid-template-columns: repeat(3, 1fr);
+}
+.cardio-screen {
+  display: grid;
+  gap: 0.8rem;
+}
+.zone2-card,
+.cardio-form,
+.cardio-history,
+.previous-zone2,
+.body-goal-panel {
+  padding: 1rem;
+}
+.zone2-card > p {
+  color: var(--muted-ink);
+}
+.zone2-card > label {
+  display: grid;
+  grid-template-columns: 1fr 6rem auto;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.8rem;
+  font-size: 0.7rem;
+}
+
+.training-preferences-grid {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 1fr auto;
+  align-items: end;
+  gap: 0.5rem;
+  margin-top: 0.8rem;
+}
+
+.training-preferences-grid label {
+  display: grid;
+  gap: 0.25rem;
+  color: var(--muted-ink);
+  font-size: 0.6rem;
+  font-weight: 800;
+}
+
+.training-preferences-grid input,
+.training-preferences-grid select,
+.training-preferences-grid button {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.6rem;
+  background: #0f1412;
+  color: var(--ink);
+}
+.zone2-card input,
+.zone2-card button,
+.cardio-fields input,
+.cardio-fields select,
+.cardio-form textarea,
+.goal-entry-fields input,
+.goal-entry-fields select {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.6rem;
+  background: #0f1412;
+  color: var(--ink);
+}
+.cardio-fields,
+.goal-entry-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(135px, 1fr));
+  gap: 0.6rem;
+}
+.cardio-fields label,
+.goal-entry-fields label {
+  display: grid;
+  gap: 0.25rem;
+  color: var(--muted-ink);
+  font-size: 0.62rem;
+  font-weight: 800;
+}
+.cardio-fields .zone2-check {
+  display: flex;
+  align-items: center;
+}
+.cardio-form textarea {
+  width: 100%;
+  margin: 0.7rem 0;
+}
+.cardio-history article {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 0.5rem;
+  border-top: 1px solid var(--line);
+  padding: 0.7rem 0;
+}
+.cardio-history strong,
+.cardio-history small {
+  display: block;
+}
+.cardio-history small {
+  margin-top: 0.15rem;
+  color: var(--muted-ink);
+}
+.cardio-history button,
+.previous-zone2 button {
+  border: 0;
+  background: transparent;
+  color: var(--accent-dark);
+}
+.previous-zone2 div {
+  display: flex;
+  justify-content: space-between;
+  border-top: 1px solid var(--line);
+  padding: 0.55rem 0;
+  font-size: 0.7rem;
+}
+.body-goal-progress > div:first-child {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 0.6rem;
+}
+.body-goal-progress span {
+  color: var(--muted-ink);
+  font-size: 0.7rem;
+}
+.goal-entry-fields {
+  margin-top: 0.8rem;
+}
+.goal-entry-fields button {
+  align-self: end;
+  border: 0;
+  border-radius: 8px;
+  padding: 0.65rem;
+  background: var(--accent);
+  color: white;
+  font-weight: 850;
+}
+.goal-line {
+  stroke: #f5b942;
+  stroke-width: 1.5;
+  stroke-dasharray: 4 3;
+}
+.goal-line-label {
+  fill: #f5b942;
+  font-size: 7px;
+}
+
+.metric-note {
+  margin: -0.35rem 0 0.8rem;
+  color: var(--muted-ink);
+  font-size: 0.62rem;
+}
+
+.pr-summary-backdrop {
+  align-items: center;
+}
+.pr-summary {
+  width: min(92vw, 430px);
+  padding: 1.2rem;
+  text-align: center;
+}
+.pr-trophy {
+  font-size: 2.5rem;
+}
+.pr-summary h2 {
+  margin: 0.3rem 0 1rem;
+}
+.pr-summary > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  border-top: 1px solid var(--line);
+  padding: 0.65rem 0;
+  text-align: left;
+}
+.pr-summary > div span {
+  color: var(--muted-ink);
+  font-size: 0.68rem;
+}
+.pr-summary > button {
+  width: 100%;
+  margin-top: 0.8rem;
+  border: 0;
+  border-radius: 10px;
+  padding: 0.75rem;
+  background: var(--accent);
+  color: white;
+  font-weight: 900;
+}
+.history-set-pill em {
+  color: #e7b469;
+  font-size: 0.55rem;
+  font-style: normal;
+}
+
+@media (max-width: 620px) {
+  .movement-card > header {
+    grid-template-columns: auto 1fr;
+  }
+  .movement-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-end;
+  }
+  .set-extras {
+    grid-template-columns: 1fr 1fr;
+  }
+  .set-extras > input,
+  .set-order-actions {
+    grid-column: 1 / -1;
+  }
+  .set-order-actions button {
+    flex: 1;
+  }
+  .zone2-card > label {
+    grid-template-columns: 1fr 5rem;
+  }
+  .zone2-card > label button {
+    grid-column: 1 / -1;
+  }
+  .training-preferences-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+  .training-preferences-grid button {
+    grid-column: 1 / -1;
+  }
+  .cardio-history article {
+    grid-template-columns: 1fr auto;
+  }
+  .cardio-history article button:last-child {
+    grid-column: 2;
+  }
+}

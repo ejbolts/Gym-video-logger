@@ -67,6 +67,25 @@ class TrainingMode(enum.StrEnum):
     BULK = "bulk"
 
 
+class SetType(enum.StrEnum):
+    WARMUP = "warmup"
+    NORMAL = "normal"
+    DROP = "drop"
+
+
+class MuscleRole(enum.StrEnum):
+    PRIMARY = "primary"
+    SECONDARY = "secondary"
+
+
+class PersonalRecordType(enum.StrEnum):
+    WEIGHT = "weight"
+    REPS_AT_WEIGHT = "reps_at_weight"
+    ESTIMATED_1RM = "estimated_1rm"
+    DURATION = "duration"
+    DISTANCE = "distance"
+
+
 def new_uuid() -> str:
     return str(uuid.uuid4())
 
@@ -216,6 +235,28 @@ class BodyMeasurement(Base):
     )
 
 
+class BodyWeightGoal(Base):
+    __tablename__ = "body_weight_goals"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    start_date: Mapped[date] = mapped_column(Date)
+    target_date: Mapped[date] = mapped_column(Date)
+    start_weight_kg: Mapped[float] = mapped_column(Float)
+    target_weight_kg: Mapped[float] = mapped_column(Float)
+    mode: Mapped[TrainingMode] = mapped_column(Enum(TrainingMode, native_enum=False))
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, server_default=func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "start_weight_kg > 0 AND target_weight_kg > 0", name="body_goal_weights_positive"
+        ),
+        CheckConstraint("target_date >= start_date", name="body_goal_dates_ordered"),
+    )
+
+
 class Exercise(Base):
     __tablename__ = "exercises"
 
@@ -233,6 +274,33 @@ class Exercise(Base):
     movements: Mapped[list[WorkoutMovement]] = relationship(back_populates="exercise")
     machine_photos: Mapped[list[MachinePhoto]] = relationship(
         back_populates="exercise", cascade="all, delete-orphan"
+    )
+    muscle_contributions: Mapped[list[ExerciseMuscleContribution]] = relationship(
+        back_populates="exercise",
+        cascade="all, delete-orphan",
+        order_by="ExerciseMuscleContribution.muscle_name",
+    )
+
+
+class ExerciseMuscleContribution(Base):
+    __tablename__ = "exercise_muscle_contributions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    exercise_id: Mapped[str] = mapped_column(
+        ForeignKey("exercises.id", ondelete="CASCADE"), index=True
+    )
+    muscle_name: Mapped[str] = mapped_column(String(100))
+    role: Mapped[MuscleRole] = mapped_column(Enum(MuscleRole, native_enum=False))
+    contribution_factor: Mapped[float] = mapped_column(Float)
+
+    exercise: Mapped[Exercise] = relationship(back_populates="muscle_contributions")
+
+    __table_args__ = (
+        UniqueConstraint("exercise_id", "muscle_name", name="uq_exercise_muscle"),
+        CheckConstraint(
+            "contribution_factor > 0 AND contribution_factor <= 1",
+            name="exercise_muscle_factor_range",
+        ),
     )
 
 
@@ -298,6 +366,12 @@ class TrainingWorkout(Base):
         cascade="all, delete-orphan",
         order_by="WorkoutMovement.order_index",
     )
+    superset_groups: Mapped[list[SupersetGroup]] = relationship(
+        back_populates="workout", cascade="all, delete-orphan", order_by="SupersetGroup.order_index"
+    )
+    personal_records: Mapped[list[PersonalRecord]] = relationship(
+        back_populates="workout", cascade="all, delete-orphan"
+    )
 
     __table_args__ = (
         CheckConstraint(
@@ -315,6 +389,9 @@ class WorkoutMovement(Base):
     exercise_id: Mapped[str] = mapped_column(ForeignKey("exercises.id"))
     order_index: Mapped[int] = mapped_column(Integer)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    superset_group_id: Mapped[str | None] = mapped_column(
+        ForeignKey("superset_groups.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
     workout: Mapped[TrainingWorkout] = relationship(back_populates="movements")
     exercise: Mapped[Exercise] = relationship(back_populates="movements")
@@ -326,6 +403,11 @@ class WorkoutMovement(Base):
         back_populates="movements",
         order_by="MachinePhoto.created_at",
     )
+    superset_group: Mapped[SupersetGroup | None] = relationship(back_populates="movements")
+
+    @property
+    def superset_name(self) -> str | None:
+        return self.superset_group.name if self.superset_group else None
 
     __table_args__ = (
         UniqueConstraint("workout_id", "order_index", name="uq_workout_movement_order"),
@@ -348,15 +430,26 @@ class WorkoutSet(Base):
     bodyweight_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
     percentile: Mapped[float | None] = mapped_column(Float, nullable=True)
     warmup: Mapped[bool] = mapped_column(Boolean, default=False)
+    set_type: Mapped[SetType] = mapped_column(
+        Enum(SetType, native_enum=False), default=SetType.NORMAL
+    )
+    failed: Mapped[bool] = mapped_column(Boolean, default=False)
+    target_reps: Mapped[int | None] = mapped_column(Integer, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     completed: Mapped[bool] = mapped_column(Boolean, default=True)
 
     movement: Mapped[WorkoutMovement] = relationship(back_populates="sets")
+    personal_records: Mapped[list[PersonalRecord]] = relationship(
+        back_populates="workout_set", cascade="all, delete-orphan"
+    )
 
     __table_args__ = (
         UniqueConstraint("movement_id", "order_index", name="uq_workout_set_order"),
         CheckConstraint("order_index >= 0", name="workout_set_order_nonnegative"),
         CheckConstraint("reps IS NULL OR reps >= 0", name="workout_set_reps_nonnegative"),
+        CheckConstraint(
+            "target_reps IS NULL OR target_reps >= 0", name="workout_set_target_reps_nonnegative"
+        ),
         CheckConstraint(
             "weight_kg IS NULL OR weight_kg >= 0", name="workout_set_weight_nonnegative"
         ),
@@ -371,5 +464,90 @@ class WorkoutSet(Base):
         CheckConstraint(
             "percentile IS NULL OR (percentile >= 0 AND percentile <= 100)",
             name="workout_set_percentile_range",
+        ),
+    )
+
+
+class SupersetGroup(Base):
+    __tablename__ = "superset_groups"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    workout_id: Mapped[str] = mapped_column(
+        ForeignKey("training_workouts.id", ondelete="CASCADE"), index=True
+    )
+    order_index: Mapped[int] = mapped_column(Integer)
+    name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
+    workout: Mapped[TrainingWorkout] = relationship(back_populates="superset_groups")
+    movements: Mapped[list[WorkoutMovement]] = relationship(back_populates="superset_group")
+
+    __table_args__ = (
+        UniqueConstraint("workout_id", "order_index", name="uq_workout_superset_order"),
+        CheckConstraint("order_index >= 0", name="superset_order_nonnegative"),
+    )
+
+
+class PersonalRecord(Base):
+    __tablename__ = "personal_records"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    exercise_id: Mapped[str] = mapped_column(
+        ForeignKey("exercises.id", ondelete="CASCADE"), index=True
+    )
+    workout_id: Mapped[str] = mapped_column(
+        ForeignKey("training_workouts.id", ondelete="CASCADE"), index=True
+    )
+    set_id: Mapped[str] = mapped_column(
+        ForeignKey("workout_sets.id", ondelete="CASCADE"), index=True
+    )
+    achieved_date: Mapped[date] = mapped_column(Date, index=True)
+    record_type: Mapped[PersonalRecordType] = mapped_column(
+        Enum(PersonalRecordType, native_enum=False)
+    )
+    value: Mapped[float] = mapped_column(Float)
+    unit: Mapped[str] = mapped_column(String(30))
+    normalized_weight: Mapped[float | None] = mapped_column(Float, nullable=True)
+    formula: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, server_default=func.now()
+    )
+
+    exercise: Mapped[Exercise] = relationship()
+    workout: Mapped[TrainingWorkout] = relationship(back_populates="personal_records")
+    workout_set: Mapped[WorkoutSet] = relationship(back_populates="personal_records")
+
+    @property
+    def exercise_name(self) -> str:
+        return self.exercise.name
+
+    __table_args__ = (
+        UniqueConstraint(
+            "set_id", "record_type", "normalized_weight", name="uq_pr_set_type_weight"
+        ),
+        CheckConstraint("value >= 0", name="personal_record_value_nonnegative"),
+    )
+
+
+class CardioSession(Base):
+    __tablename__ = "cardio_sessions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    session_date: Mapped[date] = mapped_column(Date, index=True)
+    activity_type: Mapped[str] = mapped_column(String(100))
+    duration_minutes: Mapped[int] = mapped_column(Integer)
+    intensity: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    zone: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    qualifies_zone2: Mapped[bool] = mapped_column(Boolean, default=False)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "duration_minutes > 0 AND duration_minutes <= 1440", name="cardio_duration_range"
         ),
     )

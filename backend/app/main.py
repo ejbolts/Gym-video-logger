@@ -33,6 +33,7 @@ from .storage import UploadValidationError, clean_abandoned_partials, stream_upl
 from .tracker import router as tracker_router
 from .tracker import seed_default_exercises
 from .tracker_seed import seed_sample_body_measurements, seed_sample_workouts
+from .training_metrics import rebuild_personal_records
 
 logging.basicConfig(
     level=logging.INFO,
@@ -87,6 +88,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 seed_sample_body_measurements(db)
                 if seeded:
                     logger.info("Seeded sample workouts", extra={"count": seeded})
+            rebuild_personal_records(db)
+            db.commit()
         removed = clean_abandoned_partials(settings)
         if removed:
             logger.info("Removed abandoned partial uploads", extra={"count": removed})

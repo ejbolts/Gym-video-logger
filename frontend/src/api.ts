@@ -1,5 +1,10 @@
 import type {
   BodyMeasurement,
+  BodyWeightGoal,
+  BodyWeightGoalInput,
+  CardioOverview,
+  CardioSession,
+  CardioSessionInput,
   Clip,
   CsvImportResult,
   DashboardData,
@@ -7,11 +12,14 @@ import type {
   ExerciseProgress,
   Health,
   MachinePhoto,
+  MuscleVolume,
+  PersonalRecord,
   PushConfig,
   TrackedWorkout,
   WorkoutInput,
   WorkoutSession,
   TrainingMode,
+  TrainingPreferences,
 } from './types';
 
 export class ApiError extends Error {
@@ -111,6 +119,54 @@ export const api = {
     }),
   deleteBodyMeasurement: (id: string) =>
     request<void>(`/api/body-measurements/${id}`, { method: 'DELETE' }),
+  listBodyWeightGoals: () => request<BodyWeightGoal[]>('/api/body-weight-goals'),
+  createBodyWeightGoal: (payload: BodyWeightGoalInput) =>
+    request<BodyWeightGoal>('/api/body-weight-goals', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+  updateBodyWeightGoal: (id: string, payload: BodyWeightGoalInput) =>
+    request<BodyWeightGoal>(`/api/body-weight-goals/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+  deleteBodyWeightGoal: (id: string) =>
+    request<void>(`/api/body-weight-goals/${id}`, { method: 'DELETE' }),
+  listPersonalRecords: (params?: { exerciseId?: string; workoutId?: string }) => {
+    const query = new URLSearchParams();
+    if (params?.exerciseId) query.set('exercise_id', params.exerciseId);
+    if (params?.workoutId) query.set('workout_id', params.workoutId);
+    return request<PersonalRecord[]>(`/api/personal-records${query.size ? `?${query}` : ''}`);
+  },
+  muscleVolume: (start?: string, end?: string) => {
+    const query = new URLSearchParams();
+    if (start) query.set('start', start);
+    if (end) query.set('end', end);
+    return request<MuscleVolume[]>(`/api/muscle-volume${query.size ? `?${query}` : ''}`);
+  },
+  cardioOverview: () => request<CardioOverview>('/api/cardio'),
+  createCardio: (payload: CardioSessionInput) =>
+    request<CardioSession>('/api/cardio', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+  updateCardio: (id: string, payload: CardioSessionInput) =>
+    request<CardioSession>(`/api/cardio/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+  deleteCardio: (id: string) => request<void>(`/api/cardio/${id}`, { method: 'DELETE' }),
+  getTrainingPreferences: () => request<TrainingPreferences>('/api/training-preferences'),
+  updateTrainingPreferences: (payload: TrainingPreferences) =>
+    request<TrainingPreferences>('/api/training-preferences', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
   exportWorkouts: () => requestBlob('/api/workouts/export.csv'),
   importWorkouts: (file: File) => {
     const form = new FormData();

@@ -19,3 +19,16 @@ export function formatSeconds(seconds: number): string {
     ? `${hours}:${String(minutes).padStart(2, '0')}:${String(remaining).padStart(2, '0')}`
     : `${minutes}:${String(remaining).padStart(2, '0')}`;
 }
+
+export function mergeUniqueById<T extends { id: string }>(existing: T[], selected: T[]): T[] {
+  const seen = new Set(existing.map((item) => item.id));
+  return [...existing, ...selected.filter((item) => !seen.has(item.id))];
+}
+
+export function reorder<T>(items: T[], from: number, to: number): T[] {
+  if (to < 0 || to >= items.length || from === to) return items;
+  const copy = [...items];
+  const [item] = copy.splice(from, 1);
+  copy.splice(to, 0, item);
+  return copy;
+}
