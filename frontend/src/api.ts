@@ -1,5 +1,6 @@
 import type {
   BodyMeasurement,
+  BodyMeasurementCsvImportResult,
   BodyWeightGoal,
   BodyWeightGoalInput,
   CardioOverview,
@@ -19,6 +20,7 @@ import type {
   WorkoutInput,
   WorkoutSession,
   TrainingMode,
+  TrainingPhase,
   TrainingPreferences,
 } from './types';
 
@@ -78,6 +80,12 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     }),
+  updateExerciseFavorite: (exerciseId: string, isFavorite: boolean) =>
+    request<Exercise>(`/api/exercises/${exerciseId}/favorite`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ is_favorite: isFavorite }),
+    }),
   listMachinePhotos: (exerciseId: string) =>
     request<MachinePhoto[]>(`/api/exercises/${exerciseId}/machine-photos`),
   uploadMachinePhoto: (exerciseId: string, file: File, caption: string) => {
@@ -98,12 +106,13 @@ export const api = {
   deleteMachinePhoto: (photoId: string) =>
     request<void>(`/api/machine-photos/${photoId}`, { method: 'DELETE' }),
   dashboard: () => request<DashboardData>('/api/dashboard'),
-  updateTrainingMode: (mode: TrainingMode) =>
+  updateTrainingMode: (mode: TrainingMode, effectiveDate: string) =>
     request<void>('/api/training-mode', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mode }),
+      body: JSON.stringify({ mode, effective_date: effectiveDate }),
     }),
+  listTrainingPhases: () => request<TrainingPhase[]>('/api/training-phases'),
   listWorkouts: () => request<TrackedWorkout[]>('/api/workouts'),
   listBodyMeasurements: () => request<BodyMeasurement[]>('/api/body-measurements'),
   saveBodyMeasurement: (payload: {
@@ -119,6 +128,15 @@ export const api = {
     }),
   deleteBodyMeasurement: (id: string) =>
     request<void>(`/api/body-measurements/${id}`, { method: 'DELETE' }),
+  exportBodyMeasurements: () => requestBlob('/api/body-measurements/export.csv'),
+  importBodyMeasurements: (file: File) => {
+    const form = new FormData();
+    form.append('file', file, file.name);
+    return request<BodyMeasurementCsvImportResult>('/api/body-measurements/import', {
+      method: 'POST',
+      body: form,
+    });
+  },
   listBodyWeightGoals: () => request<BodyWeightGoal[]>('/api/body-weight-goals'),
   createBodyWeightGoal: (payload: BodyWeightGoalInput) =>
     request<BodyWeightGoal>('/api/body-weight-goals', {

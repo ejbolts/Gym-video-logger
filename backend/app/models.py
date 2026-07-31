@@ -213,6 +213,17 @@ class AppSetting(Base):
     value: Mapped[str] = mapped_column(Text)
 
 
+class TrainingPhase(Base):
+    __tablename__ = "training_phases"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    start_date: Mapped[date] = mapped_column(Date, unique=True)
+    mode: Mapped[TrainingMode] = mapped_column(Enum(TrainingMode, native_enum=False))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, server_default=func.now()
+    )
+
+
 class BodyMeasurement(Base):
     __tablename__ = "body_measurements"
 
@@ -269,6 +280,7 @@ class Exercise(Base):
     muscle_group: Mapped[str] = mapped_column(String(100))
     equipment: Mapped[str | None] = mapped_column(String(100), nullable=True)
     is_custom: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_favorite: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     movements: Mapped[list[WorkoutMovement]] = relationship(back_populates="exercise")

@@ -95,6 +95,7 @@ export interface Exercise {
   muscle_group: string;
   equipment: string | null;
   is_custom: boolean;
+  is_favorite: boolean;
   muscle_contributions: MuscleContribution[];
 }
 
@@ -210,6 +211,12 @@ export interface BodyMeasurement {
   notes: string | null;
   is_sample: boolean;
   created_at: string;
+}
+
+export interface BodyMeasurementCsvImportResult {
+  measurements_created: number;
+  measurements_updated: number;
+  rows_imported: number;
 }
 
 export interface WeeklyExerciseBreakdown {
@@ -353,6 +360,13 @@ export interface BodyWeightGoalInput {
 
 export interface BodyWeightGoal extends BodyWeightGoalInput {
   id: string;
+  created_at: string;
+}
+
+export interface TrainingPhase {
+  id: string;
+  start_date: string;
+  mode: TrainingMode;
   created_at: string;
 }
 

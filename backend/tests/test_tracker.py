@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from datetime import date
-from io import BytesIO
+import csv
+from datetime import date, timedelta
+from io import BytesIO, StringIO
 
 from PIL import Image
 from pillow_heif import from_pillow
@@ -57,6 +58,20 @@ def test_default_exercise_library_is_seeded(client):
     recommendation = client.get("/api/dashboard").json()["recommendation"]
     assert recommendation["category"] == "push"
     assert recommendation["rotation_next"] == "push"
+
+
+def test_exercise_favorites_are_persisted(client):
+    exercise = client.get("/api/exercises").json()[0]
+    assert exercise["is_favorite"] is False
+
+    updated = client.patch(f"/api/exercises/{exercise['id']}/favorite", json={"is_favorite": True})
+
+    assert updated.status_code == 200
+    assert updated.json()["is_favorite"] is True
+    persisted = next(
+        item for item in client.get("/api/exercises").json() if item["id"] == exercise["id"]
+    )
+    assert persisted["is_favorite"] is True
 
 
 def test_workout_sets_notes_rest_and_rpe_are_saved(client):
@@ -126,6 +141,77 @@ def test_body_measurements_are_upserted_and_used_in_calendar_workouts(client):
     assert len(measurements) == 1
     assert measurements[0]["weight_kg"] == 87.6
     assert client.delete(f"/api/body-measurements/{measurements[0]['id']}").status_code == 204
+
+
+def test_body_measurement_csv_import_updates_dates_and_exports_history(client):
+    existing = client.post(
+        "/api/body-measurements",
+        json={
+            "measurement_date": "2026-07-17",
+            "weight_kg": 88,
+            "body_fat_pct": 18.5,
+            "notes": "Original",
+        },
+    ).json()
+    content = (
+        "Date,Weight (kg),Body Fat (%),Notes\n"
+        '2026-07-17,87.4,18,"Updated, morning"\n'
+        "2026-07-18,87.1,,Evening check-in\n"
+    )
+
+    imported = client.post(
+        "/api/body-measurements/import",
+        files={"file": ("body-weight.csv", content.encode(), "text/csv")},
+    )
+
+    assert imported.status_code == 201
+    assert imported.json() == {
+        "measurements_created": 1,
+        "measurements_updated": 1,
+        "rows_imported": 2,
+    }
+    measurements = client.get("/api/body-measurements").json()
+    assert [item["measurement_date"] for item in measurements] == ["2026-07-18", "2026-07-17"]
+    updated = measurements[1]
+    assert updated["id"] == existing["id"]
+    assert updated["weight_kg"] == 87.4
+    assert updated["body_fat_pct"] == 18
+    assert updated["notes"] == "Updated, morning"
+    assert updated["is_sample"] is False
+
+    exported = client.get("/api/body-measurements/export.csv")
+    rows = list(csv.DictReader(StringIO(exported.content.decode("utf-8-sig"))))
+    assert exported.status_code == 200
+    assert "body-weight-" in exported.headers["content-disposition"]
+    assert rows == [
+        {
+            "Date": "2026-07-17",
+            "Weight (kg)": "87.4",
+            "Body Fat (%)": "18",
+            "Notes": "Updated, morning",
+        },
+        {
+            "Date": "2026-07-18",
+            "Weight (kg)": "87.1",
+            "Body Fat (%)": "",
+            "Notes": "Evening check-in",
+        },
+    ]
+
+
+def test_body_measurement_csv_rejects_duplicate_dates_without_partial_import(client):
+    content = (
+        "Date,Weight (kg),Body Fat (%),Notes\n2026-07-17,87.4,,Morning\n2026-07-17,87.2,,Evening\n"
+    )
+
+    imported = client.post(
+        "/api/body-measurements/import",
+        files={"file": ("body-weight.csv", content.encode(), "text/csv")},
+    )
+
+    assert imported.status_code == 422
+    assert "appears more than once" in imported.json()["error"]["message"]
+    assert client.get("/api/body-measurements").json() == []
 
 
 def test_dashboard_and_progress_reflect_completed_workout(client):
@@ -374,13 +460,47 @@ def test_training_mode_changes_rpe_aware_weekly_goal(client):
         "Triceps": 1.0,
     }
 
-    changed = client.put("/api/training-mode", json={"mode": "cut"})
+    changed = client.put("/api/training-mode", json={"mode": "cut", "effective_date": "2026-07-01"})
     assert changed.status_code == 200
     assert changed.json() == {"mode": "cut"}
+    phases = client.get("/api/training-phases").json()
+    assert len(phases) == 1
+    assert phases[0]["start_date"] == "2026-07-01"
+    assert phases[0]["mode"] == "cut"
     cut_dashboard = client.get("/api/dashboard").json()
     assert cut_dashboard["weekly_goal"]["target_sets_per_muscle"] == 10
     assert cut_dashboard["weekly_goal"]["overall_percent"] == 13.3
     assert "Cut goal" in cut_dashboard["recommendation"]["reason"]
+
+
+def test_active_body_weight_goal_infers_and_persists_training_mode(client):
+    cases = (
+        (98.9, "cut"),
+        (99.0, "maintenance"),
+        (101.0, "maintenance"),
+        (101.1, "bulk"),
+    )
+
+    for target_weight, expected_mode in cases:
+        created = client.post(
+            "/api/body-weight-goals",
+            json={
+                "start_date": "2026-07-30",
+                "target_date": "2026-12-30",
+                "start_weight_kg": 100,
+                "target_weight_kg": target_weight,
+                "mode": "cut" if expected_mode != "cut" else "bulk",
+                "active": True,
+            },
+        )
+
+        assert created.status_code == 201
+        assert created.json()["mode"] == expected_mode
+        assert client.get("/api/dashboard").json()["training_mode"] == expected_mode
+        phases = client.get("/api/training-phases").json()
+        assert len(phases) == 1
+        assert phases[0]["start_date"] == "2026-07-30"
+        assert phases[0]["mode"] == expected_mode
 
 
 def test_pr_types_warmups_failed_sets_and_unit_conversion(client):
@@ -401,7 +521,7 @@ def test_pr_types_warmups_failed_sets_and_unit_conversion(client):
     assert {item["record_type"] for item in records} == {"weight", "estimated_1rm"}
     assert {item["normalized_weight"] for item in records} == {100.0}
 
-    payload["workout_date"] = "2026-07-26"
+    payload["workout_date"] = (date.today() + timedelta(days=1)).isoformat()
     payload["movements"][0]["sets"] = [{"reps": 6, "weight_kg": 100, "completed": True}]
     second = client.post("/api/workouts", json=payload)
     second_records = client.get(

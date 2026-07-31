@@ -46,7 +46,12 @@ class ExerciseRead(BaseModel):
     muscle_group: str
     equipment: str | None
     is_custom: bool
+    is_favorite: bool
     muscle_contributions: list[MuscleContributionRead] = []
+
+
+class ExerciseFavoriteUpdate(BaseModel):
+    is_favorite: bool
 
 
 class MachinePhotoCaptionUpdate(BaseModel):
@@ -249,10 +254,20 @@ class WorkoutRecommendationRead(BaseModel):
 
 class TrainingModeUpdate(BaseModel):
     mode: TrainingMode
+    effective_date: date = Field(default_factory=date.today)
 
 
 class TrainingModeRead(BaseModel):
     mode: TrainingMode
+
+
+class TrainingPhaseRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    start_date: date
+    mode: TrainingMode
+    created_at: datetime
 
 
 class WeeklyMuscleGoalRead(BaseModel):
@@ -301,6 +316,12 @@ class BodyMeasurementRead(BaseModel):
     notes: str | None
     is_sample: bool
     created_at: datetime
+
+
+class BodyMeasurementCsvImportRead(BaseModel):
+    measurements_created: int
+    measurements_updated: int
+    rows_imported: int
 
 
 class BodyWeightGoalCreate(BaseModel):

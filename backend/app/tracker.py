@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
+from .body_measurement_csv import export_body_measurements, import_body_measurements
 from .config import Settings, get_settings
 from .database import get_db
 from .models import (
@@ -23,6 +24,7 @@ from .models import (
     PersonalRecord,
     SupersetGroup,
     TrainingMode,
+    TrainingPhase,
     TrainingWorkout,
     WorkoutCategory,
     WorkoutMovement,
@@ -38,6 +40,7 @@ from .processing import backfill_completed_video_links
 from .tracker_csv import CsvImportError, export_workouts, import_workouts
 from .tracker_schemas import (
     BodyMeasurementCreate,
+    BodyMeasurementCsvImportRead,
     BodyMeasurementRead,
     BodyWeightGoalCreate,
     BodyWeightGoalRead,
@@ -49,6 +52,7 @@ from .tracker_schemas import (
     CsvImportRead,
     DashboardRead,
     ExerciseCreate,
+    ExerciseFavoriteUpdate,
     ExerciseProgressRead,
     ExerciseRead,
     HeatmapDay,
@@ -60,6 +64,7 @@ from .tracker_schemas import (
     ProgressPoint,
     TrainingModeRead,
     TrainingModeUpdate,
+    TrainingPhaseRead,
     TrainingPreferencesRead,
     TrainingPreferencesUpdate,
     TrainingWorkoutCreate,
@@ -145,6 +150,7 @@ SESSION_NAMES = {
     WorkoutCategory.CARDIO: "Cardio",
 }
 TRAINING_MODE_SETTING_KEY = "training_mode"
+MAINTENANCE_WEIGHT_RANGE_RATIO = 0.01
 WEEKLY_SET_TARGETS = {
     TrainingMode.CUT: 10,
     TrainingMode.MAINTENANCE: 12,
@@ -172,6 +178,26 @@ def current_training_mode(db: Session) -> TrainingMode:
         return TrainingMode(setting.value)
     except ValueError:
         return TrainingMode.MAINTENANCE
+
+
+def training_mode_for_weight_target(
+    current_weight_kg: float, target_weight_kg: float
+) -> TrainingMode:
+    if target_weight_kg < current_weight_kg * (1 - MAINTENANCE_WEIGHT_RANGE_RATIO):
+        return TrainingMode.CUT
+    if target_weight_kg > current_weight_kg * (1 + MAINTENANCE_WEIGHT_RANGE_RATIO):
+        return TrainingMode.BULK
+    return TrainingMode.MAINTENANCE
+
+
+def record_training_phase(db: Session, mode: TrainingMode, effective_date: date) -> TrainingPhase:
+    phase = db.scalar(select(TrainingPhase).where(TrainingPhase.start_date == effective_date))
+    if phase:
+        phase.mode = mode
+    else:
+        phase = TrainingPhase(start_date=effective_date, mode=mode)
+        db.add(phase)
+    return phase
 
 
 def weekly_goal(workouts: list[TrainingWorkout], today: date, mode: TrainingMode) -> WeeklyGoalRead:
@@ -512,6 +538,50 @@ def save_body_measurement(payload: BodyMeasurementCreate, db: DbSession) -> Body
     return measurement
 
 
+@router.get("/body-measurements/export.csv")
+def export_body_measurement_csv(db: DbSession) -> Response:
+    measurements = list(
+        db.scalars(select(BodyMeasurement).order_by(BodyMeasurement.measurement_date))
+    )
+    content = export_body_measurements(measurements)
+    filename = f"body-weight-{date.today().isoformat()}.csv"
+    return Response(
+        content=content.encode("utf-8-sig"),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.post(
+    "/body-measurements/import",
+    response_model=BodyMeasurementCsvImportRead,
+    status_code=201,
+)
+async def import_body_measurement_csv(
+    db: DbSession, file: Annotated[UploadFile, File(...)]
+) -> BodyMeasurementCsvImportRead:
+    if file.content_type not in {
+        None,
+        "text/csv",
+        "text/tab-separated-values",
+        "text/plain",
+        "application/vnd.ms-excel",
+        "application/octet-stream",
+    }:
+        raise HTTPException(status_code=415, detail="Choose a CSV or tab-separated text file.")
+    raw = await file.read(5 * 1024 * 1024 + 1)
+    await file.close()
+    if len(raw) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Body-weight CSV imports are limited to 5 MB.")
+    try:
+        summary = import_body_measurements(db, raw)
+    except CsvImportError as error:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    db.commit()
+    return BodyMeasurementCsvImportRead(**summary.__dict__)
+
+
 @router.delete("/body-measurements/{measurement_id}", status_code=204)
 def delete_body_measurement(measurement_id: str, db: DbSession) -> None:
     measurement = db.get(BodyMeasurement, measurement_id)
@@ -534,6 +604,19 @@ def create_exercise(payload: ExerciseCreate, db: DbSession) -> Exercise:
         raise HTTPException(
             status_code=409, detail="An exercise with that name already exists."
         ) from error
+
+
+@router.patch("/exercises/{exercise_id}/favorite", response_model=ExerciseRead)
+def update_exercise_favorite(
+    exercise_id: str, payload: ExerciseFavoriteUpdate, db: DbSession
+) -> Exercise:
+    exercise = db.get(Exercise, exercise_id)
+    if not exercise:
+        raise HTTPException(status_code=404, detail="Exercise was not found.")
+    exercise.is_favorite = payload.is_favorite
+    db.commit()
+    db.refresh(exercise)
+    return exercise
 
 
 @router.get("/exercises/{exercise_id}/machine-photos", response_model=list[MachinePhotoRead])
@@ -652,13 +735,15 @@ def delete_machine_photo(photo_id: str, db: DbSession, settings: SettingsDepende
 
 @router.put("/training-mode", response_model=TrainingModeRead)
 def update_training_mode(payload: TrainingModeUpdate, db: DbSession) -> TrainingModeRead:
-    setting = db.get(AppSetting, TRAINING_MODE_SETTING_KEY)
-    if setting:
-        setting.value = payload.mode.value
-    else:
-        db.add(AppSetting(key=TRAINING_MODE_SETTING_KEY, value=payload.mode.value))
+    set_setting(db, TRAINING_MODE_SETTING_KEY, payload.mode.value)
+    record_training_phase(db, payload.mode, payload.effective_date)
     db.commit()
     return TrainingModeRead(mode=payload.mode)
+
+
+@router.get("/training-phases", response_model=list[TrainingPhaseRead])
+def list_training_phases(db: DbSession) -> list[TrainingPhase]:
+    return list(db.scalars(select(TrainingPhase).order_by(TrainingPhase.start_date.asc())))
 
 
 def training_preferences(db: Session) -> TrainingPreferencesRead:
@@ -770,10 +855,17 @@ def list_body_weight_goals(db: DbSession) -> list[BodyWeightGoal]:
 
 @router.post("/body-weight-goals", response_model=BodyWeightGoalRead, status_code=201)
 def create_body_weight_goal(payload: BodyWeightGoalCreate, db: DbSession) -> BodyWeightGoal:
+    mode = training_mode_for_weight_target(payload.start_weight_kg, payload.target_weight_kg)
     if payload.active:
-        for goal in db.scalars(select(BodyWeightGoal).where(BodyWeightGoal.active.is_(True))):
-            goal.active = False
-    goal = BodyWeightGoal(**payload.model_dump())
+        for existing_goal in db.scalars(
+            select(BodyWeightGoal).where(BodyWeightGoal.active.is_(True))
+        ):
+            existing_goal.active = False
+        set_setting(db, TRAINING_MODE_SETTING_KEY, mode.value)
+        record_training_phase(db, mode, payload.start_date)
+    values = payload.model_dump()
+    values["mode"] = mode
+    goal = BodyWeightGoal(**values)
     db.add(goal)
     db.commit()
     db.refresh(goal)
@@ -787,11 +879,16 @@ def update_body_weight_goal(
     goal = db.get(BodyWeightGoal, goal_id)
     if not goal:
         raise HTTPException(status_code=404, detail="Body-weight goal was not found.")
+    mode = training_mode_for_weight_target(payload.start_weight_kg, payload.target_weight_kg)
     if payload.active:
         for other in db.scalars(select(BodyWeightGoal).where(BodyWeightGoal.active.is_(True))):
             if other.id != goal_id:
                 other.active = False
-    for key, value in payload.model_dump().items():
+        set_setting(db, TRAINING_MODE_SETTING_KEY, mode.value)
+        record_training_phase(db, mode, payload.start_date)
+    values = payload.model_dump()
+    values["mode"] = mode
+    for key, value in values.items():
         setattr(goal, key, value)
     db.commit()
     db.refresh(goal)

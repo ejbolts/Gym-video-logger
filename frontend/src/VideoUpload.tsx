@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api';
+import { InlineConfirmButton } from './InlineConfirmButton';
 import type { Health, LocalClip, SessionStatus, WorkoutSession } from './types';
 import { base64UrlToUint8Array } from './push';
 import { formatBytes, formatSeconds, localDate } from './utils';
@@ -342,12 +343,6 @@ export function VideoUpload() {
   }
 
   async function deleteSession(session: WorkoutSession) {
-    if (
-      !window.confirm(
-        `Delete “${session.name}”? This removes its saved clips and combined output from this PC.`,
-      )
-    )
-      return;
     setBusy(true);
     setMessage(null);
     try {
@@ -382,21 +377,22 @@ export function VideoUpload() {
     serverSession !== null && !processingStatuses.includes(serverSession.status);
 
   return (
-    <main className="app-shell">
-      <header className="topbar">
-        <button className="brand" onClick={() => setScreen('upload')} aria-label="New upload">
-          <span aria-hidden="true">▰</span> Gym logger
+    <div className="video-module">
+      <header className="video-toolbar" aria-label="Video tools">
+        <button className="video-tool" onClick={resetUpload}>
+          <span aria-hidden="true">＋</span>
+          New upload
         </button>
-        <div className="topbar-actions">
+        <div className="video-toolbar-actions">
           <button
-            className="text-button"
+            className="video-tool"
             disabled={pushEnabled || pushEnabling}
             onClick={() => void enablePushNotifications()}
           >
-            {pushEnabled ? 'Alerts enabled' : pushEnabling ? 'Enabling alerts…' : 'Enable alerts'}
+            {pushEnabled ? 'Alerts on' : pushEnabling ? 'Enabling…' : 'Enable alerts'}
           </button>
-          <button className="text-button" onClick={() => void showHistory()}>
-            Previous sessions
+          <button className="video-tool" onClick={() => void showHistory()}>
+            History
           </button>
         </div>
       </header>
@@ -407,10 +403,10 @@ export function VideoUpload() {
       )}
 
       {screen === 'upload' && (
-        <section className="page">
+        <section className="video-page">
           <div className="intro">
-            <p className="eyebrow">Private workout batch</p>
-            <h1>Upload your sets together.</h1>
+            <p className="eyebrow">Workout videos</p>
+            <h1>Upload your sets</h1>
           </div>
           <div className="card form-card">
             <label>
@@ -547,7 +543,7 @@ export function VideoUpload() {
       )}
 
       {screen === 'progress' && (
-        <section className="page">
+        <section className="video-page">
           <p className="eyebrow">Uploading session</p>
           <h1>{serverSession?.name}</h1>
           <div className="card progress-card">
@@ -574,7 +570,7 @@ export function VideoUpload() {
       )}
 
       {screen === 'processing' && serverSession && (
-        <section className="page">
+        <section className="video-page">
           <p className="eyebrow">Processing session</p>
           <h1>{serverSession.name}</h1>
           <div className="card status-card">
@@ -618,19 +614,19 @@ export function VideoUpload() {
             </button>
           )}
           {canDeleteCurrentSession && (
-            <button
+            <InlineConfirmButton
               className="danger-button"
               disabled={busy}
-              onClick={() => void deleteSession(serverSession)}
-            >
-              Delete this session
-            </button>
+              label="Delete this session"
+              confirmLabel="Confirm deletion"
+              onConfirm={() => deleteSession(serverSession)}
+            />
           )}
         </section>
       )}
 
       {screen === 'complete' && serverSession && (
-        <section className="page">
+        <section className="video-page">
           <p className="eyebrow">Session complete</p>
           <h1>{serverSession.name}</h1>
           {serverSession.youtube_video_id && (
@@ -667,18 +663,18 @@ export function VideoUpload() {
           <button className="secondary" onClick={resetUpload}>
             Upload another session
           </button>
-          <button
+          <InlineConfirmButton
             className="danger-button"
             disabled={busy}
-            onClick={() => void deleteSession(serverSession)}
-          >
-            Delete this session
-          </button>
+            label="Delete this session"
+            confirmLabel="Confirm deletion"
+            onConfirm={() => deleteSession(serverSession)}
+          />
         </section>
       )}
 
       {screen === 'history' && (
-        <section className="page">
+        <section className="video-page">
           <p className="eyebrow">Session history</p>
           <h1>Previous sessions</h1>
           {history.length === 0 ? (
@@ -697,20 +693,20 @@ export function VideoUpload() {
                   <em>{statusText(item.status)}</em>
                 </button>
                 {!processingStatuses.includes(item.status) && (
-                  <button
+                  <InlineConfirmButton
                     className="history-delete"
                     disabled={busy}
-                    onClick={() => void deleteSession(item)}
-                  >
-                    Delete
-                  </button>
+                    label="Delete"
+                    confirmLabel="Confirm"
+                    onConfirm={() => deleteSession(item)}
+                  />
                 )}
               </article>
             ))
           )}
         </section>
       )}
-    </main>
+    </div>
   );
 }
 
