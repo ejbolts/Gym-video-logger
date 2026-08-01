@@ -35,6 +35,7 @@ KG_TO_LB = 2.2046226218
 EPLEY_FORMULA = "Epley: weight × (1 + reps ÷ 30), reps 1–30"
 
 # Conservative, editable defaults. Entries are deliberately exercise-specific.
+# New isolation movements receive primary credit only unless the user requests a secondary.
 DEFAULT_MUSCLE_MAPPING: dict[str, tuple[tuple[str, MuscleRole, float], ...]] = {
     "Barbell Bench Press": (
         ("Pectorals", MuscleRole.PRIMARY, 1.0),
@@ -63,7 +64,10 @@ DEFAULT_MUSCLE_MAPPING: dict[str, tuple[tuple[str, MuscleRole, float], ...]] = {
         ("Pectorals", MuscleRole.PRIMARY, 1.0),
         ("Anterior deltoids", MuscleRole.SECONDARY, 0.5),
     ),
+    "Pec Deck": (("Pectorals", MuscleRole.PRIMARY, 1.0),),
     "Triceps Pushdown": (("Triceps", MuscleRole.PRIMARY, 1.0),),
+    "Single-Arm Cable Triceps Pushdown": (("Triceps", MuscleRole.PRIMARY, 1.0),),
+    "Triceps Machine Extension": (("Triceps", MuscleRole.PRIMARY, 1.0),),
     "Dips": (
         ("Pectorals", MuscleRole.PRIMARY, 1.0),
         ("Triceps", MuscleRole.PRIMARY, 1.0),
@@ -102,7 +106,9 @@ DEFAULT_MUSCLE_MAPPING: dict[str, tuple[tuple[str, MuscleRole, float], ...]] = {
         ("External rotators", MuscleRole.PRIMARY, 1.0),
         ("Mid / Upper Back", MuscleRole.SECONDARY, 0.5),
     ),
+    "Cable Shoulder Extensions": (("Rear deltoids", MuscleRole.PRIMARY, 1.0),),
     "Barbell Curl": (("Biceps", MuscleRole.PRIMARY, 1.0), ("Forearms", MuscleRole.SECONDARY, 0.5)),
+    "Single-Arm Preacher Curl": (("Biceps", MuscleRole.PRIMARY, 1.0),),
     "Hammer Curl": (
         ("Brachialis", MuscleRole.PRIMARY, 1.0),
         ("Biceps", MuscleRole.SECONDARY, 0.5),

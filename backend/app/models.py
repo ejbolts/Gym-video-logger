@@ -439,6 +439,8 @@ class WorkoutSet(Base):
     rest_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     distance_km: Mapped[float | None] = mapped_column(Float, nullable=True)
+    incline_percent: Mapped[float | None] = mapped_column(Float, nullable=True)
+    speed_kph: Mapped[float | None] = mapped_column(Float, nullable=True)
     bodyweight_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
     percentile: Mapped[float | None] = mapped_column(Float, nullable=True)
     warmup: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -468,6 +470,14 @@ class WorkoutSet(Base):
         CheckConstraint("rpe IS NULL OR (rpe >= 1 AND rpe <= 10)", name="workout_set_rpe_range"),
         CheckConstraint(
             "rest_seconds IS NULL OR rest_seconds >= 0", name="workout_set_rest_nonnegative"
+        ),
+        CheckConstraint(
+            "incline_percent IS NULL OR (incline_percent >= 0 AND incline_percent <= 100)",
+            name="workout_set_incline_range",
+        ),
+        CheckConstraint(
+            "speed_kph IS NULL OR (speed_kph >= 0 AND speed_kph <= 100)",
+            name="workout_set_speed_range",
         ),
         CheckConstraint(
             "bodyweight_kg IS NULL OR bodyweight_kg >= 0",

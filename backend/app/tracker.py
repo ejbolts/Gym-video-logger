@@ -100,7 +100,15 @@ DEFAULT_EXERCISES = (
     ("Dumbbell Shoulder Press", WorkoutCategory.PUSH, "Shoulders", "Dumbbell"),
     ("Lateral Raise", WorkoutCategory.PUSH, "Shoulders", "Dumbbell"),
     ("Cable Fly", WorkoutCategory.PUSH, "Chest", "Cable"),
+    ("Pec Deck", WorkoutCategory.PUSH, "Chest", "Machine"),
     ("Triceps Pushdown", WorkoutCategory.PUSH, "Triceps", "Cable"),
+    (
+        "Single-Arm Cable Triceps Pushdown",
+        WorkoutCategory.PUSH,
+        "Triceps",
+        "Cable",
+    ),
+    ("Triceps Machine Extension", WorkoutCategory.PUSH, "Triceps", "Machine"),
     ("Dips", WorkoutCategory.PUSH, "Chest / Triceps", "Bodyweight"),
     ("Deadlift", WorkoutCategory.PULL, "Posterior chain", "Barbell"),
     ("Barbell Row", WorkoutCategory.PULL, "Mid / Upper Back", "Barbell"),
@@ -108,7 +116,9 @@ DEFAULT_EXERCISES = (
     ("Lat Pulldown", WorkoutCategory.PULL, "Lats", "Cable"),
     ("Seated Cable Row", WorkoutCategory.PULL, "Mid / Upper Back", "Cable"),
     ("Face Pull", WorkoutCategory.PULL, "Rear Delts", "Cable"),
+    ("Cable Shoulder Extensions", WorkoutCategory.PULL, "Rear Delts", "Cable"),
     ("Barbell Curl", WorkoutCategory.PULL, "Biceps", "Barbell"),
+    ("Single-Arm Preacher Curl", WorkoutCategory.PULL, "Biceps", "Dumbbell"),
     ("Hammer Curl", WorkoutCategory.PULL, "Biceps", "Dumbbell"),
     ("Back Squat", WorkoutCategory.LOWER, "Quads", "Barbell"),
     ("Front Squat", WorkoutCategory.LOWER, "Quads", "Barbell"),
@@ -125,6 +135,7 @@ DEFAULT_EXERCISES = (
 
 DEFAULT_CARDIO = (
     ("Running", "Cardio", "Outdoor / Treadmill"),
+    ("Incline Treadmill Walking", "Cardio", "Treadmill"),
     ("Cycling", "Cardio", "Bike"),
     ("Rowing", "Cardio", "Rowing machine"),
     ("Stair Climber", "Cardio", "Machine"),
@@ -762,13 +773,35 @@ def training_preferences(db: Session) -> TrainingPreferencesRead:
     )
 
 
-def zone2_week(sessions: list[CardioSession], week: date, goal: int) -> Zone2WeekRead:
+def automatically_qualifies_for_zone2(movement: WorkoutMovement) -> bool:
+    if movement.exercise.kind != ExerciseKind.CARDIO:
+        return False
+    name = movement.exercise.name.casefold()
+    return "walking" in name or "walk" in name
+
+
+def zone2_week(
+    sessions: list[CardioSession],
+    workouts: list[TrainingWorkout],
+    week: date,
+    goal: int,
+) -> Zone2WeekRead:
     end = week + timedelta(days=6)
-    completed = sum(
+    session_minutes = sum(
         item.duration_minutes
         for item in sessions
         if item.qualifies_zone2 and week <= item.session_date <= end
     )
+    workout_seconds = sum(
+        item.duration_seconds or 0
+        for workout in workouts
+        if week <= workout.workout_date <= end
+        for movement in workout.movements
+        if automatically_qualifies_for_zone2(movement)
+        for item in movement.sets
+        if item.completed
+    )
+    completed = session_minutes + workout_seconds // 60
     return Zone2WeekRead(
         week_start=week,
         week_end=end,
@@ -802,13 +835,17 @@ def update_training_preferences(
 def cardio_overview(db: DbSession) -> CardioOverviewRead:
     preferences = training_preferences(db)
     sessions = list(db.scalars(select(CardioSession).order_by(CardioSession.session_date.desc())))
+    workouts = list(db.scalars(select(TrainingWorkout).options(*workout_options())))
     current_start = start_of_week(date.today(), preferences.week_start)
     return CardioOverviewRead(
         preferences=preferences,
-        current_week=zone2_week(sessions, current_start, preferences.zone2_goal_minutes),
+        current_week=zone2_week(sessions, workouts, current_start, preferences.zone2_goal_minutes),
         previous_weeks=[
             zone2_week(
-                sessions, current_start - timedelta(days=7 * offset), preferences.zone2_goal_minutes
+                sessions,
+                workouts,
+                current_start - timedelta(days=7 * offset),
+                preferences.zone2_goal_minutes,
             )
             for offset in range(1, 9)
         ],
@@ -1248,6 +1285,7 @@ def dashboard(db: DbSession) -> DashboardRead:
         ],
         zone2=zone2_week(
             cardio_sessions,
+            workouts,
             start_of_week(today, preferences.week_start),
             preferences.zone2_goal_minutes,
         ),

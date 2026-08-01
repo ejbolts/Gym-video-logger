@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
+import { createPortal } from 'react-dom';
 import { api } from './api';
 import type {
   BodyMeasurement,
@@ -31,6 +32,13 @@ import type { BodyTrendRange } from './bodyTrend';
 import { InlineConfirmButton } from './InlineConfirmButton';
 import { localDate, mergeUniqueById, reorder } from './utils';
 import { VideoUpload } from './VideoUpload';
+import {
+  clearActiveWorkoutDraft,
+  readActiveWorkoutDraft,
+  writeActiveWorkoutDraft,
+} from './workoutDraft';
+import { createWorkoutSet } from './workoutSets';
+import { applySupersetSelection, clearSuperset } from './workoutSupersets';
 
 type AppTab = 'dashboard' | 'log' | 'body' | 'history' | 'videos';
 type ProgressMetric = 'estimated_1rm' | 'best_weight_kg' | 'volume_kg';
@@ -72,23 +80,42 @@ const HISTORY_PAGE_SIZE = 8;
 function emptySet(kind: Exercise['kind'], previous?: DraftSet): DraftSet {
   return {
     key: crypto.randomUUID(),
-    reps: kind === 'strength' ? (previous?.reps ?? null) : null,
-    weight_kg: kind === 'strength' ? (previous?.weight_kg ?? null) : null,
-    rpe: previous?.rpe ?? null,
-    rest_seconds: previous?.rest_seconds ?? 120,
-    duration_seconds: kind === 'cardio' ? (previous?.duration_seconds ?? null) : null,
-    distance_km: kind === 'cardio' ? (previous?.distance_km ?? null) : null,
-    notes: null,
-    set_type: previous?.set_type ?? 'normal',
-    failed: false,
-    target_reps: previous?.target_reps ?? null,
-    warmup: false,
-    completed: false,
+    ...createWorkoutSet(kind, previous),
   };
 }
 
 function numberOrNull(value: string): number | null {
   return value === '' ? null : Number(value);
+}
+
+function completedSetPerformance(item: DraftSet, cardio: boolean): string {
+  if (cardio) {
+    const values = [
+      item.duration_seconds !== null ? formatDuration(item.duration_seconds) : null,
+      item.distance_km !== null ? `${item.distance_km} km` : null,
+      item.incline_percent != null ? `${item.incline_percent}% incline` : null,
+      item.speed_kph != null ? `${item.speed_kph} km/h` : null,
+    ].filter((value): value is string => value !== null);
+    return values.join(' · ') || 'No result entered';
+  }
+
+  const values = [
+    item.weight_kg !== null ? `${item.weight_kg} kg` : null,
+    item.reps !== null ? `${item.reps} reps` : null,
+  ].filter((value): value is string => value !== null);
+  return values.join(' × ') || 'No result entered';
+}
+
+function completedSetMeta(item: DraftSet): string {
+  const setType =
+    item.set_type === 'warmup' || item.warmup
+      ? 'Warm-up'
+      : item.set_type === 'drop'
+        ? 'Drop set'
+        : 'Working set';
+  return [setType, `RPE ${item.rpe ?? '–'}`, item.failed ? 'Failed' : null]
+    .filter((value): value is string => value !== null)
+    .join(' · ');
 }
 
 function moveItem<T>(items: T[], from: number, to: number): T[] {
@@ -256,6 +283,11 @@ export function App() {
   const [completionRecords, setCompletionRecords] = useState<PersonalRecord[]>([]);
   const [workoutStartDate, setWorkoutStartDate] = useState(localDate());
   const [editingWorkout, setEditingWorkout] = useState<TrackedWorkout | null>(null);
+  const [activeWorkoutStartedAt, setActiveWorkoutStartedAt] = useState<number | null>(() => {
+    const storedDraft = readActiveWorkoutDraft();
+    if (storedDraft) return storedDraft.startedAt;
+    return window.location.hash === '#log' ? Date.now() : null;
+  });
   const [historyOpenId, setHistoryOpenId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
@@ -292,12 +324,17 @@ export function App() {
   }, [tab]);
 
   async function saveWorkout(payload: WorkoutInput) {
+    const wasEditing = editingWorkout !== null;
     const saved = editingWorkout
       ? await api.updateWorkout(editingWorkout.id, payload)
       : await api.createWorkout(payload);
     const newRecords = await api.listPersonalRecords({ workoutId: saved.id });
     await refreshData();
-    setTab(editingWorkout ? 'history' : 'dashboard');
+    if (!wasEditing) {
+      clearActiveWorkoutDraft();
+      setActiveWorkoutStartedAt(null);
+    }
+    setTab(wasEditing ? 'history' : 'dashboard');
     setMessage(
       newRecords.length
         ? `Workout saved — ${newRecords.length} PR${newRecords.length === 1 ? '' : 's'}! ${newRecords.map((record) => recordTypeLabel(record.record_type)).join(', ')}`
@@ -361,9 +398,13 @@ export function App() {
   }
 
   function startWorkout(workoutDate = localDate()) {
+    const storedDraft = readActiveWorkoutDraft();
+    const startedAt = storedDraft?.startedAt ?? Date.now();
     setEditingWorkout(null);
-    setWorkoutStartDate(workoutDate);
+    setActiveWorkoutStartedAt(startedAt);
+    setWorkoutStartDate(storedDraft?.workoutDate ?? workoutDate);
     setTab('log');
+    if (navigator.storage?.persist) void navigator.storage.persist().catch(() => false);
   }
 
   function editWorkout(workout: TrackedWorkout) {
@@ -471,6 +512,11 @@ export function App() {
         )}
         {!loading && tab === 'log' && (
           <WorkoutLogger
+            key={
+              editingWorkout
+                ? `edit-${editingWorkout.id}`
+                : `active-${activeWorkoutStartedAt ?? workoutStartDate}`
+            }
             exercises={exercises}
             recommendation={dashboard?.recommendation ?? null}
             initialDate={workoutStartDate}
@@ -480,7 +526,12 @@ export function App() {
             historicalWorkouts={workouts}
             onExerciseFavorite={updateExerciseFavorite}
             onSave={saveWorkout}
-            onCancel={() => {
+            activeStartedAt={activeWorkoutStartedAt}
+            onClose={() => {
+              if (!editingWorkout) {
+                clearActiveWorkoutDraft();
+                setActiveWorkoutStartedAt(null);
+              }
               setTab(editingWorkout ? 'history' : 'dashboard');
               setEditingWorkout(null);
             }}
@@ -525,11 +576,12 @@ export function App() {
         />
         <NavButton active={tab === 'body'} label="Body" icon="◒" onClick={() => setTab('body')} />
         <button
-          className={`nav-log ${tab === 'log' ? 'active' : ''}`}
+          className={`nav-log ${tab === 'log' ? 'active' : ''} ${activeWorkoutStartedAt !== null ? 'workout-active' : ''}`}
+          aria-label={activeWorkoutStartedAt !== null ? 'Resume active workout' : 'Start workout'}
           onClick={() => startWorkout()}
         >
-          <span>＋</span>
-          Log
+          <span>{activeWorkoutStartedAt !== null ? <i className="nav-live-dot" /> : '＋'}</span>
+          {activeWorkoutStartedAt !== null ? 'Live' : 'Log'}
         </button>
         <NavButton
           active={tab === 'history'}
@@ -777,10 +829,10 @@ function DashboardScreen({
         </div>
         <WorkoutHeatmap
           entries={data.heatmap}
-          monthCount="all"
+          monthCount={2}
           onDayClick={(workoutDate, entry) => {
             if (entry) setSelectedDay(entry);
-            else if (workoutDate === localDate()) onStart(workoutDate);
+            else onStart(workoutDate);
           }}
         />
         <div className="heatmap-legend">
@@ -796,6 +848,7 @@ function DashboardScreen({
           <CalendarDayDetail
             day={selectedDay}
             onClose={() => setSelectedDay(null)}
+            onStartWorkout={onStart}
             onEditWorkout={onEditWorkout}
           />
         )}
@@ -1174,6 +1227,7 @@ function WorkoutHeatmap({
   monthCount: number | 'all';
   onDayClick: (workoutDate: string, entry: DashboardData['heatmap'][number] | undefined) => void;
 }) {
+  const calendarScrollRef = useRef<HTMLDivElement>(null);
   const map = new Map(entries.map((entry) => [entry.workout_date, entry]));
   const months = useMemo(() => {
     const today = new Date();
@@ -1202,12 +1256,21 @@ function WorkoutHeatmap({
         title: first.toLocaleDateString(undefined, { month: 'long', year: 'numeric' }),
         cells,
       };
-    });
+    }).reverse();
   }, [entries, monthCount]);
   const todayKey = localCalendarDate(new Date());
 
+  useEffect(() => {
+    const calendar = calendarScrollRef.current;
+    if (!calendar) return;
+    const frame = window.requestAnimationFrame(() => {
+      calendar.scrollLeft = calendar.scrollWidth - calendar.clientWidth;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [months]);
+
   return (
-    <div className="calendar-scroll">
+    <div className="calendar-scroll" ref={calendarScrollRef}>
       {months.map((month) => (
         <article className="calendar-month" key={month.key}>
           <h3>{month.title}</h3>
@@ -1232,8 +1295,13 @@ function WorkoutHeatmap({
                   className={`calendar-day ${entry ? 'trained' : ''} ${key === todayKey ? 'today' : ''} ${key > todayKey ? 'future' : ''}`}
                   key={key}
                   style={background ? { background } : undefined}
-                  disabled={!entry && key !== todayKey}
                   onClick={() => onDayClick(key, entry)}
+                  aria-current={key === todayKey ? 'date' : undefined}
+                  aria-label={
+                    entry
+                      ? `View ${entry.workout_count} ${entry.workout_count === 1 ? 'workout' : 'workouts'} for ${prettyDate(key)}`
+                      : `Create workout for ${prettyDate(key)}`
+                  }
                   title={
                     entry
                       ? `${prettyDate(key)}: ${entry.workout_count} ${entry.workout_count === 1 ? 'workout' : 'workouts'}, ${entry.set_count} sets`
@@ -1254,10 +1322,12 @@ function WorkoutHeatmap({
 function CalendarDayDetail({
   day,
   onClose,
+  onStartWorkout,
   onEditWorkout,
 }: {
   day: DashboardData['heatmap'][number];
   onClose: () => void;
+  onStartWorkout: (workoutDate: string) => void;
   onEditWorkout: (workoutId: string) => void;
 }) {
   return (
@@ -1305,6 +1375,13 @@ function CalendarDayDetail({
           </article>
         ))}
       </div>
+      <button
+        type="button"
+        className="calendar-add-workout"
+        onClick={() => onStartWorkout(day.workout_date)}
+      >
+        Add another workout
+      </button>
     </section>
   );
 }
@@ -1349,7 +1426,8 @@ function WorkoutLogger({
   historicalWorkouts,
   onExerciseFavorite,
   onSave,
-  onCancel,
+  activeStartedAt,
+  onClose,
 }: {
   exercises: Exercise[];
   recommendation: WorkoutRecommendation | null;
@@ -1360,14 +1438,18 @@ function WorkoutLogger({
   historicalWorkouts: TrackedWorkout[];
   onExerciseFavorite: (exerciseId: string, isFavorite: boolean) => Promise<void>;
   onSave: (payload: WorkoutInput) => Promise<PersonalRecord[]>;
-  onCancel: () => void;
+  activeStartedAt: number | null;
+  onClose: () => void;
 }) {
-  const [name, setName] = useState(initialWorkout?.name ?? '');
-  const [workoutDate, setWorkoutDate] = useState(initialDate);
-  const [category, setCategory] = useState<WorkoutCategory>(
-    initialWorkout?.category ?? recommendation?.category ?? 'push',
+  const restoredDraft = useState(() => (initialWorkout ? null : readActiveWorkoutDraft()))[0];
+  const [name, setName] = useState(initialWorkout?.name ?? restoredDraft?.name ?? '');
+  const [workoutDate, setWorkoutDate] = useState(
+    initialWorkout?.workout_date ?? restoredDraft?.workoutDate ?? initialDate,
   );
-  const [notes, setNotes] = useState(initialWorkout?.notes ?? '');
+  const [category, setCategory] = useState<WorkoutCategory>(
+    initialWorkout?.category ?? restoredDraft?.category ?? recommendation?.category ?? 'push',
+  );
+  const [notes, setNotes] = useState(initialWorkout?.notes ?? restoredDraft?.notes ?? '');
   const [movements, setMovements] = useState<DraftMovement[]>(() =>
     initialWorkout
       ? initialWorkout.movements.map((movement) => ({
@@ -1384,6 +1466,8 @@ function WorkoutLogger({
             rest_seconds: item.rest_seconds,
             duration_seconds: item.duration_seconds,
             distance_km: item.distance_km,
+            incline_percent: item.incline_percent,
+            speed_kph: item.speed_kph,
             bodyweight_kg: item.bodyweight_kg,
             percentile: item.percentile,
             warmup: item.warmup,
@@ -1394,14 +1478,36 @@ function WorkoutLogger({
             completed: item.completed,
           })),
         }))
-      : [],
+      : (restoredDraft?.movements.flatMap((movement) => {
+          const exercise = exercises.find((item) => item.id === movement.exerciseId);
+          return exercise
+            ? [
+                {
+                  key: movement.key,
+                  exercise,
+                  notes: movement.notes,
+                  machinePhotoIds: movement.machinePhotoIds,
+                  supersetKey: movement.supersetKey,
+                  sets: movement.sets,
+                },
+              ]
+            : [];
+        }) ?? []),
   );
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [supersetPickerKey, setSupersetPickerKey] = useState<string | null>(null);
+  const [closeConfirmationOpen, setCloseConfirmationOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [elapsed, setElapsed] = useState((initialWorkout?.duration_minutes ?? 0) * 60);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const supersetButtonRef = useRef<HTMLButtonElement>(null);
+  const startedAt = useState(() => restoredDraft?.startedAt ?? activeStartedAt ?? Date.now())[0];
+  const [elapsed, setElapsed] = useState(
+    initialWorkout
+      ? (initialWorkout.duration_minutes ?? 0) * 60
+      : Math.max(0, Math.floor((Date.now() - startedAt) / 1000)),
+  );
   const [restLeft, setRestLeft] = useState(0);
-  const startedAt = useState(() => Date.now())[0];
 
   useEffect(() => {
     if (initialWorkout) return;
@@ -1411,6 +1517,39 @@ function WorkoutLogger({
     );
     return () => window.clearInterval(timer);
   }, [initialWorkout, startedAt]);
+
+  useEffect(() => {
+    if (initialWorkout) return;
+    const persistDraft = () => {
+      writeActiveWorkoutDraft({
+        version: 1,
+        startedAt,
+        updatedAt: Date.now(),
+        name,
+        workoutDate,
+        category,
+        notes,
+        movements: movements.map((movement) => ({
+          key: movement.key,
+          exerciseId: movement.exercise.id,
+          notes: movement.notes,
+          machinePhotoIds: movement.machinePhotoIds,
+          supersetKey: movement.supersetKey,
+          sets: movement.sets,
+        })),
+      });
+    };
+    const persistWhenHidden = () => {
+      if (document.visibilityState === 'hidden') persistDraft();
+    };
+    persistDraft();
+    window.addEventListener('pagehide', persistDraft);
+    document.addEventListener('visibilitychange', persistWhenHidden);
+    return () => {
+      window.removeEventListener('pagehide', persistDraft);
+      document.removeEventListener('visibilitychange', persistWhenHidden);
+    };
+  }, [category, initialWorkout, movements, name, notes, startedAt, workoutDate]);
 
   useEffect(() => {
     if (restLeft <= 0) return;
@@ -1511,27 +1650,27 @@ function WorkoutLogger({
     setUndoDeletion(null);
   }
 
-  function toggleSuperset(movementKey: string) {
-    const current = movements.find((item) => item.key === movementKey);
-    if (!current) return;
-    if (current.supersetKey) {
-      const key = current.supersetKey;
-      setMovements((items) =>
-        items.map((item) => (item.supersetKey === key ? { ...item, supersetKey: null } : item)),
-      );
-      return;
-    }
-    const partner = movements.find((item) => item.key !== movementKey && !item.supersetKey);
-    if (!partner) {
-      setError('Add another ungrouped exercise before creating a superset.');
-      return;
-    }
-    const key = crypto.randomUUID();
+  function openSupersetPicker(movementKey: string, button: HTMLButtonElement) {
+    supersetButtonRef.current = button;
+    setError(null);
+    setSupersetPickerKey(movementKey);
+  }
+
+  function closeSupersetPicker() {
+    setSupersetPickerKey(null);
+    window.requestAnimationFrame(() => supersetButtonRef.current?.focus());
+  }
+
+  function saveSuperset(movementKey: string, partnerKeys: string[]) {
     setMovements((items) =>
-      items.map((item) =>
-        item.key === movementKey || item.key === partner.key ? { ...item, supersetKey: key } : item,
-      ),
+      applySupersetSelection(items, movementKey, partnerKeys, crypto.randomUUID()),
     );
+    closeSupersetPicker();
+  }
+
+  function removeSuperset(movementKey: string) {
+    setMovements((items) => clearSuperset(items, movementKey));
+    closeSupersetPicker();
   }
 
   function updateSet(movementKey: string, setKey: string, update: Partial<DraftSet>) {
@@ -1597,6 +1736,8 @@ function WorkoutLogger({
             rest_seconds: item.rest_seconds,
             duration_seconds: item.duration_seconds,
             distance_km: item.distance_km,
+            incline_percent: item.incline_percent ?? null,
+            speed_kph: item.speed_kph ?? null,
             bodyweight_kg: item.bodyweight_kg,
             percentile: item.percentile,
             warmup: item.warmup,
@@ -1618,7 +1759,9 @@ function WorkoutLogger({
   return (
     <section className="logger-screen content-page">
       <div className="live-workout-bar">
-        <button onClick={onCancel}>Cancel</button>
+        <button ref={closeButtonRef} type="button" onClick={() => setCloseConfirmationOpen(true)}>
+          Close
+        </button>
         <div>
           {!initialWorkout && <span className="live-dot" />}
           {initialWorkout ? 'EDIT WORKOUT' : ` LIVE · ${formatDuration(elapsed)}`}
@@ -1732,7 +1875,7 @@ function WorkoutLogger({
             canMoveDown={movementIndex < movements.length - 1}
             onMoveSet={(index, direction) => moveSet(movement.key, index, direction)}
             onDeleteSet={(index) => deleteSet(movement, index)}
-            onSuperset={() => toggleSuperset(movement.key)}
+            onSuperset={(button) => openSupersetPicker(movement.key, button)}
             onMachinePhotos={(machinePhotoIds) =>
               setMovements((current) =>
                 current.map((item) =>
@@ -1766,7 +1909,7 @@ function WorkoutLogger({
           </button>
         </div>
       )}
-      <button className="add-exercise-button" onClick={() => setPickerOpen(true)}>
+      <button className="add-exercise-button" type="button" onClick={() => setPickerOpen(true)}>
         ＋ Add exercise
       </button>
       <label className="workout-notes panel">
@@ -1778,6 +1921,24 @@ function WorkoutLogger({
           rows={3}
         />
       </label>
+      <button
+        className="primary-action finish-workout-bottom"
+        disabled={saving}
+        onClick={() => void finishWorkout()}
+      >
+        {saving ? 'Saving…' : initialWorkout ? 'Save workout' : 'Finish workout'}
+      </button>
+
+      {closeConfirmationOpen && (
+        <WorkoutCloseDialog
+          editing={Boolean(initialWorkout)}
+          onCancel={() => {
+            setCloseConfirmationOpen(false);
+            window.requestAnimationFrame(() => closeButtonRef.current?.focus());
+          }}
+          onConfirm={onClose}
+        />
+      )}
 
       {pickerOpen && (
         <ExercisePicker
@@ -1791,7 +1952,252 @@ function WorkoutLogger({
           onClose={() => setPickerOpen(false)}
         />
       )}
+
+      {supersetPickerKey && (
+        <SupersetPicker
+          key={supersetPickerKey}
+          movementKey={supersetPickerKey}
+          movements={movements}
+          onClose={closeSupersetPicker}
+          onSave={(partnerKeys) => saveSuperset(supersetPickerKey, partnerKeys)}
+          onRemove={() => removeSuperset(supersetPickerKey)}
+        />
+      )}
     </section>
+  );
+}
+
+function SupersetPicker({
+  movementKey,
+  movements,
+  onClose,
+  onSave,
+  onRemove,
+}: {
+  movementKey: string;
+  movements: DraftMovement[];
+  onClose: () => void;
+  onSave: (partnerKeys: string[]) => void;
+  onRemove: () => void;
+}) {
+  const movement = movements.find((item) => item.key === movementKey);
+  const candidates = movements.filter((item) => item.key !== movementKey);
+  const [selectedKeys, setSelectedKeys] = useState<string[]>(() =>
+    movement?.supersetKey
+      ? candidates
+          .filter((item) => item.supersetKey === movement.supersetKey)
+          .map((item) => item.key)
+      : [],
+  );
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const onCloseRef = useRef(onClose);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
+    const root = document.getElementById('root');
+    const rootWasInert = root?.hasAttribute('inert') ?? false;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    root?.setAttribute('inert', '');
+    closeButtonRef.current?.focus();
+
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onCloseRef.current();
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      if (!rootWasInert) root?.removeAttribute('inert');
+      window.removeEventListener('keydown', closeOnEscape);
+    };
+  }, []);
+
+  if (!movement) return null;
+
+  const selected = new Set(selectedKeys);
+  const toggleSelection = (key: string) => {
+    setSelectedKeys((current) =>
+      current.includes(key) ? current.filter((item) => item !== key) : [...current, key],
+    );
+  };
+
+  return createPortal(
+    <div
+      className="modal-backdrop superset-picker-backdrop"
+      onPointerDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <section
+        className="superset-picker panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="superset-picker-title"
+        aria-describedby="superset-picker-description"
+      >
+        <header>
+          <div>
+            <p className="section-kicker">SUPERSET BUILDER</p>
+            <h2 id="superset-picker-title">Group {movement.exercise.name}</h2>
+          </div>
+          <button
+            ref={closeButtonRef}
+            type="button"
+            onClick={onClose}
+            aria-label="Close superset picker"
+          >
+            ×
+          </button>
+        </header>
+        <p id="superset-picker-description">
+          Choose one or more exercises to perform back-to-back with little or no rest.
+        </p>
+
+        <div className="superset-options" aria-label="Exercises in this workout">
+          {candidates.length === 0 ? (
+            <div className="superset-empty">
+              <strong>No other exercises yet</strong>
+              <span>Add another exercise to this workout, then come back to group it.</span>
+            </div>
+          ) : (
+            candidates.map((candidate) => {
+              const belongsToAnotherGroup = Boolean(
+                candidate.supersetKey && candidate.supersetKey !== movement.supersetKey,
+              );
+              const isSelected = selected.has(candidate.key);
+              return (
+                <label
+                  className={`superset-option ${isSelected ? 'selected' : ''} ${
+                    belongsToAnotherGroup ? 'unavailable' : ''
+                  }`}
+                  key={candidate.key}
+                >
+                  <input
+                    type="checkbox"
+                    checked={isSelected}
+                    disabled={belongsToAnotherGroup}
+                    onChange={() => toggleSelection(candidate.key)}
+                  />
+                  <ExerciseIcon
+                    exercise={candidate.exercise}
+                    number={movements.indexOf(candidate) + 1}
+                  />
+                  <span className="superset-option-copy">
+                    <strong>{candidate.exercise.name}</strong>
+                    <small>
+                      {candidate.exercise.muscle_group} · {candidate.exercise.equipment}
+                    </small>
+                  </span>
+                  <span className="superset-option-status">
+                    {belongsToAnotherGroup ? 'Already grouped' : isSelected ? 'Selected' : 'Add'}
+                  </span>
+                </label>
+              );
+            })
+          )}
+        </div>
+
+        <footer>
+          {movement.supersetKey && (
+            <button className="remove-superset-button" type="button" onClick={onRemove}>
+              Remove group
+            </button>
+          )}
+          <div className="superset-picker-actions">
+            <button type="button" onClick={onClose}>
+              Cancel
+            </button>
+            <button
+              className="save-superset-button"
+              type="button"
+              disabled={selectedKeys.length === 0}
+              onClick={() => onSave(selectedKeys)}
+            >
+              {movement.supersetKey ? 'Update group' : 'Create superset'}
+            </button>
+          </div>
+        </footer>
+      </section>
+    </div>,
+    document.body,
+  );
+}
+
+function WorkoutCloseDialog({
+  editing,
+  onCancel,
+  onConfirm,
+}: {
+  editing: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const safeButtonRef = useRef<HTMLButtonElement>(null);
+  const onCancelRef = useRef(onCancel);
+
+  useEffect(() => {
+    onCancelRef.current = onCancel;
+  }, [onCancel]);
+
+  useEffect(() => {
+    const root = document.getElementById('root');
+    const rootWasInert = root?.hasAttribute('inert') ?? false;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    root?.setAttribute('inert', '');
+    safeButtonRef.current?.focus();
+
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onCancelRef.current();
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      if (!rootWasInert) root?.removeAttribute('inert');
+      window.removeEventListener('keydown', closeOnEscape);
+    };
+  }, []);
+
+  return createPortal(
+    <div
+      className="modal-backdrop workout-close-backdrop"
+      onPointerDown={(event) => {
+        if (event.target === event.currentTarget) onCancel();
+      }}
+    >
+      <section
+        className="workout-close-dialog panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="workout-close-title"
+        aria-describedby="workout-close-description"
+      >
+        <div className="workout-close-warning" aria-hidden="true">
+          !
+        </div>
+        <p className="section-kicker">PLEASE CONFIRM</p>
+        <h2 id="workout-close-title">
+          {editing ? 'Discard your changes?' : 'Discard this workout?'}
+        </h2>
+        <p id="workout-close-description">
+          {editing
+            ? 'Your recent edits will be lost. The previously saved workout will stay in your history.'
+            : 'Your unsaved sets and notes will be removed. This cannot be undone.'}
+        </p>
+        <div className="workout-close-actions">
+          <button ref={safeButtonRef} type="button" onClick={onCancel}>
+            {editing ? 'Keep editing' : 'Keep workout'}
+          </button>
+          <button className="discard-workout-button" type="button" onClick={onConfirm}>
+            {editing ? 'Discard changes' : 'Discard workout'}
+          </button>
+        </div>
+      </section>
+    </div>,
+    document.body,
   );
 }
 
@@ -1877,11 +2283,26 @@ function MovementCard({
   canMoveDown: boolean;
   onMoveSet: (index: number, direction: -1 | 1) => void;
   onDeleteSet: (index: number) => void;
-  onSuperset: () => void;
+  onSuperset: (button: HTMLButtonElement) => void;
 }) {
   const cardio = movement.exercise.kind === 'cardio';
+  const treadmill =
+    cardio && (movement.exercise.equipment?.toLowerCase().includes('treadmill') ?? false);
+  const completedSetCount = movement.sets.filter((item) => item.completed).length;
+  const [expanded, setExpanded] = useState(completedSetCount < 3);
+  const previousCompletedSetCount = useRef(completedSetCount);
+
+  useEffect(() => {
+    const previousCount = previousCompletedSetCount.current;
+    if (previousCount < 3 && completedSetCount >= 3) setExpanded(false);
+    if (previousCount >= 3 && completedSetCount < 3) setExpanded(true);
+    previousCompletedSetCount.current = completedSetCount;
+  }, [completedSetCount]);
+
   return (
-    <article className={`movement-card panel ${supersetLabel ? 'superset-card' : ''}`}>
+    <article
+      className={`movement-card panel ${expanded ? '' : 'is-collapsed'} ${supersetLabel ? 'superset-card' : ''}`}
+    >
       {supersetLabel && <div className="superset-ribbon">{supersetLabel}</div>}
       <header>
         <ExerciseIcon exercise={movement.exercise} number={number} />
@@ -1891,15 +2312,34 @@ function MovementCard({
             {movement.exercise.muscle_group} · {movement.exercise.equipment}
             {currentBodyweight !== null && ` · @ ${currentBodyweight} kg`}
           </p>
+          {!expanded && (
+            <span className="movement-completed-summary">
+              {completedSetCount} completed {completedSetCount === 1 ? 'set' : 'sets'}
+            </span>
+          )}
         </div>
         <div className="movement-actions">
+          <button
+            className="movement-collapse-toggle"
+            onClick={() => setExpanded((current) => !current)}
+            aria-expanded={expanded}
+            aria-label={`${expanded ? 'Minimise' : 'Expand'} ${movement.exercise.name}`}
+          >
+            {expanded ? 'Minimise' : 'Expand'}
+            <span aria-hidden="true">{expanded ? '⌃' : '⌄'}</span>
+          </button>
           <button disabled={!canMoveUp} onClick={onMoveUp} aria-label="Move exercise up">
             ↑
           </button>
           <button disabled={!canMoveDown} onClick={onMoveDown} aria-label="Move exercise down">
             ↓
           </button>
-          <button onClick={onSuperset} aria-label="Toggle superset">
+          <button
+            className={supersetLabel ? 'active' : ''}
+            onClick={(event) => onSuperset(event.currentTarget)}
+            aria-label={`Choose superset exercises for ${movement.exercise.name}`}
+            aria-haspopup="dialog"
+          >
             S
           </button>
           <button onClick={onRemove} aria-label={`Remove ${movement.exercise.name}`}>
@@ -1935,183 +2375,249 @@ function MovementCard({
         </div>
         {movement.sets.map((item, index) => (
           <Fragment key={item.key}>
-            <div
-              className={`set-row ${item.completed ? 'completed' : ''} ${item.failed ? 'failed-set' : ''} set-type-${item.set_type ?? 'normal'}`}
+            <details
+              className={`set-details ${item.completed ? 'completed' : ''}`}
+              open={!item.completed}
             >
-              <span className="set-index">
-                {index + 1}
-                {prBadges.has(item.key) && (
-                  <b className="pr-badge" title={prBadges.get(item.key)?.join(', ')}>
-                    PR
-                  </b>
-                )}
-              </span>
-              {cardio ? (
-                <>
-                  <input
-                    inputMode="numeric"
-                    type="number"
-                    min="0"
-                    value={
-                      item.duration_seconds === null ? '' : Math.round(item.duration_seconds / 60)
-                    }
-                    onChange={(event) =>
-                      onUpdateSet(item.key, {
-                        duration_seconds:
-                          numberOrNull(event.target.value) === null
-                            ? null
-                            : Number(event.target.value) * 60,
-                      })
-                    }
-                    aria-label="Duration minutes"
-                  />
-                  <input
-                    inputMode="decimal"
-                    type="number"
-                    min="0"
-                    step="0.1"
-                    value={item.distance_km ?? ''}
-                    onChange={(event) =>
-                      onUpdateSet(item.key, { distance_km: numberOrNull(event.target.value) })
-                    }
-                    aria-label="Distance kilometres"
-                  />
-                </>
-              ) : (
-                <>
-                  <input
-                    inputMode="decimal"
-                    type="number"
-                    min="0"
-                    step="0.5"
-                    value={item.weight_kg ?? ''}
-                    onChange={(event) =>
-                      onUpdateSet(item.key, { weight_kg: numberOrNull(event.target.value) })
-                    }
-                    aria-label="Weight kilograms"
-                  />
-                  <input
-                    inputMode="numeric"
-                    type="number"
-                    min="0"
-                    value={item.reps ?? ''}
-                    onChange={(event) =>
-                      onUpdateSet(item.key, { reps: numberOrNull(event.target.value) })
-                    }
-                    aria-label="Repetitions"
-                  />
-                </>
-              )}
-              <select
-                value={item.rpe ?? ''}
-                onChange={(event) =>
-                  onUpdateSet(item.key, { rpe: numberOrNull(event.target.value) })
-                }
-                aria-label="RPE"
+              <summary className="completed-set-summary">
+                <span className="set-index">
+                  {index + 1}
+                  {prBadges.has(item.key) && (
+                    <b className="pr-badge" title={prBadges.get(item.key)?.join(', ')}>
+                      PR
+                    </b>
+                  )}
+                </span>
+                <span className="completed-set-result">
+                  <strong>{completedSetPerformance(item, cardio)}</strong>
+                  <small>{completedSetMeta(item)}</small>
+                </span>
+                <b className="completed-set-check">✓</b>
+                <span className="completed-set-chevron" aria-hidden="true">
+                  ⌄
+                </span>
+              </summary>
+              <div
+                className={`set-row ${item.completed ? 'completed' : ''} ${item.failed ? 'failed-set' : ''} set-type-${item.set_type ?? 'normal'}`}
               >
-                <option value="">–</option>
-                {[5, 6, 7, 7.5, 8, 8.5, 9, 9.5, 10].map((rpe) => (
-                  <option key={rpe} value={rpe}>
-                    {rpe}
-                  </option>
-                ))}
-              </select>
-              <button
-                className="complete-set"
-                onClick={() => onToggleSet(item)}
-                aria-label={item.completed ? 'Mark set incomplete' : 'Complete set'}
-              >
-                {item.completed ? '✓' : ''}
-              </button>
-              <div className="set-extras">
-                <label>
-                  Type
-                  <select
-                    value={item.set_type ?? (item.warmup ? 'warmup' : 'normal')}
-                    onChange={(event) =>
-                      onUpdateSet(item.key, {
-                        set_type: event.target.value as DraftSet['set_type'],
-                        warmup: event.target.value === 'warmup',
-                      })
-                    }
-                  >
-                    <option value="normal">Working</option>
-                    <option value="warmup">Warm-up</option>
-                    <option value="drop">Drop set</option>
-                  </select>
-                </label>
-                <label>
-                  Rest
-                  <select
-                    value={item.rest_seconds ?? 120}
-                    onChange={(event) =>
-                      onUpdateSet(item.key, { rest_seconds: Number(event.target.value) })
-                    }
-                  >
-                    {restOptions.map((seconds) => (
-                      <option key={seconds} value={seconds}>
-                        {seconds < 60 ? `${seconds}s` : `${seconds / 60}m`}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="failed-toggle">
-                  <input
-                    type="checkbox"
-                    checked={item.failed ?? false}
-                    onChange={(event) => onUpdateSet(item.key, { failed: event.target.checked })}
-                  />
-                  Failed
-                </label>
-                {item.failed && !cardio && (
-                  <label>
-                    Target reps
+                <span className="set-index">
+                  {index + 1}
+                  {prBadges.has(item.key) && (
+                    <b className="pr-badge" title={prBadges.get(item.key)?.join(', ')}>
+                      PR
+                    </b>
+                  )}
+                </span>
+                {cardio ? (
+                  <>
                     <input
+                      inputMode="numeric"
                       type="number"
                       min="0"
-                      inputMode="numeric"
-                      value={item.target_reps ?? ''}
-                      onChange={(event) =>
-                        onUpdateSet(item.key, { target_reps: numberOrNull(event.target.value) })
+                      value={
+                        item.duration_seconds === null ? '' : Math.round(item.duration_seconds / 60)
                       }
+                      onChange={(event) =>
+                        onUpdateSet(item.key, {
+                          duration_seconds:
+                            numberOrNull(event.target.value) === null
+                              ? null
+                              : Number(event.target.value) * 60,
+                        })
+                      }
+                      aria-label="Duration minutes"
                     />
-                  </label>
+                    <input
+                      inputMode="decimal"
+                      type="number"
+                      min="0"
+                      step="0.1"
+                      value={item.distance_km ?? ''}
+                      onChange={(event) =>
+                        onUpdateSet(item.key, { distance_km: numberOrNull(event.target.value) })
+                      }
+                      aria-label="Distance kilometres"
+                    />
+                  </>
+                ) : (
+                  <>
+                    <input
+                      inputMode="decimal"
+                      type="number"
+                      min="0"
+                      step="0.5"
+                      value={item.weight_kg ?? ''}
+                      onChange={(event) =>
+                        onUpdateSet(item.key, { weight_kg: numberOrNull(event.target.value) })
+                      }
+                      aria-label="Weight kilograms"
+                    />
+                    <input
+                      inputMode="numeric"
+                      type="number"
+                      min="0"
+                      value={item.reps ?? ''}
+                      onChange={(event) =>
+                        onUpdateSet(item.key, { reps: numberOrNull(event.target.value) })
+                      }
+                      aria-label="Repetitions"
+                    />
+                  </>
                 )}
-                <input
-                  value={item.notes ?? ''}
-                  onChange={(event) => onUpdateSet(item.key, { notes: event.target.value || null })}
-                  placeholder="Set note (optional)"
-                />
-                <div className="set-order-actions">
-                  <button
-                    disabled={index === 0}
-                    onClick={() => onMoveSet(index, -1)}
-                    aria-label="Move set up"
-                  >
-                    ↑
-                  </button>
-                  <button
-                    disabled={index === movement.sets.length - 1}
-                    onClick={() => onMoveSet(index, 1)}
-                    aria-label="Move set down"
-                  >
-                    ↓
-                  </button>
-                  <button
-                    className="danger"
-                    onClick={() => onDeleteSet(index)}
-                    aria-label="Delete set"
-                  >
-                    Delete
-                  </button>
+                <select
+                  value={item.rpe ?? ''}
+                  onChange={(event) =>
+                    onUpdateSet(item.key, { rpe: numberOrNull(event.target.value) })
+                  }
+                  aria-label="RPE"
+                >
+                  <option value="">–</option>
+                  {[5, 6, 7, 7.5, 8, 8.5, 9, 9.5, 10].map((rpe) => (
+                    <option key={rpe} value={rpe}>
+                      {rpe}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  className="complete-set"
+                  onClick={() => onToggleSet(item)}
+                  aria-label={item.completed ? 'Mark set incomplete' : 'Complete set'}
+                >
+                  {item.completed ? '✓' : ''}
+                </button>
+                <div className="set-extras">
+                  {treadmill && (
+                    <fieldset className="treadmill-set-fields">
+                      <legend>Treadmill</legend>
+                      <label>
+                        Incline %
+                        <input
+                          inputMode="decimal"
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="0.5"
+                          value={item.incline_percent ?? ''}
+                          onChange={(event) =>
+                            onUpdateSet(item.key, {
+                              incline_percent: numberOrNull(event.target.value),
+                            })
+                          }
+                          aria-label="Treadmill incline percentage"
+                        />
+                      </label>
+                      <label>
+                        Speed km/h
+                        <input
+                          inputMode="decimal"
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="0.1"
+                          value={item.speed_kph ?? ''}
+                          onChange={(event) =>
+                            onUpdateSet(item.key, { speed_kph: numberOrNull(event.target.value) })
+                          }
+                          aria-label="Treadmill speed kilometres per hour"
+                        />
+                      </label>
+                    </fieldset>
+                  )}
+                  <label>
+                    Type
+                    <select
+                      value={item.set_type ?? (item.warmup ? 'warmup' : 'normal')}
+                      onChange={(event) =>
+                        onUpdateSet(item.key, {
+                          set_type: event.target.value as DraftSet['set_type'],
+                          warmup: event.target.value === 'warmup',
+                        })
+                      }
+                    >
+                      <option value="normal">Working</option>
+                      <option value="warmup">Warm-up</option>
+                      <option value="drop">Drop set</option>
+                    </select>
+                  </label>
+                  <label>
+                    Rest
+                    <select
+                      value={item.rest_seconds ?? 120}
+                      onChange={(event) =>
+                        onUpdateSet(item.key, { rest_seconds: Number(event.target.value) })
+                      }
+                    >
+                      {restOptions.map((seconds) => (
+                        <option key={seconds} value={seconds}>
+                          {seconds < 60 ? `${seconds}s` : `${seconds / 60}m`}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  {!cardio && (
+                    <label className="failed-toggle">
+                      <input
+                        type="checkbox"
+                        checked={item.failed ?? false}
+                        onChange={(event) =>
+                          onUpdateSet(item.key, { failed: event.target.checked })
+                        }
+                      />
+                      Failed
+                    </label>
+                  )}
+                  {item.failed && !cardio && (
+                    <label>
+                      Target reps
+                      <input
+                        type="number"
+                        min="0"
+                        inputMode="numeric"
+                        value={item.target_reps ?? ''}
+                        onChange={(event) =>
+                          onUpdateSet(item.key, { target_reps: numberOrNull(event.target.value) })
+                        }
+                      />
+                    </label>
+                  )}
+                  <input
+                    value={item.notes ?? ''}
+                    onChange={(event) =>
+                      onUpdateSet(item.key, { notes: event.target.value || null })
+                    }
+                    placeholder="Set note (optional)"
+                  />
+                  <div className="set-order-actions">
+                    <button
+                      disabled={index === 0}
+                      onClick={() => onMoveSet(index, -1)}
+                      aria-label="Move set up"
+                    >
+                      ↑
+                    </button>
+                    <button
+                      disabled={index === movement.sets.length - 1}
+                      onClick={() => onMoveSet(index, 1)}
+                      aria-label="Move set down"
+                    >
+                      ↓
+                    </button>
+                    <button
+                      className="danger"
+                      onClick={() => onDeleteSet(index)}
+                      aria-label="Delete set"
+                    >
+                      Delete
+                    </button>
+                  </div>
                 </div>
+                {prBadges.has(item.key) && (
+                  <div className="pr-callout" role="status">
+                    🏆 {prBadges.get(item.key)?.join(' · ')}
+                  </div>
+                )}
               </div>
-              {prBadges.has(item.key) && (
-                <div className="pr-callout" role="status">
-                  🏆 {prBadges.get(item.key)?.join(' · ')}
-                </div>
-              )}
-            </div>
+            </details>
             {index < movement.sets.length - 1 && (
               <div className="rest-between" aria-label={`Rest after set ${index + 1}`}>
                 <i />
@@ -2150,6 +2656,7 @@ function MachinePhotoChooser({
   const [pending, setPending] = useState<{ file: File; previewUrl: string } | null>(null);
   const [caption, setCaption] = useState('');
   const [expanded, setExpanded] = useState<MachinePhoto | null>(null);
+  const [photoPanelOpen, setPhotoPanelOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -2198,6 +2705,7 @@ function MachinePhotoChooser({
       onChange([...new Set([...selectedIds, photo.id])]);
       setPending(null);
       setCaption('');
+      setPhotoPanelOpen(false);
     } catch (uploadError) {
       setError(uploadError instanceof Error ? uploadError.message : 'Could not save that photo.');
     } finally {
@@ -2226,106 +2734,136 @@ function MachinePhotoChooser({
     setExpanded(null);
   }
 
-  return (
-    <section className="machine-photo-picker" aria-label={`Machine photos for ${exercise.name}`}>
-      <div className="machine-photo-heading">
-        <div>
-          <strong>Machine used</strong>
-          <small>Pin one or more photos to every set in this exercise.</small>
-        </div>
-        {selectedIds.length > 0 && <span>{selectedIds.length} pinned</span>}
-      </div>
-      <div className="machine-photo-actions">
-        <label>
-          <span aria-hidden="true">⌁</span>
-          Take photo
-          <input
-            className="sr-only"
-            type="file"
-            accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
-            capture="environment"
-            onChange={(event) => {
-              stagePhoto(event.target.files?.[0]);
-              event.target.value = '';
-            }}
-          />
-        </label>
-        <label>
-          <span aria-hidden="true">＋</span>
-          Choose photo
-          <input
-            className="sr-only"
-            type="file"
-            accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
-            onChange={(event) => {
-              stagePhoto(event.target.files?.[0]);
-              event.target.value = '';
-            }}
-          />
-        </label>
-      </div>
-      {photos.length > 0 && (
-        <div className="machine-photo-rail">
-          {photos.map((photo) => {
-            const selected = selectedIds.includes(photo.id);
-            return (
-              <article className={selected ? 'selected' : ''} key={photo.id}>
-                <button
-                  type="button"
-                  className="machine-thumbnail"
-                  onClick={() => setExpanded(photo)}
-                  aria-label={`Expand ${photo.caption}`}
-                >
-                  <img src={photo.thumbnail_url} alt={photo.caption} loading="lazy" />
-                </button>
-                <strong title={photo.caption}>{photo.caption}</strong>
-                <button type="button" className="machine-pin" onClick={() => togglePhoto(photo.id)}>
-                  {selected ? '✓ Pinned' : 'Pin to sets'}
-                </button>
-              </article>
-            );
-          })}
-        </div>
-      )}
-      {error && <p className="machine-photo-error">{error}</p>}
+  const pinnedPhotos = photos.filter((photo) => selectedIds.includes(photo.id));
+  const primaryPinnedPhoto = pinnedPhotos[0] ?? null;
+  const photoSummary = primaryPinnedPhoto
+    ? `${primaryPinnedPhoto.caption}${pinnedPhotos.length > 1 ? ` +${pinnedPhotos.length - 1} more` : ''}`
+    : photos.length > 0
+      ? `${photos.length} saved · none pinned`
+      : 'No equipment photo pinned';
 
-      {pending && (
-        <section className="photo-inline-editor panel">
-          <button type="button" className="photo-inline-close" onClick={() => setPending(null)}>
-            Cancel
-          </button>
-          <img src={pending.previewUrl} alt="New machine preview" />
-          <div>
-            <p className="section-kicker">NEW MACHINE PHOTO</p>
-            <h2>Name this machine</h2>
-            <p>For example: Hammer Strength lying leg curl.</p>
+  return (
+    <details
+      className="machine-photo-picker"
+      aria-label={`Machine photos for ${exercise.name}`}
+      open={photoPanelOpen}
+      onToggle={(event) => setPhotoPanelOpen(event.currentTarget.open)}
+    >
+      <summary className="machine-photo-summary">
+        {primaryPinnedPhoto ? (
+          <img src={primaryPinnedPhoto.thumbnail_url} alt="" loading="lazy" />
+        ) : (
+          <span className="machine-photo-placeholder" aria-hidden="true">
+            ⌁
+          </span>
+        )}
+        <span className="machine-photo-summary-copy">
+          <strong>Machine used</strong>
+          <small>{photoSummary}</small>
+        </span>
+        {selectedIds.length > 0 && <b>{selectedIds.length} pinned</b>}
+        <span className="machine-photo-chevron" aria-hidden="true">
+          ⌄
+        </span>
+      </summary>
+      <div className="machine-photo-content">
+        <p>Take, choose, or pin equipment photos for every set in this exercise.</p>
+        <div className="machine-photo-actions">
+          <label>
+            <span aria-hidden="true">⌁</span>
+            Take photo
             <input
-              autoFocus
-              value={caption}
-              maxLength={160}
-              onChange={(event) => setCaption(event.target.value)}
-              placeholder="Machine name"
+              className="sr-only"
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
+              capture="environment"
+              onChange={(event) => {
+                stagePhoto(event.target.files?.[0]);
+                event.target.value = '';
+              }}
             />
-            <div className="photo-inline-actions">
-              <button type="button" onClick={() => setPending(null)} disabled={uploading}>
-                Cancel
-              </button>
-              <button type="button" onClick={() => void uploadPhoto()} disabled={uploading}>
-                {uploading ? 'Saving…' : 'Save and pin'}
-              </button>
-            </div>
+          </label>
+          <label>
+            <span aria-hidden="true">＋</span>
+            Choose photo
+            <input
+              className="sr-only"
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
+              onChange={(event) => {
+                stagePhoto(event.target.files?.[0]);
+                event.target.value = '';
+              }}
+            />
+          </label>
+        </div>
+        {photos.length > 0 && (
+          <div className="machine-photo-rail">
+            {photos.map((photo) => {
+              const selected = selectedIds.includes(photo.id);
+              return (
+                <article className={selected ? 'selected' : ''} key={photo.id}>
+                  <button
+                    type="button"
+                    className="machine-thumbnail"
+                    onClick={() => setExpanded(photo)}
+                    aria-label={`Expand ${photo.caption}`}
+                  >
+                    <img src={photo.thumbnail_url} alt={photo.caption} loading="lazy" />
+                  </button>
+                  <strong title={photo.caption}>{photo.caption}</strong>
+                  <button
+                    type="button"
+                    className="machine-pin"
+                    onClick={() => togglePhoto(photo.id)}
+                  >
+                    {selected ? '✓ Pinned' : 'Pin to sets'}
+                  </button>
+                </article>
+              );
+            })}
           </div>
-        </section>
-      )}
-      {expanded && (
-        <MachinePhotoDetail
-          photo={expanded}
-          onClose={() => setExpanded(null)}
-          onUpdate={updatePhoto}
-          onDelete={deletePhoto}
-        />
-      )}
-    </section>
+        )}
+        {error && <p className="machine-photo-error">{error}</p>}
+
+        {pending && (
+          <section className="photo-inline-editor panel">
+            <button type="button" className="photo-inline-close" onClick={() => setPending(null)}>
+              Cancel
+            </button>
+            <img src={pending.previewUrl} alt="New machine preview" />
+            <div>
+              <p className="section-kicker">NEW MACHINE PHOTO</p>
+              <h2>Name this machine</h2>
+              <p>For example: Hammer Strength lying leg curl.</p>
+              <input
+                autoFocus
+                value={caption}
+                maxLength={160}
+                onChange={(event) => setCaption(event.target.value)}
+                placeholder="Machine name"
+              />
+              <div className="photo-inline-actions">
+                <button type="button" onClick={() => setPending(null)} disabled={uploading}>
+                  Cancel
+                </button>
+                <button type="button" onClick={() => void uploadPhoto()} disabled={uploading}>
+                  {uploading ? 'Saving…' : 'Save and pin'}
+                </button>
+              </div>
+            </div>
+          </section>
+        )}
+        {expanded && (
+          <MachinePhotoDetail
+            photo={expanded}
+            onClose={() => setExpanded(null)}
+            onUpdate={updatePhoto}
+            onDelete={deletePhoto}
+          />
+        )}
+      </div>
+    </details>
   );
 }
 
@@ -2437,8 +2975,18 @@ function ExercisePicker({
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [favoriteSavingIds, setFavoriteSavingIds] = useState<string[]>([]);
   const [pickerError, setPickerError] = useState<string | null>(null);
+  const [viewport, setViewport] = useState(() => {
+    const visualViewport = window.visualViewport;
+    return {
+      height: visualViewport?.height ?? window.innerHeight,
+      top: visualViewport?.offsetTop ?? 0,
+      keyboardVisible: false,
+    };
+  });
   const listRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const onCloseRef = useRef(onClose);
+  const initialViewportHeightRef = useRef(window.visualViewport?.height ?? window.innerHeight);
   const query = search.trim().toLowerCase();
   const available = exercises.filter((exercise) => !excludedIds.includes(exercise.id));
   const recent = recentExerciseIds
@@ -2540,90 +3088,162 @@ function ExercisePicker({
     listRef.current?.scrollTo({ top: 0 });
   }, [search, filter]);
 
-  return (
-    <section className="exercise-picker exercise-picker-inline panel" aria-label="Choose exercise">
-      <header>
-        <div className="exercise-picker-heading">
-          <p className="section-kicker">EXERCISE LIBRARY</p>
-          <h2>Add exercises</h2>
-          <small>{selectedIds.length} selected</small>
-        </div>
-        <button className="icon-button" type="button" onClick={onClose} aria-label="Close">
-          ×
-        </button>
-      </header>
-      <input
-        ref={searchRef}
-        className="exercise-search"
-        autoFocus
-        value={search}
-        onChange={(event) => setSearch(event.target.value)}
-        placeholder="Search exercises or muscles…"
-      />
-      <div className="filter-pills">
-        <button
-          type="button"
-          className={filter === 'favorites' ? 'active' : ''}
-          onClick={() => setFilter('favorites')}
-        >
-          Favorites
-        </button>
-        <button
-          type="button"
-          className={filter === 'recent' ? 'active' : ''}
-          onClick={() => setFilter('recent')}
-        >
-          Recent
-        </button>
-        {(
-          ['push', 'pull', 'lower', 'upper', 'full_body', 'cardio', 'other'] as WorkoutCategory[]
-        ).map((category) => (
+  useEffect(() => {
+    const visualViewport = window.visualViewport;
+    const updateViewport = () => {
+      const height = visualViewport?.height ?? window.innerHeight;
+      const top = visualViewport?.offsetTop ?? 0;
+      setViewport({
+        height,
+        top,
+        keyboardVisible: initialViewportHeightRef.current - height > 100,
+      });
+    };
+
+    updateViewport();
+    visualViewport?.addEventListener('resize', updateViewport);
+    visualViewport?.addEventListener('scroll', updateViewport);
+    window.addEventListener('resize', updateViewport);
+    return () => {
+      visualViewport?.removeEventListener('resize', updateViewport);
+      visualViewport?.removeEventListener('scroll', updateViewport);
+      window.removeEventListener('resize', updateViewport);
+    };
+  }, []);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
+    const root = document.getElementById('root');
+    const rootWasInert = root?.hasAttribute('inert') ?? false;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    root?.setAttribute('inert', '');
+
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onCloseRef.current();
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      if (!rootWasInert) root?.removeAttribute('inert');
+      window.removeEventListener('keydown', closeOnEscape);
+    };
+  }, []);
+
+  const pickerHeight = viewport.keyboardVisible
+    ? Math.max(280, viewport.height - 12)
+    : Math.min(720, viewport.height * 0.84);
+  const viewportStyle = {
+    '--exercise-picker-viewport-top': `${viewport.top}px`,
+    '--exercise-picker-viewport-height': `${viewport.height}px`,
+    '--exercise-picker-height': `${pickerHeight}px`,
+  } as CSSProperties;
+
+  return createPortal(
+    <div
+      className="modal-backdrop exercise-picker-backdrop"
+      style={viewportStyle}
+      onPointerDown={(event) => {
+        if (event.target !== event.currentTarget) return;
+        event.preventDefault();
+        onClose();
+      }}
+    >
+      <section
+        className={`exercise-picker panel ${viewport.keyboardVisible ? 'keyboard-visible' : ''}`}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="exercise-picker-title"
+      >
+        <header>
+          <div className="exercise-picker-heading">
+            <p className="section-kicker">EXERCISE LIBRARY</p>
+            <h2 id="exercise-picker-title">Add exercises</h2>
+            <small>{selectedIds.length} selected</small>
+          </div>
+          <button className="icon-button" type="button" onClick={onClose} aria-label="Close">
+            ×
+          </button>
+        </header>
+        <input
+          ref={searchRef}
+          className="exercise-search"
+          autoFocus
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder="Search exercises or muscles…"
+        />
+        <div className="filter-pills">
           <button
             type="button"
-            key={category}
-            className={filter === category ? 'active' : ''}
-            onClick={() => setFilter(category)}
+            className={filter === 'favorites' ? 'active' : ''}
+            onClick={() => setFilter('favorites')}
           >
-            {categoryNames[category]}
+            Favorites
           </button>
-        ))}
+          <button
+            type="button"
+            className={filter === 'recent' ? 'active' : ''}
+            onClick={() => setFilter('recent')}
+          >
+            Recent
+          </button>
+          {(
+            ['push', 'pull', 'lower', 'upper', 'full_body', 'cardio', 'other'] as WorkoutCategory[]
+          ).map((category) => (
+            <button
+              type="button"
+              key={category}
+              className={filter === category ? 'active' : ''}
+              onClick={() => setFilter(category)}
+            >
+              {categoryNames[category]}
+            </button>
+          ))}
+          <button
+            type="button"
+            className={filter === 'all' ? 'active' : ''}
+            onClick={() => setFilter('all')}
+          >
+            All
+          </button>
+        </div>
+        <div className="exercise-list" ref={listRef}>
+          {sections.map(
+            (section) =>
+              section.exercises.length > 0 && (
+                <section className="exercise-list-section" key={section.title}>
+                  <h3>{section.title}</h3>
+                  {section.exercises.map(renderExercise)}
+                </section>
+              ),
+          )}
+          {!visibleExerciseCount && (
+            <p className="muted-empty">
+              {filter === 'favorites' && !query
+                ? 'Tap the star beside an exercise to add a favorite.'
+                : filter === 'recent' && !query
+                  ? 'Exercises from completed workouts will appear here.'
+                  : 'No exercises match that search.'}
+            </p>
+          )}
+          {pickerError && <p className="inline-error">{pickerError}</p>}
+        </div>
         <button
-          type="button"
-          className={filter === 'all' ? 'active' : ''}
-          onClick={() => setFilter('all')}
+          className="add-selected-button"
+          disabled={!selectedIds.length}
+          onClick={() =>
+            onChoose(exercises.filter((exercise) => selectedIds.includes(exercise.id)))
+          }
         >
-          All
+          Add selected exercises ({selectedIds.length})
         </button>
-      </div>
-      <div className="exercise-list" ref={listRef}>
-        {sections.map(
-          (section) =>
-            section.exercises.length > 0 && (
-              <section className="exercise-list-section" key={section.title}>
-                <h3>{section.title}</h3>
-                {section.exercises.map(renderExercise)}
-              </section>
-            ),
-        )}
-        {!visibleExerciseCount && (
-          <p className="muted-empty">
-            {filter === 'favorites' && !query
-              ? 'Tap the star beside an exercise to add a favorite.'
-              : filter === 'recent' && !query
-                ? 'Exercises from completed workouts will appear here.'
-                : 'No exercises match that search.'}
-          </p>
-        )}
-        {pickerError && <p className="inline-error">{pickerError}</p>}
-      </div>
-      <button
-        className="add-selected-button"
-        disabled={!selectedIds.length}
-        onClick={() => onChoose(exercises.filter((exercise) => selectedIds.includes(exercise.id)))}
-      >
-        Add selected exercises ({selectedIds.length})
-      </button>
-    </section>
+      </section>
+    </div>,
+    document.body,
   );
 }
 
@@ -4395,10 +5015,13 @@ function HistorySetFlow({
 
 function setResult(item: TrackedSet): string {
   if (item.weight_kg !== null) return `${item.weight_kg} kg × ${item.reps ?? '–'}`;
-  if (item.duration_seconds) {
-    const distance = item.distance_km !== null ? ` · ${item.distance_km} km` : '';
-    return `${formatDuration(item.duration_seconds)}${distance}`;
-  }
+  const cardioValues = [
+    item.duration_seconds ? formatDuration(item.duration_seconds) : null,
+    item.distance_km !== null ? `${item.distance_km} km` : null,
+    item.incline_percent !== null ? `${item.incline_percent}% incline` : null,
+    item.speed_kph !== null ? `${item.speed_kph} km/h` : null,
+  ].filter((value): value is string => value !== null);
+  if (cardioValues.length) return cardioValues.join(' · ');
   return `${item.reps ?? '–'} reps`;
 }
 

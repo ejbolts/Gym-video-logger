@@ -119,6 +119,8 @@ export interface TrackedSet {
   rest_seconds: number | null;
   duration_seconds: number | null;
   distance_km: number | null;
+  incline_percent: number | null;
+  speed_kph: number | null;
   bodyweight_kg: number | null;
   percentile: number | null;
   warmup: boolean;
@@ -160,6 +162,8 @@ export interface WorkoutSetInput {
   rest_seconds: number | null;
   duration_seconds: number | null;
   distance_km: number | null;
+  incline_percent?: number | null;
+  speed_kph?: number | null;
   bodyweight_kg?: number | null;
   percentile?: number | null;
   warmup?: boolean;

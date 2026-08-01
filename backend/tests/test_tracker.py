@@ -48,7 +48,57 @@ def test_default_exercise_library_is_seeded(client):
     assert response.status_code == 200
     exercises = response.json()
     names = {item["name"] for item in exercises}
-    assert {"Barbell Bench Press", "Back Squat", "Running"} <= names
+    assert {
+        "Barbell Bench Press",
+        "Back Squat",
+        "Cable Shoulder Extensions",
+        "Incline Treadmill Walking",
+        "Pec Deck",
+        "Running",
+        "Single-Arm Cable Triceps Pushdown",
+        "Single-Arm Preacher Curl",
+        "Triceps Machine Extension",
+    } <= names
+    pec_deck = next(item for item in exercises if item["name"] == "Pec Deck")
+    assert pec_deck["category"] == "push"
+    assert pec_deck["muscle_group"] == "Chest"
+    assert pec_deck["equipment"] == "Machine"
+    shoulder_extensions = next(
+        item for item in exercises if item["name"] == "Cable Shoulder Extensions"
+    )
+    assert shoulder_extensions["category"] == "pull"
+    assert shoulder_extensions["muscle_group"] == "Rear Delts"
+    assert shoulder_extensions["equipment"] == "Cable"
+    assert shoulder_extensions["muscle_contributions"] == [
+        {"muscle_name": "Rear deltoids", "role": "primary", "contribution_factor": 1.0}
+    ]
+    triceps_extension = next(
+        item for item in exercises if item["name"] == "Triceps Machine Extension"
+    )
+    assert triceps_extension["category"] == "push"
+    assert triceps_extension["muscle_group"] == "Triceps"
+    assert triceps_extension["equipment"] == "Machine"
+    assert triceps_extension["muscle_contributions"] == [
+        {"muscle_name": "Triceps", "role": "primary", "contribution_factor": 1.0}
+    ]
+    single_arm_pushdown = next(
+        item for item in exercises if item["name"] == "Single-Arm Cable Triceps Pushdown"
+    )
+    assert single_arm_pushdown["category"] == "push"
+    assert single_arm_pushdown["muscle_group"] == "Triceps"
+    assert single_arm_pushdown["equipment"] == "Cable"
+    assert single_arm_pushdown["muscle_contributions"] == [
+        {"muscle_name": "Triceps", "role": "primary", "contribution_factor": 1.0}
+    ]
+    single_arm_preacher = next(
+        item for item in exercises if item["name"] == "Single-Arm Preacher Curl"
+    )
+    assert single_arm_preacher["category"] == "pull"
+    assert single_arm_preacher["muscle_group"] == "Biceps"
+    assert single_arm_preacher["equipment"] == "Dumbbell"
+    assert single_arm_preacher["muscle_contributions"] == [
+        {"muscle_name": "Biceps", "role": "primary", "contribution_factor": 1.0}
+    ]
     assert next(item for item in exercises if item["name"] == "Barbell Row")["muscle_group"] == (
         "Mid / Upper Back"
     )
@@ -95,6 +145,8 @@ def test_workout_sets_notes_rest_and_rpe_are_saved(client):
         "rest_seconds": 180,
         "duration_seconds": None,
         "distance_km": None,
+        "incline_percent": None,
+        "speed_kph": None,
         "bodyweight_kg": None,
         "percentile": None,
         "warmup": False,
@@ -104,6 +156,33 @@ def test_workout_sets_notes_rest_and_rpe_are_saved(client):
         "notes": "Moved cleanly",
         "completed": True,
     }
+
+
+def test_treadmill_incline_and_speed_are_saved(client):
+    exercise = next(
+        item
+        for item in client.get("/api/exercises").json()
+        if item["name"] == "Incline Treadmill Walking"
+    )
+    payload = workout_payload(exercise["id"])
+    payload["category"] = "cardio"
+    payload["movements"][0]["sets"][0].update(
+        {
+            "reps": None,
+            "weight_kg": None,
+            "duration_seconds": 1_800,
+            "distance_km": 2.7,
+            "incline_percent": 12.5,
+            "speed_kph": 5.4,
+        }
+    )
+
+    response = client.post("/api/workouts", json=payload)
+
+    assert response.status_code == 201
+    saved_set = response.json()["movements"][0]["sets"][0]
+    assert saved_set["incline_percent"] == 12.5
+    assert saved_set["speed_kph"] == 5.4
 
 
 def test_body_measurements_are_upserted_and_used_in_calendar_workouts(client):
@@ -649,4 +728,42 @@ def test_zone2_week_boundaries_edit_and_delete(client):
     assert client.get("/api/cardio").json()["current_week"]["completed_minutes"] == 120
     assert client.delete(f"/api/cardio/{current_id}").status_code == 204
     assert client.delete(f"/api/cardio/{other_id}").status_code == 204
+
+
+def test_completed_treadmill_walking_workout_counts_toward_zone2(client):
+    exercise = next(
+        item
+        for item in client.get("/api/exercises").json()
+        if item["name"] == "Incline Treadmill Walking"
+    )
+    payload = {
+        "name": "Incline walking",
+        "workout_date": date.today().isoformat(),
+        "category": "cardio",
+        "notes": None,
+        "duration_minutes": 30,
+        "movements": [
+            {
+                "exercise_id": exercise["id"],
+                "notes": None,
+                "sets": [
+                    {
+                        "duration_seconds": 1_800,
+                        "distance_km": 2.7,
+                        "incline_percent": 12.5,
+                        "speed_kph": 5.4,
+                        "completed": True,
+                    }
+                ],
+            }
+        ],
+    }
+
+    created = client.post("/api/workouts", json=payload)
+
+    assert created.status_code == 201
+    assert client.get("/api/dashboard").json()["zone2"]["completed_minutes"] == 30
+    assert client.get("/api/cardio").json()["current_week"]["completed_minutes"] == 30
+    assert client.delete(f"/api/workouts/{created.json()['id']}").status_code == 204
+    assert client.get("/api/dashboard").json()["zone2"]["completed_minutes"] == 0
     assert client.get("/api/cardio").json()["current_week"]["completed_minutes"] == 0
