@@ -51,18 +51,33 @@ def test_default_exercise_library_is_seeded(client):
     assert {
         "Barbell Bench Press",
         "Back Squat",
+        "Back Extension Machine",
         "Cable Shoulder Extensions",
+        "Cycling (Indoor)",
         "Incline Treadmill Walking",
+        "Machine Bicep Preacher Curl",
         "Pec Deck",
         "Running",
+        "Seated Ab Crunch Machine",
+        "Seated Leg Curl",
+        "Seated Machine Row",
         "Single-Arm Cable Triceps Pushdown",
+        "Single-Arm Lat Pulldown",
         "Single-Arm Preacher Curl",
+        "Single Leg Press",
         "Triceps Machine Extension",
+        "Lying Leg Curl",
     } <= names
+    assert "Leg Curl" not in names
     pec_deck = next(item for item in exercises if item["name"] == "Pec Deck")
     assert pec_deck["category"] == "push"
     assert pec_deck["muscle_group"] == "Chest"
     assert pec_deck["equipment"] == "Machine"
+    indoor_cycling = next(item for item in exercises if item["name"] == "Cycling (Indoor)")
+    assert indoor_cycling["category"] == "cardio"
+    assert indoor_cycling["kind"] == "cardio"
+    assert indoor_cycling["muscle_group"] == "Cardio"
+    assert indoor_cycling["equipment"] == "Stationary Bike"
     shoulder_extensions = next(
         item for item in exercises if item["name"] == "Cable Shoulder Extensions"
     )
@@ -99,6 +114,131 @@ def test_default_exercise_library_is_seeded(client):
     assert single_arm_preacher["muscle_contributions"] == [
         {"muscle_name": "Biceps", "role": "primary", "contribution_factor": 1.0}
     ]
+    incline_press = next(item for item in exercises if item["name"] == "Incline Dumbbell Press")
+    assert {item["muscle_name"] for item in incline_press["muscle_contributions"]} == {
+        "Pectorals",
+        "Front delts",
+        "Triceps",
+    }
+    lateral_raise = next(item for item in exercises if item["name"] == "Lateral Raise")
+    assert {item["muscle_name"] for item in lateral_raise["muscle_contributions"]} == {
+        "Side delts",
+        "Upper traps",
+    }
+    face_pull = next(item for item in exercises if item["name"] == "Face Pull")
+    assert {item["muscle_name"] for item in face_pull["muscle_contributions"]} == {
+        "Rear deltoids",
+        "Mid / Upper Back",
+    }
+    hammer_curl = next(item for item in exercises if item["name"] == "Hammer Curl")
+    assert {item["muscle_name"] for item in hammer_curl["muscle_contributions"]} == {
+        "Biceps",
+        "Forearms",
+    }
+    single_arm_lat_pulldown = next(
+        item for item in exercises if item["name"] == "Single-Arm Lat Pulldown"
+    )
+    assert single_arm_lat_pulldown["category"] == "pull"
+    assert single_arm_lat_pulldown["muscle_group"] == "Lats"
+    assert single_arm_lat_pulldown["equipment"] == "Cable"
+    assert single_arm_lat_pulldown["muscle_contributions"] == [
+        {"muscle_name": "Lats", "role": "primary", "contribution_factor": 1.0}
+    ]
+    seated_machine_row = next(
+        item for item in exercises if item["name"] == "Seated Machine Row"
+    )
+    assert seated_machine_row["category"] == "pull"
+    assert seated_machine_row["muscle_group"] == "Mid / Upper Back"
+    assert seated_machine_row["equipment"] == "Machine"
+    seated_machine_row_contributions = {
+        contribution["muscle_name"]: contribution
+        for contribution in seated_machine_row["muscle_contributions"]
+    }
+    assert seated_machine_row_contributions == {
+        "Mid / Upper Back": {
+            "muscle_name": "Mid / Upper Back",
+            "role": "primary",
+            "contribution_factor": 1.0,
+        },
+        "Lats": {"muscle_name": "Lats", "role": "secondary", "contribution_factor": 0.5},
+        "Biceps": {
+            "muscle_name": "Biceps",
+            "role": "secondary",
+            "contribution_factor": 0.5,
+        },
+    }
+    seated_ab_crunch = next(
+        item for item in exercises if item["name"] == "Seated Ab Crunch Machine"
+    )
+    assert seated_ab_crunch["category"] == "full_body"
+    assert seated_ab_crunch["muscle_group"] == "Core"
+    assert seated_ab_crunch["equipment"] == "Machine"
+    assert seated_ab_crunch["muscle_contributions"] == [
+        {"muscle_name": "Core", "role": "primary", "contribution_factor": 1.0}
+    ]
+    machine_preacher_curl = next(
+        item for item in exercises if item["name"] == "Machine Bicep Preacher Curl"
+    )
+    assert machine_preacher_curl["category"] == "pull"
+    assert machine_preacher_curl["muscle_group"] == "Biceps"
+    assert machine_preacher_curl["equipment"] == "Machine"
+    assert machine_preacher_curl["muscle_contributions"] == [
+        {"muscle_name": "Biceps", "role": "primary", "contribution_factor": 1.0}
+    ]
+    single_leg_press = next(item for item in exercises if item["name"] == "Single Leg Press")
+    assert single_leg_press["category"] == "lower"
+    assert single_leg_press["muscle_group"] == "Quads"
+    assert single_leg_press["equipment"] == "Machine"
+    assert {
+        contribution["muscle_name"]: contribution
+        for contribution in single_leg_press["muscle_contributions"]
+    } == {
+        "Quadriceps": {
+            "muscle_name": "Quadriceps",
+            "role": "primary",
+            "contribution_factor": 1.0,
+        },
+        "Glutes": {"muscle_name": "Glutes", "role": "primary", "contribution_factor": 1.0},
+        "Adductors": {
+            "muscle_name": "Adductors",
+            "role": "secondary",
+            "contribution_factor": 0.5,
+        },
+    }
+    for leg_curl_name in ("Seated Leg Curl", "Lying Leg Curl"):
+        leg_curl = next(item for item in exercises if item["name"] == leg_curl_name)
+        assert leg_curl["category"] == "lower"
+        assert leg_curl["muscle_group"] == "Hamstrings"
+        assert leg_curl["equipment"] == "Machine"
+        assert leg_curl["muscle_contributions"] == [
+            {
+                "muscle_name": "Hamstrings",
+                "role": "primary",
+                "contribution_factor": 1.0,
+            }
+        ]
+    back_extension = next(
+        item for item in exercises if item["name"] == "Back Extension Machine"
+    )
+    assert back_extension["category"] == "lower"
+    assert back_extension["muscle_group"] == "Lower Back"
+    assert back_extension["equipment"] == "Machine"
+    assert {
+        contribution["muscle_name"]: contribution
+        for contribution in back_extension["muscle_contributions"]
+    } == {
+        "Spinal erectors": {
+            "muscle_name": "Spinal erectors",
+            "role": "primary",
+            "contribution_factor": 1.0,
+        },
+        "Glutes": {"muscle_name": "Glutes", "role": "secondary", "contribution_factor": 0.5},
+        "Hamstrings": {
+            "muscle_name": "Hamstrings",
+            "role": "primary",
+            "contribution_factor": 1.0,
+        },
+    }
     assert next(item for item in exercises if item["name"] == "Barbell Row")["muscle_group"] == (
         "Mid / Upper Back"
     )
@@ -108,6 +248,66 @@ def test_default_exercise_library_is_seeded(client):
     recommendation = client.get("/api/dashboard").json()["recommendation"]
     assert recommendation["category"] == "push"
     assert recommendation["rotation_next"] == "push"
+
+
+def test_default_muscle_mappings_are_resynchronized(client):
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+
+    from app.database import SessionLocal
+    from app.models import Exercise, MuscleRole
+    from app.training_metrics import seed_muscle_mappings
+
+    with SessionLocal() as db:
+        exercise = db.scalar(
+            select(Exercise)
+            .where(Exercise.name == "Back Extension Machine")
+            .options(selectinload(Exercise.muscle_contributions))
+        )
+        assert exercise is not None
+        hamstrings = next(
+            item for item in exercise.muscle_contributions if item.muscle_name == "Hamstrings"
+        )
+        hamstrings.role = MuscleRole.SECONDARY
+        hamstrings.contribution_factor = 0.5
+        db.commit()
+        seed_muscle_mappings(db)
+
+    updated = next(
+        item
+        for item in client.get("/api/exercises").json()
+        if item["name"] == "Back Extension Machine"
+    )
+    hamstrings = next(
+        item for item in updated["muscle_contributions"] if item["muscle_name"] == "Hamstrings"
+    )
+    assert hamstrings == {
+        "muscle_name": "Hamstrings",
+        "role": "primary",
+        "contribution_factor": 1.0,
+    }
+
+
+def test_legacy_leg_curl_is_renamed_without_changing_its_id(client):
+    from sqlalchemy import select
+
+    from app.database import SessionLocal
+    from app.models import Exercise
+    from app.tracker import seed_default_exercises
+
+    with SessionLocal() as db:
+        exercise = db.scalar(select(Exercise).where(Exercise.name == "Seated Leg Curl"))
+        assert exercise is not None
+        original_id = exercise.id
+        exercise.name = "Leg Curl"
+        db.commit()
+
+        seed_default_exercises(db)
+
+        renamed = db.scalar(select(Exercise).where(Exercise.name == "Seated Leg Curl"))
+        assert renamed is not None
+        assert renamed.id == original_id
+        assert db.scalar(select(Exercise).where(Exercise.name == "Leg Curl")) is None
 
 
 def test_exercise_favorites_are_persisted(client):
@@ -407,7 +607,9 @@ def test_sample_seed_creates_one_week_once(client):
 
 def test_machine_photos_are_processed_pinned_and_protected_while_referenced(client):
     exercise = next(
-        item for item in client.get("/api/exercises").json() if item["name"] == "Leg Curl"
+        item
+        for item in client.get("/api/exercises").json()
+        if item["name"] == "Seated Leg Curl"
     )
     image_buffer = BytesIO()
     source = Image.new("RGB", (1200, 2400), "#e86f35")
@@ -427,6 +629,7 @@ def test_machine_photos_are_processed_pinned_and_protected_while_referenced(clie
     assert (photo["width"], photo["height"]) == (1800, 900)
     assert photo["thumbnail_url"].endswith("variant=thumbnail")
     assert client.get(f"/api/exercises/{exercise['id']}/machine-photos").json() == [photo]
+    assert client.get(f"/api/exercises/{exercise['id']}/machine-photos/last-used").json() == []
 
     full = client.get(photo["full_url"])
     thumbnail = client.get(photo["thumbnail_url"])
@@ -450,13 +653,38 @@ def test_machine_photos_are_processed_pinned_and_protected_while_referenced(clie
     workout = client.post("/api/workouts", json=payload)
     assert workout.status_code == 201
     assert workout.json()["movements"][0]["machine_photos"][0]["id"] == photo["id"]
+    assert client.get(
+        f"/api/exercises/{exercise['id']}/machine-photos/last-used"
+    ).json() == [renamed.json()]
 
     updated = client.put(f"/api/workouts/{workout.json()['id']}", json=payload)
     assert updated.status_code == 200
     assert updated.json()["movements"][0]["machine_photos"][0]["id"] == photo["id"]
     assert client.delete(f"/api/machine-photos/{photo['id']}").status_code == 409
 
+    second_buffer = BytesIO()
+    Image.new("RGB", (800, 600), "#293d6b").save(second_buffer, format="JPEG")
+    second_photo = client.post(
+        f"/api/exercises/{exercise['id']}/machine-photos",
+        data={"caption": "Technogym seated leg curl"},
+        files={"file": ("technogym.jpg", second_buffer.getvalue(), "image/jpeg")},
+    ).json()
+    next_payload = workout_payload(exercise["id"])
+    next_payload["workout_date"] = (date.today() + timedelta(days=1)).isoformat()
+    next_payload["movements"][0]["machine_photo_ids"] = [second_photo["id"]]
+    next_workout = client.post("/api/workouts", json=next_payload)
+    assert next_workout.status_code == 201
+    assert client.get(
+        f"/api/exercises/{exercise['id']}/machine-photos/last-used"
+    ).json() == [second_photo]
+
+    assert client.delete(f"/api/workouts/{next_workout.json()['id']}").status_code == 204
+    assert client.get(
+        f"/api/exercises/{exercise['id']}/machine-photos/last-used"
+    ).json() == [renamed.json()]
     assert client.delete(f"/api/workouts/{workout.json()['id']}").status_code == 204
+    assert client.get(f"/api/exercises/{exercise['id']}/machine-photos/last-used").json() == []
+    assert client.delete(f"/api/machine-photos/{second_photo['id']}").status_code == 204
     assert client.delete(f"/api/machine-photos/{photo['id']}").status_code == 204
     assert client.get(photo["full_url"]).status_code == 404
 
@@ -532,11 +760,16 @@ def test_training_mode_changes_rpe_aware_weekly_goal(client):
     assert goal["unrated_sets"] == 1
     assert goal["low_rpe_sets"] == 1
     assert goal["rpe_logging_percent"] == 66.7
-    assert goal["overall_percent"] == 11.1
+    assert goal["overall_percent"] == 16.7
     assert {item["muscle_group"]: item["effective_sets"] for item in goal["muscle_groups"]} == {
-        "Anterior deltoids": 1.0,
+        "Front delts": 1.0,
         "Pectorals": 2.0,
         "Triceps": 1.0,
+    }
+    assert {item["muscle_group"]: item["target_sets"] for item in goal["muscle_groups"]} == {
+        "Front delts": 6,
+        "Pectorals": 12,
+        "Triceps": 6,
     }
 
     changed = client.put("/api/training-mode", json={"mode": "cut", "effective_date": "2026-07-01"})
@@ -548,8 +781,27 @@ def test_training_mode_changes_rpe_aware_weekly_goal(client):
     assert phases[0]["mode"] == "cut"
     cut_dashboard = client.get("/api/dashboard").json()
     assert cut_dashboard["weekly_goal"]["target_sets_per_muscle"] == 10
-    assert cut_dashboard["weekly_goal"]["overall_percent"] == 13.3
+    assert cut_dashboard["weekly_goal"]["overall_percent"] == 20.0
+    assert {
+        item["muscle_group"]: item["target_sets"]
+        for item in cut_dashboard["weekly_goal"]["muscle_groups"]
+    } == {"Front delts": 5, "Pectorals": 10, "Triceps": 5}
     assert "Cut goal" in cut_dashboard["recommendation"]["reason"]
+
+    assert (
+        client.put(
+            "/api/training-mode", json={"mode": "bulk", "effective_date": "2026-07-01"}
+        ).status_code
+        == 200
+    )
+    bulk_goal = client.get("/api/dashboard").json()["weekly_goal"]
+    assert bulk_goal["target_sets_per_muscle"] == 14
+    assert bulk_goal["overall_percent"] == 14.3
+    assert {item["muscle_group"]: item["target_sets"] for item in bulk_goal["muscle_groups"]} == {
+        "Front delts": 7,
+        "Pectorals": 14,
+        "Triceps": 7,
+    }
 
 
 def test_active_body_weight_goal_infers_and_persists_training_mode(client):
@@ -633,7 +885,7 @@ def test_fractional_muscle_volume_and_pr_rebuild_after_edit_delete(client):
     totals = {
         item["muscle_name"]: item["set_total"] for item in client.get("/api/muscle-volume").json()
     }
-    assert totals == {"Anterior deltoids": 0.5, "Pectorals": 1.0, "Triceps": 0.5}
+    assert totals == {"Front delts": 0.5, "Pectorals": 1.0, "Triceps": 0.5}
     original_count = len(client.get("/api/personal-records").json())
     assert client.put(f"/api/workouts/{created['id']}", json=payload).status_code == 200
     assert len(client.get("/api/personal-records").json()) == original_count
@@ -767,3 +1019,77 @@ def test_completed_treadmill_walking_workout_counts_toward_zone2(client):
     assert client.delete(f"/api/workouts/{created.json()['id']}").status_code == 204
     assert client.get("/api/dashboard").json()["zone2"]["completed_minutes"] == 0
     assert client.get("/api/cardio").json()["current_week"]["completed_minutes"] == 0
+
+
+def test_completed_indoor_cycling_is_imported_as_read_only_cardio_session(client):
+    exercise = next(
+        item for item in client.get("/api/exercises").json() if item["name"] == "Cycling (Indoor)"
+    )
+    payload = {
+        "name": "Pull and cardio",
+        "workout_date": date.today().isoformat(),
+        "category": "pull",
+        "notes": None,
+        "duration_minutes": 60,
+        "movements": [
+            {
+                "exercise_id": exercise["id"],
+                "notes": "Easy spin",
+                "sets": [
+                    {
+                        "duration_seconds": 2_400,
+                        "distance_km": 17.68,
+                        "completed": True,
+                    }
+                ],
+            }
+        ],
+    }
+
+    created = client.post("/api/workouts", json=payload)
+
+    assert created.status_code == 201
+    workout_id = created.json()["id"]
+    overview = client.get("/api/cardio").json()
+    assert overview["current_week"]["completed_minutes"] == 40
+    imported = next(
+        session for session in overview["sessions"] if session["source_workout_id"] == workout_id
+    )
+    assert imported["activity_type"] == "Cycling (Indoor)"
+    assert imported["duration_minutes"] == 40
+    assert imported["zone"] == "Zone 2"
+    assert imported["qualifies_zone2"] is True
+    assert imported["notes"] == "Easy spin"
+    assert (
+        client.put(
+            f"/api/cardio/{imported['id']}",
+            json={
+                "session_date": date.today().isoformat(),
+                "activity_type": "Cycling",
+                "duration_minutes": 10,
+                "intensity": None,
+                "zone": "Zone 2",
+                "qualifies_zone2": True,
+                "notes": None,
+            },
+        ).status_code
+        == 409
+    )
+    assert client.delete(f"/api/cardio/{imported['id']}").status_code == 409
+
+    payload["movements"][0]["sets"][0]["duration_seconds"] = 3_000
+    assert client.put(f"/api/workouts/{workout_id}", json=payload).status_code == 200
+    updated_overview = client.get("/api/cardio").json()
+    updated = next(
+        session
+        for session in updated_overview["sessions"]
+        if session["source_workout_id"] == workout_id
+    )
+    assert updated["id"] == imported["id"]
+    assert updated["duration_minutes"] == 50
+    assert updated_overview["current_week"]["completed_minutes"] == 50
+
+    assert client.delete(f"/api/workouts/{workout_id}").status_code == 204
+    final_overview = client.get("/api/cardio").json()
+    assert final_overview["current_week"]["completed_minutes"] == 0
+    assert all(session["source_workout_id"] != workout_id for session in final_overview["sessions"])

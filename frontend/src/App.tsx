@@ -19,7 +19,6 @@ import type {
   WorkoutCategory,
   WorkoutInput,
   WorkoutRecommendation,
-  WorkoutSetInput,
   WeeklyGoal,
 } from './types';
 import {
@@ -30,29 +29,24 @@ import {
 } from './bodyTrend';
 import type { BodyTrendRange } from './bodyTrend';
 import { InlineConfirmButton } from './InlineConfirmButton';
-import { localDate, mergeUniqueById, reorder } from './utils';
+import { formatMinutesDuration, localDate, mergeUniqueById, reorder } from './utils';
 import { VideoUpload } from './VideoUpload';
 import {
   clearActiveWorkoutDraft,
   readActiveWorkoutDraft,
   writeActiveWorkoutDraft,
 } from './workoutDraft';
-import { createWorkoutSet } from './workoutSets';
+import { createWorkoutSet, isCompletedWorkingSet } from './workoutSets';
+import {
+  replaceMovementExercise,
+  type WorkoutDraftMovement as DraftMovement,
+  type WorkoutDraftSet as DraftSet,
+} from './workoutMovements';
 import { applySupersetSelection, clearSuperset } from './workoutSupersets';
 
 type AppTab = 'dashboard' | 'log' | 'body' | 'history' | 'videos';
 type ProgressMetric = 'estimated_1rm' | 'best_weight_kg' | 'volume_kg';
 type DashboardMetric = 'workouts' | 'sets' | 'streak';
-
-type DraftSet = WorkoutSetInput & { key: string };
-type DraftMovement = {
-  key: string;
-  exercise: Exercise;
-  notes: string;
-  machinePhotoIds: string[];
-  supersetKey: string | null;
-  sets: DraftSet[];
-};
 
 const categoryNames: Record<WorkoutCategory, string> = {
   upper: 'Upper body',
@@ -397,8 +391,9 @@ export function App() {
     }
   }
 
-  function startWorkout(workoutDate = localDate()) {
-    const storedDraft = readActiveWorkoutDraft();
+  function startWorkout(workoutDate = localDate(), replaceActiveWorkout = false) {
+    if (replaceActiveWorkout) clearActiveWorkoutDraft();
+    const storedDraft = replaceActiveWorkout ? null : readActiveWorkoutDraft();
     const startedAt = storedDraft?.startedAt ?? Date.now();
     setEditingWorkout(null);
     setActiveWorkoutStartedAt(startedAt);
@@ -499,6 +494,8 @@ export function App() {
             data={dashboard}
             currentBodyweight={measurements[0]?.weight_kg ?? null}
             onStart={startWorkout}
+            activeWorkout={activeWorkoutStartedAt !== null}
+            onReplaceActiveWorkout={(workoutDate) => startWorkout(workoutDate, true)}
             onBody={() => setTab('body')}
             onOpenWorkout={(id) => {
               setHistoryOpenId(id);
@@ -729,6 +726,8 @@ function DashboardScreen({
   data,
   currentBodyweight,
   onStart,
+  activeWorkout,
+  onReplaceActiveWorkout,
   onBody,
   onOpenWorkout,
   onEditWorkout,
@@ -736,12 +735,15 @@ function DashboardScreen({
   data: DashboardData;
   currentBodyweight: number | null;
   onStart: (workoutDate?: string) => void;
+  activeWorkout: boolean;
+  onReplaceActiveWorkout: (workoutDate: string) => void;
   onBody: () => void;
   onOpenWorkout: (workoutId: string) => void;
   onEditWorkout: (workoutId: string) => void;
 }) {
   const [activeMetric, setActiveMetric] = useState<DashboardMetric | null>(null);
   const [selectedDay, setSelectedDay] = useState<DashboardData['heatmap'][number] | null>(null);
+  const [pendingWorkoutDate, setPendingWorkoutDate] = useState<string | null>(null);
 
   return (
     <section className="dashboard-screen content-page">
@@ -832,7 +834,7 @@ function DashboardScreen({
           monthCount={2}
           onDayClick={(workoutDate, entry) => {
             if (entry) setSelectedDay(entry);
-            else onStart(workoutDate);
+            else setPendingWorkoutDate(workoutDate);
           }}
         />
         <div className="heatmap-legend">
@@ -848,7 +850,10 @@ function DashboardScreen({
           <CalendarDayDetail
             day={selectedDay}
             onClose={() => setSelectedDay(null)}
-            onStartWorkout={onStart}
+            onStartWorkout={(workoutDate) => {
+              setSelectedDay(null);
+              setPendingWorkoutDate(workoutDate);
+            }}
             onEditWorkout={onEditWorkout}
           />
         )}
@@ -880,7 +885,104 @@ function DashboardScreen({
             ))
         )}
       </section>
+      {pendingWorkoutDate && (
+        <CalendarCreateWorkoutDialog
+          workoutDate={pendingWorkoutDate}
+          activeWorkout={activeWorkout}
+          onCancel={() => setPendingWorkoutDate(null)}
+          onConfirm={() => {
+            const workoutDate = pendingWorkoutDate;
+            setPendingWorkoutDate(null);
+            if (activeWorkout) onReplaceActiveWorkout(workoutDate);
+            else onStart(workoutDate);
+          }}
+        />
+      )}
     </section>
+  );
+}
+
+function CalendarCreateWorkoutDialog({
+  workoutDate,
+  activeWorkout,
+  onCancel,
+  onConfirm,
+}: {
+  workoutDate: string;
+  activeWorkout: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const cancelButtonRef = useRef<HTMLButtonElement>(null);
+  const onCancelRef = useRef(onCancel);
+
+  useEffect(() => {
+    onCancelRef.current = onCancel;
+  }, [onCancel]);
+
+  useEffect(() => {
+    const root = document.getElementById('root');
+    const rootWasInert = root?.hasAttribute('inert') ?? false;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    root?.setAttribute('inert', '');
+    cancelButtonRef.current?.focus();
+
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onCancelRef.current();
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      if (!rootWasInert) root?.removeAttribute('inert');
+      window.removeEventListener('keydown', closeOnEscape);
+    };
+  }, []);
+
+  return createPortal(
+    <div
+      className="modal-backdrop calendar-create-backdrop"
+      onPointerDown={(event) => {
+        if (event.target === event.currentTarget) onCancel();
+      }}
+    >
+      <section
+        className="calendar-create-dialog panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="calendar-create-title"
+        aria-describedby="calendar-create-description"
+      >
+        <div
+          className={`calendar-create-icon ${activeWorkout ? 'active-conflict' : ''}`}
+          aria-hidden="true"
+        >
+          {activeWorkout ? '!' : '+'}
+        </div>
+        <p className="section-kicker">{activeWorkout ? 'WORKOUT IN PROGRESS' : 'NEW WORKOUT'}</p>
+        <h2 id="calendar-create-title">
+          {activeWorkout ? 'Cancel your current workout?' : 'Create a new workout?'}
+        </h2>
+        <p id="calendar-create-description">
+          {activeWorkout
+            ? `Creating a workout for ${prettyDate(workoutDate)} will discard your current unsaved workout.`
+            : `Start a workout for ${prettyDate(workoutDate)}?`}
+        </p>
+        <div className="calendar-create-actions">
+          <button ref={cancelButtonRef} type="button" onClick={onCancel}>
+            {activeWorkout ? 'Keep current workout' : 'Cancel'}
+          </button>
+          <button
+            className={activeWorkout ? 'cancel-current-workout-button' : 'create-workout-button'}
+            type="button"
+            onClick={onConfirm}
+          >
+            {activeWorkout ? 'Cancel & create new' : 'Create workout'}
+          </button>
+        </div>
+      </section>
+    </div>,
+    document.body,
   );
 }
 
@@ -928,7 +1030,7 @@ function trainingModeForWeightTarget(currentWeight: number, targetWeight: number
 
 function WeeklyGoalCard({ goal }: { goal: WeeklyGoal }) {
   const [open, setOpen] = useState(false);
-  const targetTotal = goal.target_sets_per_muscle * goal.muscle_groups.length;
+  const targetTotal = goal.muscle_groups.reduce((total, item) => total + item.target_sets, 0);
   const belowTarget = goal.muscle_groups.filter((item) => item.status === 'below').length;
   const displayedPercent = Math.min(goal.overall_percent, 100);
 
@@ -977,24 +1079,45 @@ function WeeklyGoalCard({ goal }: { goal: WeeklyGoal }) {
 }
 
 function WeeklyGoalDetail({ goal, onClose }: { goal: WeeklyGoal; onClose: () => void }) {
+  const [infoOpen, setInfoOpen] = useState(false);
+
   return (
     <section className="weekly-goal-detail inline-detail panel" aria-label="Weekly training goal">
       <header>
         <div>
           <p className="section-kicker">{trainingModeLabels[goal.mode].toUpperCase()} PHASE</p>
-          <h2>Your weekly target</h2>
+          <div className="weekly-goal-title">
+            <h2>Your weekly target</h2>
+            <button
+              type="button"
+              className="goal-info-button"
+              aria-label={
+                infoOpen ? 'Hide weekly target information' : 'Show weekly target information'
+              }
+              aria-expanded={infoOpen}
+              aria-controls="weekly-goal-information"
+              onClick={() => setInfoOpen((current) => !current)}
+            >
+              <span aria-hidden="true">i</span>
+            </button>
+          </div>
         </div>
         <button type="button" className="icon-button" onClick={onClose} aria-label="Close">
           ×
         </button>
       </header>
-      <div className="goal-explainer">
-        <strong>{goal.target_sets_per_muscle} hard sets per active muscle</strong>
+      {infoOpen && (
+        <div className="goal-explainer" id="weekly-goal-information">
+        <strong>
+          {goal.target_sets_per_muscle} sets for larger muscles ·{' '}
+          {Math.floor(goal.target_sets_per_muscle / 2)} for smaller muscles
+        </strong>
         <p>
           Completed strength sets at RPE 7–10 count. Warmups, cardio, and lower-effort sets do not
           fill the bar; secondary muscles receive half credit.
         </p>
-      </div>
+        </div>
+      )}
       <div className="muscle-goal-list">
         {goal.muscle_groups.map((item) => {
           const percent = Math.min(
@@ -1330,59 +1453,110 @@ function CalendarDayDetail({
   onStartWorkout: (workoutDate: string) => void;
   onEditWorkout: (workoutId: string) => void;
 }) {
-  return (
-    <section
-      className="calendar-day-detail inline-detail"
-      aria-label={`Workouts for ${prettyDate(day.workout_date)}`}
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const onCloseRef = useRef(onClose);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
+    const root = document.getElementById('root');
+    const rootWasInert = root?.hasAttribute('inert') ?? false;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    root?.setAttribute('inert', '');
+    closeButtonRef.current?.focus();
+
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onCloseRef.current();
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      if (!rootWasInert) root?.removeAttribute('inert');
+      window.removeEventListener('keydown', closeOnEscape);
+    };
+  }, []);
+
+  return createPortal(
+    <div
+      className="modal-backdrop calendar-day-backdrop"
+      onPointerDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
     >
-      <header>
-        <div>
-          <p className="section-kicker">TRAINING DAY</p>
-          <h2>{prettyDate(day.workout_date)}</h2>
-        </div>
-        <button type="button" className="icon-button" onClick={onClose} aria-label="Close">
-          ×
-        </button>
-      </header>
-      <div className="calendar-day-workouts">
-        {day.workouts.map((workout) => (
-          <article key={workout.id}>
-            <div>
-              <i style={{ background: categoryColors[workout.category] }} />
-              <div>
-                <strong>{workout.name}</strong>
-                <small>
-                  {categoryNames[workout.category]} · {workout.duration_minutes ?? '–'} min
-                </small>
-              </div>
-            </div>
-            {workout.exercises.map((exercise) => (
-              <p key={exercise.exercise_name}>
-                <span>
-                  {exercise.exercise_name}
-                  {exercise.bodyweight_kg !== null && ` @ ${exercise.bodyweight_kg} kg`}
-                </span>
-                <b>{exercise.set_count} sets</b>
-              </p>
-            ))}
-            <button
-              type="button"
-              className="calendar-edit-workout"
-              onClick={() => onEditWorkout(workout.id)}
-            >
-              Edit workout
-            </button>
-          </article>
-        ))}
-      </div>
-      <button
-        type="button"
-        className="calendar-add-workout"
-        onClick={() => onStartWorkout(day.workout_date)}
+      <section
+        className="calendar-day-detail"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="calendar-day-detail-title"
       >
-        Add another workout
-      </button>
-    </section>
+        <header>
+          <div>
+            <p className="section-kicker">TRAINING DAY</p>
+            <h2 id="calendar-day-detail-title">{prettyDate(day.workout_date)}</h2>
+          </div>
+          <button
+            ref={closeButtonRef}
+            type="button"
+            className="icon-button"
+            onClick={onClose}
+            aria-label="Close workout details"
+          >
+            ×
+          </button>
+        </header>
+        <div className="calendar-day-workouts">
+          {day.workouts.map((workout) => (
+            <article key={workout.id}>
+              <button
+                type="button"
+                className="calendar-workout-open"
+                onClick={() => onEditWorkout(workout.id)}
+                aria-label={`View and edit ${workout.name}`}
+              >
+                <i style={{ background: categoryColors[workout.category] }} />
+                <span>
+                  <strong>{workout.name}</strong>
+                  <small>
+                    {categoryNames[workout.category]} ·{' '}
+                    {formatMinutesDuration(workout.duration_minutes)}
+                  </small>
+                </span>
+                <svg className="disclosure-chevron" viewBox="0 0 20 20" aria-hidden="true">
+                  <path d="m7 4 6 6-6 6" />
+                </svg>
+              </button>
+              {workout.exercises.map((exercise) => (
+                <p key={exercise.exercise_name}>
+                  <span>
+                    {exercise.exercise_name}
+                    {exercise.bodyweight_kg !== null && ` @ ${exercise.bodyweight_kg} kg`}
+                  </span>
+                  <b>{exercise.set_count} sets</b>
+                </p>
+              ))}
+              <button
+                type="button"
+                className="calendar-edit-workout"
+                onClick={() => onEditWorkout(workout.id)}
+              >
+                View &amp; edit workout
+              </button>
+            </article>
+          ))}
+        </div>
+        <button
+          type="button"
+          className="calendar-add-workout"
+          onClick={() => onStartWorkout(day.workout_date)}
+        >
+          Add another workout
+        </button>
+      </section>
+    </div>,
+    document.body,
   );
 }
 
@@ -1412,6 +1586,9 @@ function WorkoutSummary({ workout, onOpen }: { workout: TrackedWorkout; onOpen: 
           {completedSets.length} sets
         </small>
       </div>
+      <svg className="workout-summary-chevron" viewBox="0 0 20 20" aria-hidden="true">
+        <path d="m7 4 6 6-6 6" />
+      </svg>
     </button>
   );
 }
@@ -1450,6 +1627,9 @@ function WorkoutLogger({
     initialWorkout?.category ?? restoredDraft?.category ?? recommendation?.category ?? 'push',
   );
   const [notes, setNotes] = useState(initialWorkout?.notes ?? restoredDraft?.notes ?? '');
+  const [editedDurationMinutes, setEditedDurationMinutes] = useState(
+    initialWorkout?.duration_minutes ?? 0,
+  );
   const [movements, setMovements] = useState<DraftMovement[]>(() =>
     initialWorkout
       ? initialWorkout.movements.map((movement) => ({
@@ -1457,6 +1637,7 @@ function WorkoutLogger({
           exercise: movement.exercise,
           notes: movement.notes ?? '',
           machinePhotoIds: movement.machine_photos.map((photo) => photo.id),
+          machinePhotosInitialized: true,
           supersetKey: movement.superset_group_id,
           sets: movement.sets.map((item) => ({
             key: crypto.randomUUID(),
@@ -1487,6 +1668,7 @@ function WorkoutLogger({
                   exercise,
                   notes: movement.notes,
                   machinePhotoIds: movement.machinePhotoIds,
+                  machinePhotosInitialized: true,
                   supersetKey: movement.supersetKey,
                   sets: movement.sets,
                 },
@@ -1495,6 +1677,7 @@ function WorkoutLogger({
         }) ?? []),
   );
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [switchingMovementKey, setSwitchingMovementKey] = useState<string | null>(null);
   const [supersetPickerKey, setSupersetPickerKey] = useState<string | null>(null);
   const [closeConfirmationOpen, setCloseConfirmationOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -1598,6 +1781,7 @@ function WorkoutLogger({
           exercise,
           notes: '',
           machinePhotoIds: [],
+          machinePhotosInitialized: false,
           supersetKey: null,
           sets: [emptySet(exercise.kind)],
         })),
@@ -1605,6 +1789,20 @@ function WorkoutLogger({
     });
     if (!name) setName(`${categoryNames[category]} workout`);
     setPickerOpen(false);
+  }
+
+  function closeExercisePicker() {
+    setPickerOpen(false);
+    setSwitchingMovementKey(null);
+  }
+
+  function switchExercise(selected: Exercise[]) {
+    const replacement = selected[0];
+    if (!switchingMovementKey || !replacement) return;
+    setMovements((current) =>
+      replaceMovementExercise(current, switchingMovementKey, replacement),
+    );
+    closeExercisePicker();
   }
 
   function moveMovement(index: number, direction: -1 | 1) {
@@ -1724,7 +1922,9 @@ function WorkoutLogger({
         workout_date: workoutDate,
         category,
         notes: notes.trim() || null,
-        duration_minutes: initialWorkout?.duration_minutes ?? Math.max(1, Math.round(elapsed / 60)),
+        duration_minutes: initialWorkout
+          ? editedDurationMinutes
+          : Math.max(1, Math.round(elapsed / 60)),
         movements: movements.map((movement) => ({
           exercise_id: movement.exercise.id,
           notes: movement.notes.trim() || null,
@@ -1755,6 +1955,9 @@ function WorkoutLogger({
       setSaving(false);
     }
   }
+
+  const editedDurationHours = Math.floor(editedDurationMinutes / 60);
+  const editedDurationRemainder = editedDurationMinutes % 60;
 
   return (
     <section className="logger-screen content-page">
@@ -1844,6 +2047,52 @@ function WorkoutLogger({
               ))}
             </select>
           </label>
+          {initialWorkout && (
+            <fieldset className="workout-duration-editor">
+              <legend>Duration</legend>
+              <label>
+                Hours
+                <input
+                  type="number"
+                  min="0"
+                  max="24"
+                  inputMode="numeric"
+                  value={editedDurationHours}
+                  onChange={(event) => {
+                    const hours = Number.isNaN(event.target.valueAsNumber)
+                      ? 0
+                      : event.target.valueAsNumber;
+                    setEditedDurationMinutes(
+                      Math.min(1440, Math.max(0, Math.floor(hours)) * 60 + editedDurationRemainder),
+                    );
+                  }}
+                  aria-label="Workout duration hours"
+                />
+              </label>
+              <label>
+                Minutes
+                <input
+                  type="number"
+                  min="0"
+                  max="59"
+                  inputMode="numeric"
+                  value={editedDurationRemainder}
+                  onChange={(event) => {
+                    const minutes = Number.isNaN(event.target.valueAsNumber)
+                      ? 0
+                      : event.target.valueAsNumber;
+                    setEditedDurationMinutes(
+                      Math.min(
+                        1440,
+                        editedDurationHours * 60 + Math.min(59, Math.max(0, Math.floor(minutes))),
+                      ),
+                    );
+                  }}
+                  aria-label="Workout duration minutes"
+                />
+              </label>
+            </fieldset>
+          )}
         </div>
       </section>
 
@@ -1868,6 +2117,10 @@ function WorkoutLogger({
             onUpdateSet={(setKey, update) => updateSet(movement.key, setKey, update)}
             onToggleSet={(item) => toggleSet(movement, item)}
             onAddSet={() => addSet(movement)}
+            onSwitch={() => {
+              setSwitchingMovementKey(movement.key);
+              setPickerOpen(true);
+            }}
             onRemove={() => removeMovement(movement.key)}
             onMoveUp={() => moveMovement(movementIndex, -1)}
             onMoveDown={() => moveMovement(movementIndex, 1)}
@@ -1879,7 +2132,9 @@ function WorkoutLogger({
             onMachinePhotos={(machinePhotoIds) =>
               setMovements((current) =>
                 current.map((item) =>
-                  item.key === movement.key ? { ...item, machinePhotoIds } : item,
+                  item.key === movement.key
+                    ? { ...item, machinePhotoIds, machinePhotosInitialized: true }
+                    : item,
                 ),
               )
             }
@@ -1909,7 +2164,14 @@ function WorkoutLogger({
           </button>
         </div>
       )}
-      <button className="add-exercise-button" type="button" onClick={() => setPickerOpen(true)}>
+      <button
+        className="add-exercise-button"
+        type="button"
+        onClick={() => {
+          setSwitchingMovementKey(null);
+          setPickerOpen(true);
+        }}
+      >
         ＋ Add exercise
       </button>
       <label className="workout-notes panel">
@@ -1942,14 +2204,19 @@ function WorkoutLogger({
 
       {pickerOpen && (
         <ExercisePicker
+          key={switchingMovementKey ? `switch-${switchingMovementKey}` : 'add-exercises'}
           exercises={exercises}
           currentBodyweight={currentBodyweight}
           excludedIds={movements.map((item) => item.exercise.id)}
-          defaultCategory={category}
+          defaultCategory={
+            movements.find((item) => item.key === switchingMovementKey)?.exercise.category ??
+            category
+          }
           recentExerciseIds={recentExerciseIds}
           onFavoriteChange={onExerciseFavorite}
-          onChoose={addExercises}
-          onClose={() => setPickerOpen(false)}
+          singleSelect={switchingMovementKey !== null}
+          onChoose={switchingMovementKey ? switchExercise : addExercises}
+          onClose={closeExercisePicker}
         />
       )}
 
@@ -2253,6 +2520,7 @@ function MovementCard({
   onUpdateSet,
   onToggleSet,
   onAddSet,
+  onSwitch,
   onRemove,
   onMachinePhotos,
   onMovementNotes,
@@ -2272,6 +2540,7 @@ function MovementCard({
   onUpdateSet: (setKey: string, update: Partial<DraftSet>) => void;
   onToggleSet: (item: DraftSet) => void;
   onAddSet: () => void;
+  onSwitch: () => void;
   onRemove: () => void;
   onMachinePhotos: (photoIds: string[]) => void;
   onMovementNotes: (value: string) => void;
@@ -2288,16 +2557,16 @@ function MovementCard({
   const cardio = movement.exercise.kind === 'cardio';
   const treadmill =
     cardio && (movement.exercise.equipment?.toLowerCase().includes('treadmill') ?? false);
-  const completedSetCount = movement.sets.filter((item) => item.completed).length;
-  const [expanded, setExpanded] = useState(completedSetCount < 3);
-  const previousCompletedSetCount = useRef(completedSetCount);
+  const completedWorkingSetCount = movement.sets.filter(isCompletedWorkingSet).length;
+  const [expanded, setExpanded] = useState(completedWorkingSetCount < 3);
+  const previousCompletedWorkingSetCount = useRef(completedWorkingSetCount);
 
   useEffect(() => {
-    const previousCount = previousCompletedSetCount.current;
-    if (previousCount < 3 && completedSetCount >= 3) setExpanded(false);
-    if (previousCount >= 3 && completedSetCount < 3) setExpanded(true);
-    previousCompletedSetCount.current = completedSetCount;
-  }, [completedSetCount]);
+    const previousCount = previousCompletedWorkingSetCount.current;
+    if (previousCount < 3 && completedWorkingSetCount >= 3) setExpanded(false);
+    if (previousCount >= 3 && completedWorkingSetCount < 3) setExpanded(true);
+    previousCompletedWorkingSetCount.current = completedWorkingSetCount;
+  }, [completedWorkingSetCount]);
 
   return (
     <article
@@ -2314,7 +2583,8 @@ function MovementCard({
           </p>
           {!expanded && (
             <span className="movement-completed-summary">
-              {completedSetCount} completed {completedSetCount === 1 ? 'set' : 'sets'}
+              {completedWorkingSetCount} completed working{' '}
+              {completedWorkingSetCount === 1 ? 'set' : 'sets'}
             </span>
           )}
         </div>
@@ -2348,10 +2618,15 @@ function MovementCard({
         </div>
       </header>
 
+      <button className="movement-switch-exercise" type="button" onClick={onSwitch}>
+        Switch exercise
+      </button>
+
       {!cardio && (
         <MachinePhotoChooser
           exercise={movement.exercise}
           selectedIds={movement.machinePhotoIds}
+          autoPinLastUsed={!movement.machinePhotosInitialized}
           onChange={onMachinePhotos}
         />
       )}
@@ -2646,10 +2921,12 @@ function MovementCard({
 function MachinePhotoChooser({
   exercise,
   selectedIds,
+  autoPinLastUsed,
   onChange,
 }: {
   exercise: Exercise;
   selectedIds: string[];
+  autoPinLastUsed: boolean;
   onChange: (photoIds: string[]) => void;
 }) {
   const [photos, setPhotos] = useState<MachinePhoto[]>([]);
@@ -2657,15 +2934,33 @@ function MachinePhotoChooser({
   const [caption, setCaption] = useState('');
   const [expanded, setExpanded] = useState<MachinePhoto | null>(null);
   const [photoPanelOpen, setPhotoPanelOpen] = useState(false);
+  const [choosingReplacement, setChoosingReplacement] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const photoRailRef = useRef<HTMLDivElement>(null);
+  const autoPinLastUsedRef = useRef(autoPinLastUsed);
+  const onChangeRef = useRef(onChange);
+  const selectedIdsRef = useRef(selectedIds);
+
+  useEffect(() => {
+    onChangeRef.current = onChange;
+    selectedIdsRef.current = selectedIds;
+  }, [onChange, selectedIds]);
 
   useEffect(() => {
     let active = true;
-    void api
-      .listMachinePhotos(exercise.id)
-      .then((items) => {
-        if (active) setPhotos(items);
+    void Promise.all([
+      api.listMachinePhotos(exercise.id),
+      autoPinLastUsedRef.current
+        ? api.lastUsedMachinePhotos(exercise.id)
+        : Promise.resolve([] as MachinePhoto[]),
+    ])
+      .then(([items, lastUsed]) => {
+        if (!active) return;
+        setPhotos(items);
+        if (autoPinLastUsedRef.current && selectedIdsRef.current.length === 0) {
+          onChangeRef.current(lastUsed.map((photo) => photo.id));
+        }
       })
       .catch((loadError) => {
         if (active)
@@ -2702,7 +2997,8 @@ function MachinePhotoChooser({
     try {
       const photo = await api.uploadMachinePhoto(exercise.id, pending.file, caption.trim());
       setPhotos((current) => [photo, ...current]);
-      onChange([...new Set([...selectedIds, photo.id])]);
+      onChange(choosingReplacement ? [photo.id] : [...new Set([...selectedIds, photo.id])]);
+      setChoosingReplacement(false);
       setPending(null);
       setCaption('');
       setPhotoPanelOpen(false);
@@ -2714,6 +3010,11 @@ function MachinePhotoChooser({
   }
 
   function togglePhoto(photoId: string) {
+    if (choosingReplacement) {
+      onChange([photoId]);
+      setChoosingReplacement(false);
+      return;
+    }
     onChange(
       selectedIds.includes(photoId)
         ? selectedIds.filter((current) => current !== photoId)
@@ -2732,6 +3033,15 @@ function MachinePhotoChooser({
     setPhotos((current) => current.filter((item) => item.id !== photo.id));
     onChange(selectedIds.filter((id) => id !== photo.id));
     setExpanded(null);
+  }
+
+  function chooseAnotherPhoto() {
+    setExpanded(null);
+    setChoosingReplacement(true);
+    setPhotoPanelOpen(true);
+    window.requestAnimationFrame(() => {
+      photoRailRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    });
   }
 
   const pinnedPhotos = photos.filter((photo) => selectedIds.includes(photo.id));
@@ -2798,31 +3108,46 @@ function MachinePhotoChooser({
           </label>
         </div>
         {photos.length > 0 && (
-          <div className="machine-photo-rail">
-            {photos.map((photo) => {
-              const selected = selectedIds.includes(photo.id);
-              return (
-                <article className={selected ? 'selected' : ''} key={photo.id}>
-                  <button
-                    type="button"
-                    className="machine-thumbnail"
-                    onClick={() => setExpanded(photo)}
-                    aria-label={`Expand ${photo.caption}`}
-                  >
-                    <img src={photo.thumbnail_url} alt={photo.caption} loading="lazy" />
-                  </button>
-                  <strong title={photo.caption}>{photo.caption}</strong>
-                  <button
-                    type="button"
-                    className="machine-pin"
-                    onClick={() => togglePhoto(photo.id)}
-                  >
-                    {selected ? '✓ Pinned' : 'Pin to sets'}
-                  </button>
-                </article>
-              );
-            })}
-          </div>
+          <>
+            {choosingReplacement && (
+              <p className="machine-photo-choice-prompt" role="status">
+                {photos.length > 1
+                  ? 'Choose the machine you are using for this workout.'
+                  : 'No other saved photos yet. Use Take photo or Choose photo above to add another machine.'}
+              </p>
+            )}
+            <div className="machine-photo-rail" ref={photoRailRef}>
+              {photos.map((photo) => {
+                const selected = selectedIds.includes(photo.id);
+                return (
+                  <article className={selected ? 'selected' : ''} key={photo.id}>
+                    <button
+                      type="button"
+                      className="machine-thumbnail"
+                      onClick={() => setExpanded(photo)}
+                      aria-label={`Expand ${photo.caption}`}
+                    >
+                      <img src={photo.thumbnail_url} alt={photo.caption} loading="lazy" />
+                    </button>
+                    <strong title={photo.caption}>{photo.caption}</strong>
+                    <button
+                      type="button"
+                      className="machine-pin"
+                      onClick={() => togglePhoto(photo.id)}
+                    >
+                      {choosingReplacement
+                        ? selected
+                          ? 'Currently pinned'
+                          : 'Use this machine'
+                        : selected
+                          ? '✓ Pinned'
+                          : 'Pin to sets'}
+                    </button>
+                  </article>
+                );
+              })}
+            </div>
+          </>
         )}
         {error && <p className="machine-photo-error">{error}</p>}
 
@@ -2860,6 +3185,7 @@ function MachinePhotoChooser({
             onClose={() => setExpanded(null)}
             onUpdate={updatePhoto}
             onDelete={deletePhoto}
+            onChooseAnother={chooseAnotherPhoto}
           />
         )}
       </div>
@@ -2872,11 +3198,13 @@ function MachinePhotoDetail({
   onClose,
   onUpdate,
   onDelete,
+  onChooseAnother,
 }: {
   photo: MachinePhoto;
   onClose: () => void;
   onUpdate?: (photo: MachinePhoto, caption: string) => Promise<void>;
   onDelete?: (photo: MachinePhoto) => Promise<void>;
+  onChooseAnother?: () => void;
 }) {
   const [caption, setCaption] = useState(photo.caption);
   const [saving, setSaving] = useState(false);
@@ -2933,6 +3261,11 @@ function MachinePhotoDetail({
               Save name
             </button>
           )}
+          {onChooseAnother && (
+            <button type="button" className="photo-choose-other" onClick={onChooseAnother}>
+              Switch photo
+            </button>
+          )}
           {onDelete && (
             <InlineConfirmButton
               className="photo-delete"
@@ -2958,6 +3291,7 @@ function ExercisePicker({
   defaultCategory,
   recentExerciseIds,
   onFavoriteChange,
+  singleSelect = false,
   onChoose,
   onClose,
 }: {
@@ -2967,6 +3301,7 @@ function ExercisePicker({
   defaultCategory: WorkoutCategory;
   recentExerciseIds: string[];
   onFavoriteChange: (exerciseId: string, isFavorite: boolean) => Promise<void>;
+  singleSelect?: boolean;
   onChoose: (exercises: Exercise[]) => void;
   onClose: () => void;
 }) {
@@ -3055,7 +3390,9 @@ function ExercisePicker({
             setSelectedIds((current) =>
               current.includes(exercise.id)
                 ? current.filter((id) => id !== exercise.id)
-                : [...current, exercise.id],
+                : singleSelect
+                  ? [exercise.id]
+                  : [...current, exercise.id],
             );
             searchRef.current?.blur();
           }}
@@ -3161,8 +3498,10 @@ function ExercisePicker({
         <header>
           <div className="exercise-picker-heading">
             <p className="section-kicker">EXERCISE LIBRARY</p>
-            <h2 id="exercise-picker-title">Add exercises</h2>
-            <small>{selectedIds.length} selected</small>
+            <h2 id="exercise-picker-title">
+              {singleSelect ? 'Switch exercise' : 'Add exercises'}
+            </h2>
+            <small>{singleSelect ? 'Choose one exercise' : `${selectedIds.length} selected`}</small>
           </div>
           <button className="icon-button" type="button" onClick={onClose} aria-label="Close">
             ×
@@ -3239,7 +3578,9 @@ function ExercisePicker({
             onChoose(exercises.filter((exercise) => selectedIds.includes(exercise.id)))
           }
         >
-          Add selected exercises ({selectedIds.length})
+          {singleSelect
+            ? 'Switch exercise'
+            : `Add selected exercises (${selectedIds.length})`}
         </button>
       </section>
     </div>,
@@ -4726,21 +5067,26 @@ function CardioScreen({ onDataChange }: { onDataChange: () => Promise<void> }) {
                 {prettyDate(session.session_date)} · {session.duration_minutes} min ·{' '}
                 {session.zone ?? session.intensity ?? 'Unspecified'}
                 {session.qualifies_zone2 ? ' · Zone 2 ✓' : ''}
+                {session.source_workout_id ? ' · Imported from workout' : ''}
               </small>
             </div>
-            <button
-              onClick={() => {
-                setEditingId(session.id);
-                setDraft(session);
-              }}
-            >
-              Edit
-            </button>
-            <InlineConfirmButton
-              label="Delete"
-              confirmLabel="Delete session"
-              onConfirm={() => remove(session.id)}
-            />
+            {!session.source_workout_id && (
+              <>
+                <button
+                  onClick={() => {
+                    setEditingId(session.id);
+                    setDraft(session);
+                  }}
+                >
+                  Edit
+                </button>
+                <InlineConfirmButton
+                  label="Delete"
+                  confirmLabel="Delete session"
+                  onConfirm={() => remove(session.id)}
+                />
+              </>
+            )}
           </article>
         ))}
       </section>
@@ -4896,7 +5242,8 @@ function HistoryScreen({
                     </span>
                     <strong>{workout.name}</strong>
                     <small>
-                      {prettyDate(workout.workout_date)} · {workout.duration_minutes ?? '–'} min
+                      {prettyDate(workout.workout_date)} ·{' '}
+                      {formatMinutesDuration(workout.duration_minutes)}
                     </small>
                   </div>
                   <b>{open ? '−' : '+'}</b>
@@ -4910,19 +5257,48 @@ function HistoryScreen({
                           {workoutBodyweight !== null && ` @ ${workoutBodyweight} kg`}
                         </strong>
                         {movement.machine_photos.length > 0 && (
-                          <div className="history-machine-photos">
-                            {movement.machine_photos.map((photo) => (
-                              <button
-                                type="button"
-                                key={photo.id}
-                                onClick={() => setExpandedPhoto(photo)}
-                                aria-label={`Expand ${photo.caption}`}
-                              >
-                                <img src={photo.thumbnail_url} alt={photo.caption} loading="lazy" />
-                                <span>{photo.caption}</span>
-                              </button>
-                            ))}
-                          </div>
+                          <>
+                            <div className="history-machine-photos">
+                              {movement.machine_photos.map((photo) => (
+                                <button
+                                  type="button"
+                                  key={photo.id}
+                                  onClick={() =>
+                                    setExpandedPhoto((current) =>
+                                      current?.id === photo.id ? null : photo,
+                                    )
+                                  }
+                                  aria-label={`${expandedPhoto?.id === photo.id ? 'Collapse' : 'Expand'} ${photo.caption}`}
+                                  aria-expanded={expandedPhoto?.id === photo.id}
+                                >
+                                  <span className="history-photo-image">
+                                    <img
+                                      src={photo.thumbnail_url}
+                                      alt={photo.caption}
+                                      loading="lazy"
+                                    />
+                                    <svg
+                                      className="history-photo-expand-icon"
+                                      viewBox="0 0 20 20"
+                                      aria-hidden="true"
+                                    >
+                                      <path d="M7 3H3v4M13 3h4v4M7 17H3v-4M13 17h4v-4" />
+                                    </svg>
+                                  </span>
+                                  <span className="history-photo-caption">{photo.caption}</span>
+                                </button>
+                              ))}
+                            </div>
+                            {expandedPhoto &&
+                              movement.machine_photos.some(
+                                (photo) => photo.id === expandedPhoto.id,
+                              ) && (
+                                <MachinePhotoDetail
+                                  photo={expandedPhoto}
+                                  onClose={() => setExpandedPhoto(null)}
+                                />
+                              )}
+                          </>
                         )}
                         <HistorySetFlow
                           sets={movement.sets.filter((item) => item.completed)}
@@ -4960,9 +5336,6 @@ function HistoryScreen({
             label="workout history"
           />
         </>
-      )}
-      {expandedPhoto && (
-        <MachinePhotoDetail photo={expandedPhoto} onClose={() => setExpandedPhoto(null)} />
       )}
     </section>
   );

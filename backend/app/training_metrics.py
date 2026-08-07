@@ -40,29 +40,29 @@ DEFAULT_MUSCLE_MAPPING: dict[str, tuple[tuple[str, MuscleRole, float], ...]] = {
     "Barbell Bench Press": (
         ("Pectorals", MuscleRole.PRIMARY, 1.0),
         ("Triceps", MuscleRole.SECONDARY, 0.5),
-        ("Anterior deltoids", MuscleRole.SECONDARY, 0.5),
+        ("Front delts", MuscleRole.SECONDARY, 0.5),
     ),
     "Incline Dumbbell Press": (
-        ("Upper pectorals", MuscleRole.PRIMARY, 1.0),
-        ("Anterior deltoids", MuscleRole.PRIMARY, 1.0),
+        ("Pectorals", MuscleRole.PRIMARY, 1.0),
+        ("Front delts", MuscleRole.PRIMARY, 1.0),
         ("Triceps", MuscleRole.SECONDARY, 0.5),
     ),
     "Overhead Press": (
-        ("Anterior deltoids", MuscleRole.PRIMARY, 1.0),
+        ("Front delts", MuscleRole.PRIMARY, 1.0),
         ("Triceps", MuscleRole.SECONDARY, 0.5),
-        ("Upper pectorals", MuscleRole.SECONDARY, 0.5),
+        ("Pectorals", MuscleRole.SECONDARY, 0.5),
     ),
     "Dumbbell Shoulder Press": (
-        ("Anterior deltoids", MuscleRole.PRIMARY, 1.0),
+        ("Front delts", MuscleRole.PRIMARY, 1.0),
         ("Triceps", MuscleRole.SECONDARY, 0.5),
     ),
     "Lateral Raise": (
-        ("Lateral deltoids", MuscleRole.PRIMARY, 1.0),
-        ("Upper trapezius", MuscleRole.SECONDARY, 0.5),
+        ("Side delts", MuscleRole.PRIMARY, 1.0),
+        ("Upper traps", MuscleRole.SECONDARY, 0.5),
     ),
     "Cable Fly": (
         ("Pectorals", MuscleRole.PRIMARY, 1.0),
-        ("Anterior deltoids", MuscleRole.SECONDARY, 0.5),
+        ("Front delts", MuscleRole.SECONDARY, 0.5),
     ),
     "Pec Deck": (("Pectorals", MuscleRole.PRIMARY, 1.0),),
     "Triceps Pushdown": (("Triceps", MuscleRole.PRIMARY, 1.0),),
@@ -71,7 +71,7 @@ DEFAULT_MUSCLE_MAPPING: dict[str, tuple[tuple[str, MuscleRole, float], ...]] = {
     "Dips": (
         ("Pectorals", MuscleRole.PRIMARY, 1.0),
         ("Triceps", MuscleRole.PRIMARY, 1.0),
-        ("Anterior deltoids", MuscleRole.SECONDARY, 0.5),
+        ("Front delts", MuscleRole.SECONDARY, 0.5),
     ),
     "Deadlift": (
         ("Glutes", MuscleRole.PRIMARY, 1.0),
@@ -96,22 +96,27 @@ DEFAULT_MUSCLE_MAPPING: dict[str, tuple[tuple[str, MuscleRole, float], ...]] = {
         ("Biceps", MuscleRole.SECONDARY, 0.5),
         ("Forearms", MuscleRole.SECONDARY, 0.5),
     ),
+    "Single-Arm Lat Pulldown": (("Lats", MuscleRole.PRIMARY, 1.0),),
     "Seated Cable Row": (
+        ("Mid / Upper Back", MuscleRole.PRIMARY, 1.0),
+        ("Lats", MuscleRole.SECONDARY, 0.5),
+        ("Biceps", MuscleRole.SECONDARY, 0.5),
+    ),
+    "Seated Machine Row": (
         ("Mid / Upper Back", MuscleRole.PRIMARY, 1.0),
         ("Lats", MuscleRole.SECONDARY, 0.5),
         ("Biceps", MuscleRole.SECONDARY, 0.5),
     ),
     "Face Pull": (
         ("Rear deltoids", MuscleRole.PRIMARY, 1.0),
-        ("External rotators", MuscleRole.PRIMARY, 1.0),
         ("Mid / Upper Back", MuscleRole.SECONDARY, 0.5),
     ),
     "Cable Shoulder Extensions": (("Rear deltoids", MuscleRole.PRIMARY, 1.0),),
     "Barbell Curl": (("Biceps", MuscleRole.PRIMARY, 1.0), ("Forearms", MuscleRole.SECONDARY, 0.5)),
+    "Machine Bicep Preacher Curl": (("Biceps", MuscleRole.PRIMARY, 1.0),),
     "Single-Arm Preacher Curl": (("Biceps", MuscleRole.PRIMARY, 1.0),),
     "Hammer Curl": (
-        ("Brachialis", MuscleRole.PRIMARY, 1.0),
-        ("Biceps", MuscleRole.SECONDARY, 0.5),
+        ("Biceps", MuscleRole.PRIMARY, 1.0),
         ("Forearms", MuscleRole.SECONDARY, 0.5),
     ),
     "Back Squat": (
@@ -134,25 +139,45 @@ DEFAULT_MUSCLE_MAPPING: dict[str, tuple[tuple[str, MuscleRole, float], ...]] = {
         ("Glutes", MuscleRole.PRIMARY, 1.0),
         ("Adductors", MuscleRole.SECONDARY, 0.5),
     ),
+    "Single Leg Press": (
+        ("Quadriceps", MuscleRole.PRIMARY, 1.0),
+        ("Glutes", MuscleRole.PRIMARY, 1.0),
+        ("Adductors", MuscleRole.SECONDARY, 0.5),
+    ),
     "Bulgarian Split Squat": (
         ("Quadriceps", MuscleRole.PRIMARY, 1.0),
         ("Glutes", MuscleRole.PRIMARY, 1.0),
         ("Adductors", MuscleRole.SECONDARY, 0.5),
     ),
     "Leg Extension": (("Quadriceps", MuscleRole.PRIMARY, 1.0),),
-    "Leg Curl": (("Hamstrings", MuscleRole.PRIMARY, 1.0), ("Calves", MuscleRole.SECONDARY, 0.5)),
+    "Seated Leg Curl": (("Hamstrings", MuscleRole.PRIMARY, 1.0),),
+    "Lying Leg Curl": (("Hamstrings", MuscleRole.PRIMARY, 1.0),),
     "Hip Thrust": (
         ("Glutes", MuscleRole.PRIMARY, 1.0),
         ("Hamstrings", MuscleRole.SECONDARY, 0.5),
         ("Adductors", MuscleRole.SECONDARY, 0.5),
     ),
     "Standing Calf Raise": (("Calves", MuscleRole.PRIMARY, 1.0),),
+    "Back Extension Machine": (
+        ("Spinal erectors", MuscleRole.PRIMARY, 1.0),
+        ("Glutes", MuscleRole.SECONDARY, 0.5),
+        ("Hamstrings", MuscleRole.PRIMARY, 1.0),
+    ),
+    "Seated Ab Crunch Machine": (("Core", MuscleRole.PRIMARY, 1.0),),
     "Plank": (("Core", MuscleRole.PRIMARY, 1.0), ("Glutes", MuscleRole.SECONDARY, 0.5)),
     "Hanging Leg Raise": (
         ("Core", MuscleRole.PRIMARY, 1.0),
         ("Hip flexors", MuscleRole.SECONDARY, 0.5),
     ),
 }
+
+MUSCLE_GROUP_ALIASES = {
+    "Upper pectorals": "Pectorals",
+    "Anterior deltoids": "Front delts",
+    "Lateral deltoids": "Side delts",
+    "Upper trapezius": "Upper traps",
+}
+HIDDEN_MUSCLE_GROUPS = {"External rotators", "Brachialis"}
 
 
 def get_setting(db: Session, key: str, default: str) -> str:
@@ -202,11 +227,18 @@ def is_pr_eligible(item: WorkoutSet) -> bool:
 
 def muscle_credits(exercise: Exercise) -> list[tuple[str, float]]:
     if exercise.muscle_contributions:
-        return [
-            (item.muscle_name, item.contribution_factor) for item in exercise.muscle_contributions
-        ]
+        credits: dict[str, float] = {}
+        for item in exercise.muscle_contributions:
+            if item.muscle_name in HIDDEN_MUSCLE_GROUPS:
+                continue
+            muscle_name = MUSCLE_GROUP_ALIASES.get(item.muscle_name, item.muscle_name)
+            credits[muscle_name] = max(credits.get(muscle_name, 0), item.contribution_factor)
+        return list(credits.items())
     # Custom exercises retain the user's explicit muscle field until they edit detailed credits.
-    return [(exercise.muscle_group.strip(), 1.0)] if exercise.muscle_group.strip() else []
+    muscle_name = exercise.muscle_group.strip()
+    if not muscle_name or muscle_name in HIDDEN_MUSCLE_GROUPS:
+        return []
+    return [(MUSCLE_GROUP_ALIASES.get(muscle_name, muscle_name), 1.0)]
 
 
 def muscle_volume(workouts: list[TrainingWorkout], start: date, end: date) -> dict[str, float]:
@@ -233,15 +265,31 @@ def seed_muscle_mappings(db: Session) -> None:
     changed = False
     for exercise_name, mappings in DEFAULT_MUSCLE_MAPPING.items():
         exercise = exercises.get(exercise_name)
-        if not exercise or exercise.is_custom or exercise.muscle_contributions:
+        if not exercise or exercise.is_custom:
             continue
+        expected_muscles = {muscle for muscle, _, _ in mappings}
+        for contribution in list(exercise.muscle_contributions):
+            if contribution.muscle_name not in expected_muscles:
+                exercise.muscle_contributions.remove(contribution)
+                changed = True
+        existing = {
+            contribution.muscle_name: contribution
+            for contribution in exercise.muscle_contributions
+        }
         for muscle, role, factor in mappings:
-            exercise.muscle_contributions.append(
-                ExerciseMuscleContribution(
-                    muscle_name=muscle, role=role, contribution_factor=factor
+            contribution = existing.get(muscle)
+            if contribution:
+                if contribution.role != role or contribution.contribution_factor != factor:
+                    contribution.role = role
+                    contribution.contribution_factor = factor
+                    changed = True
+            else:
+                exercise.muscle_contributions.append(
+                    ExerciseMuscleContribution(
+                        muscle_name=muscle, role=role, contribution_factor=factor
+                    )
                 )
-            )
-        changed = True
+                changed = True
     if changed:
         db.commit()
 

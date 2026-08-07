@@ -88,6 +88,8 @@ export const api = {
     }),
   listMachinePhotos: (exerciseId: string) =>
     request<MachinePhoto[]>(`/api/exercises/${exerciseId}/machine-photos`),
+  lastUsedMachinePhotos: (exerciseId: string) =>
+    request<MachinePhoto[]>(`/api/exercises/${exerciseId}/machine-photos/last-used`),
   uploadMachinePhoto: (exerciseId: string, file: File, caption: string) => {
     const form = new FormData();
     form.append('caption', caption);

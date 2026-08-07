@@ -20,6 +20,16 @@ export function formatSeconds(seconds: number): string {
     : `${minutes}:${String(remaining).padStart(2, '0')}`;
 }
 
+export function formatMinutesDuration(minutes: number | null): string {
+  if (minutes === null) return '–';
+  const normalized = Math.max(0, Math.floor(minutes));
+  const hours = Math.floor(normalized / 60);
+  const remainingMinutes = normalized % 60;
+  if (hours && remainingMinutes) return `${hours}h ${remainingMinutes}min`;
+  if (hours) return `${hours}h`;
+  return `${remainingMinutes}min`;
+}
+
 export function mergeUniqueById<T extends { id: string }>(existing: T[], selected: T[]): T[] {
   const seen = new Set(existing.map((item) => item.id));
   return [...existing, ...selected.filter((item) => !seen.has(item.id))];

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { WorkoutSetInput } from './types';
-import { createWorkoutSet } from './workoutSets';
+import { createWorkoutSet, isCompletedWorkingSet } from './workoutSets';
 
 const previousSet: WorkoutSetInput = {
   reps: 8,
@@ -38,5 +38,23 @@ describe('new workout sets', () => {
 
     expect(nextSet.incline_percent).toBe(12.5);
     expect(nextSet.speed_kph).toBe(5.4);
+  });
+});
+
+describe('completed working sets', () => {
+  it('does not count completed warm-ups', () => {
+    expect(
+      isCompletedWorkingSet({ ...previousSet, set_type: 'warmup', warmup: true }),
+    ).toBe(false);
+  });
+
+  it('counts completed normal and drop sets', () => {
+    expect(isCompletedWorkingSet({ ...previousSet, set_type: 'normal' })).toBe(true);
+    expect(isCompletedWorkingSet({ ...previousSet, set_type: 'drop' })).toBe(true);
+  });
+
+  it('only counts a failed set when at least one rep was completed', () => {
+    expect(isCompletedWorkingSet({ ...previousSet, failed: true, reps: 0 })).toBe(false);
+    expect(isCompletedWorkingSet({ ...previousSet, failed: true, reps: 1 })).toBe(true);
   });
 });

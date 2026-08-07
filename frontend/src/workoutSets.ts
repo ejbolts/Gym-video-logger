@@ -18,3 +18,12 @@ export function createWorkoutSet(kind: ExerciseKind, previous?: WorkoutSetInput)
     completed: false,
   };
 }
+
+export function isCompletedWorkingSet(item: WorkoutSetInput): boolean {
+  return (
+    item.completed &&
+    item.set_type !== 'warmup' &&
+    !item.warmup &&
+    (!item.failed || (item.reps ?? 0) > 0)
+  );
+}

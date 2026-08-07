@@ -342,6 +342,7 @@ export interface CardioSessionInput {
 
 export interface CardioSession extends CardioSessionInput {
   id: string;
+  source_workout_id: string | null;
   created_at: string;
   updated_at: string;
 }

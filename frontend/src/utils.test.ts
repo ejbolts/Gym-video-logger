@@ -1,10 +1,23 @@
 import { describe, expect, it } from 'vitest';
-import { formatBytes, formatSeconds, mergeUniqueById, reorder } from './utils';
+import {
+  formatBytes,
+  formatMinutesDuration,
+  formatSeconds,
+  mergeUniqueById,
+  reorder,
+} from './utils';
 
 describe('display formatting', () => {
   it('formats a video size and a timestamp', () => {
     expect(formatBytes(1.5 * 1024 * 1024)).toBe('1.5 MB');
     expect(formatSeconds(3661)).toBe('1:01:01');
+  });
+
+  it('formats completed workout durations in hours and minutes', () => {
+    expect(formatMinutesDuration(45)).toBe('45min');
+    expect(formatMinutesDuration(75)).toBe('1h 15min');
+    expect(formatMinutesDuration(120)).toBe('2h');
+    expect(formatMinutesDuration(null)).toBe('–');
   });
 });
 

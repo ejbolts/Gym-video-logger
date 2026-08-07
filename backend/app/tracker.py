@@ -6,7 +6,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, Response
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
@@ -114,21 +114,28 @@ DEFAULT_EXERCISES = (
     ("Barbell Row", WorkoutCategory.PULL, "Mid / Upper Back", "Barbell"),
     ("Pull-up", WorkoutCategory.PULL, "Lats", "Bodyweight"),
     ("Lat Pulldown", WorkoutCategory.PULL, "Lats", "Cable"),
+    ("Single-Arm Lat Pulldown", WorkoutCategory.PULL, "Lats", "Cable"),
     ("Seated Cable Row", WorkoutCategory.PULL, "Mid / Upper Back", "Cable"),
+    ("Seated Machine Row", WorkoutCategory.PULL, "Mid / Upper Back", "Machine"),
     ("Face Pull", WorkoutCategory.PULL, "Rear Delts", "Cable"),
     ("Cable Shoulder Extensions", WorkoutCategory.PULL, "Rear Delts", "Cable"),
     ("Barbell Curl", WorkoutCategory.PULL, "Biceps", "Barbell"),
+    ("Machine Bicep Preacher Curl", WorkoutCategory.PULL, "Biceps", "Machine"),
     ("Single-Arm Preacher Curl", WorkoutCategory.PULL, "Biceps", "Dumbbell"),
     ("Hammer Curl", WorkoutCategory.PULL, "Biceps", "Dumbbell"),
     ("Back Squat", WorkoutCategory.LOWER, "Quads", "Barbell"),
     ("Front Squat", WorkoutCategory.LOWER, "Quads", "Barbell"),
     ("Romanian Deadlift", WorkoutCategory.LOWER, "Hamstrings", "Barbell"),
     ("Leg Press", WorkoutCategory.LOWER, "Quads", "Machine"),
+    ("Single Leg Press", WorkoutCategory.LOWER, "Quads", "Machine"),
     ("Bulgarian Split Squat", WorkoutCategory.LOWER, "Quads", "Dumbbell"),
     ("Leg Extension", WorkoutCategory.LOWER, "Quads", "Machine"),
-    ("Leg Curl", WorkoutCategory.LOWER, "Hamstrings", "Machine"),
+    ("Seated Leg Curl", WorkoutCategory.LOWER, "Hamstrings", "Machine"),
+    ("Lying Leg Curl", WorkoutCategory.LOWER, "Hamstrings", "Machine"),
     ("Hip Thrust", WorkoutCategory.LOWER, "Glutes", "Barbell"),
     ("Standing Calf Raise", WorkoutCategory.LOWER, "Calves", "Machine"),
+    ("Back Extension Machine", WorkoutCategory.LOWER, "Lower Back", "Machine"),
+    ("Seated Ab Crunch Machine", WorkoutCategory.FULL_BODY, "Core", "Machine"),
     ("Plank", WorkoutCategory.FULL_BODY, "Core", "Bodyweight"),
     ("Hanging Leg Raise", WorkoutCategory.FULL_BODY, "Core", "Bodyweight"),
 )
@@ -137,6 +144,7 @@ DEFAULT_CARDIO = (
     ("Running", "Cardio", "Outdoor / Treadmill"),
     ("Incline Treadmill Walking", "Cardio", "Treadmill"),
     ("Cycling", "Cardio", "Bike"),
+    ("Cycling (Indoor)", "Cardio", "Stationary Bike"),
     ("Rowing", "Cardio", "Rowing machine"),
     ("Stair Climber", "Cardio", "Machine"),
     ("Walking", "Cardio", "Outdoor / Treadmill"),
@@ -149,7 +157,7 @@ TRAINING_ROTATION = (
     WorkoutCategory.CARDIO,
 )
 SESSION_MUSCLE_GROUPS = {
-    WorkoutCategory.PUSH: ("Pectorals", "Anterior deltoids", "Lateral deltoids", "Triceps"),
+    WorkoutCategory.PUSH: ("Pectorals", "Front delts", "Side delts", "Triceps"),
     WorkoutCategory.PULL: ("Lats", "Mid / Upper Back", "Rear deltoids", "Biceps", "Forearms"),
     WorkoutCategory.LOWER: ("Quadriceps", "Hamstrings", "Glutes", "Calves"),
     WorkoutCategory.CARDIO: ("Cardio",),
@@ -167,6 +175,23 @@ WEEKLY_SET_TARGETS = {
     TrainingMode.MAINTENANCE: 12,
     TrainingMode.BULK: 14,
 }
+SMALL_MUSCLE_GROUPS = {
+    "Biceps",
+    "Calves",
+    "Core",
+    "Forearms",
+    "Front delts",
+    "Hip flexors",
+    "Rear deltoids",
+    "Side delts",
+    "Triceps",
+    "Upper traps",
+}
+
+
+def weekly_set_target(mode: TrainingMode, muscle_group: str) -> int:
+    target = WEEKLY_SET_TARGETS[mode]
+    return target // 2 if muscle_group in SMALL_MUSCLE_GROUPS else target
 
 
 def exercise_muscle_credits(exercise: Exercise) -> list[tuple[str, float]]:
@@ -256,10 +281,11 @@ def weekly_goal(workouts: list[TrainingWorkout], today: date, mode: TrainingMode
     target = WEEKLY_SET_TARGETS[mode]
     muscle_groups: list[WeeklyMuscleGoalRead] = []
     for group in sorted(active_groups):
+        group_target = weekly_set_target(mode, group)
         effective = round(effective_by_group[group], 1)
-        if effective < target:
+        if effective < group_target:
             status = "below"
-        elif effective <= target * 1.15:
+        elif effective <= group_target * 1.15:
             status = "on_target"
         else:
             status = "above"
@@ -269,7 +295,7 @@ def weekly_goal(workouts: list[TrainingWorkout], today: date, mode: TrainingMode
                 muscle_group=group,
                 raw_sets=round(raw_by_group[group], 1),
                 effective_sets=effective,
-                target_sets=target,
+                target_sets=group_target,
                 average_rpe=(round(sum(group_rpes) / len(group_rpes), 1) if group_rpes else None),
                 status=status,
             )
@@ -277,7 +303,7 @@ def weekly_goal(workouts: list[TrainingWorkout], today: date, mode: TrainingMode
 
     overall_percent = (
         round(
-            sum(min(item.effective_sets / target, 1) for item in muscle_groups)
+            sum(min(item.effective_sets / item.target_sets, 1) for item in muscle_groups)
             / len(muscle_groups)
             * 100,
             1,
@@ -343,12 +369,13 @@ def workout_recommendation(
         ]
         coverage_need = sum(deficits) / len(groups)
         recovery_readiness = sum(days_since) / len(days_since) / 7
-        set_target = WEEKLY_SET_TARGETS[mode]
         volume_need = (
             0.0
             if category == WorkoutCategory.CARDIO
             else sum(
-                max(0.0, set_target - group_effective_sets[group]) / set_target for group in groups
+                max(0.0, weekly_set_target(mode, group) - group_effective_sets[group])
+                / weekly_set_target(mode, group)
+                for group in groups
             )
             / len(groups)
         )
@@ -382,7 +409,7 @@ def workout_recommendation(
         reason += (
             f" {mode.value.title()} goal: {lowest_group} has "
             f"{group_effective_sets[lowest_group]:g} of "
-            f"{WEEKLY_SET_TARGETS[mode]} effective sets."
+            f"{weekly_set_target(mode, lowest_group)} effective sets."
         )
     return WorkoutRecommendationRead(
         category=recommended,
@@ -395,6 +422,12 @@ def workout_recommendation(
 
 def seed_default_exercises(db: Session) -> None:
     existing = {item.name.casefold(): item for item in db.scalars(select(Exercise))}
+    legacy_leg_curl = existing.get("leg curl")
+    seated_leg_curl = existing.get("seated leg curl")
+    if legacy_leg_curl and not legacy_leg_curl.is_custom and not seated_leg_curl:
+        legacy_leg_curl.name = "Seated Leg Curl"
+        existing.pop("leg curl")
+        existing["seated leg curl"] = legacy_leg_curl
     defaults = (
         *(
             (name, category, ExerciseKind.STRENGTH, muscle_group, equipment)
@@ -479,7 +512,7 @@ def replace_workout_contents(
                 detail=f"Exercise {movement_payload.exercise_id} was not found.",
             )
         movement = WorkoutMovement(
-            exercise_id=exercise.id,
+            exercise=exercise,
             order_index=movement_index,
             notes=movement_payload.notes,
             superset_group=groups.get(movement_payload.superset_key or ""),
@@ -511,6 +544,52 @@ def replace_workout_contents(
         for set_index, set_payload in enumerate(movement_payload.sets):
             movement.sets.append(WorkoutSet(order_index=set_index, **set_payload.model_dump()))
         workout.movements.append(movement)
+
+
+def sync_workout_cardio_sessions(db: Session, workout: TrainingWorkout) -> None:
+    """Mirror completed cardio movements into the cardio-session ledger."""
+    existing = {
+        session.source_movement_index: session
+        for session in db.scalars(
+            select(CardioSession).where(CardioSession.source_workout_id == workout.id)
+        )
+    }
+    imported_indexes: set[int] = set()
+    for movement in workout.movements:
+        if movement.exercise.kind != ExerciseKind.CARDIO:
+            continue
+        duration_seconds = sum(
+            item.duration_seconds or 0
+            for item in movement.sets
+            if item.completed and (item.duration_seconds or 0) > 0
+        )
+        duration_minutes = duration_seconds // 60
+        if duration_minutes < 1:
+            continue
+        imported_indexes.add(movement.order_index)
+        session = existing.get(movement.order_index)
+        if session is None:
+            session = CardioSession(
+                source_workout_id=workout.id,
+                source_movement_index=movement.order_index,
+            )
+            db.add(session)
+        session.session_date = workout.workout_date
+        session.activity_type = movement.exercise.name
+        session.duration_minutes = duration_minutes
+        session.intensity = "Imported from workout"
+        session.zone = "Zone 2"
+        session.qualifies_zone2 = True
+        session.notes = movement.notes
+    for movement_index, session in existing.items():
+        if movement_index not in imported_indexes:
+            db.delete(session)
+
+
+def sync_all_workout_cardio_sessions(db: Session) -> None:
+    workouts = list(db.scalars(select(TrainingWorkout).options(*workout_options())))
+    for workout in workouts:
+        sync_workout_cardio_sessions(db, workout)
 
 
 @router.get("/exercises", response_model=list[ExerciseRead])
@@ -639,6 +718,39 @@ def list_machine_photos(exercise_id: str, db: DbSession) -> list[MachinePhoto]:
             select(MachinePhoto)
             .where(MachinePhoto.exercise_id == exercise_id)
             .order_by(MachinePhoto.created_at.desc())
+        )
+    )
+
+
+@router.get(
+    "/exercises/{exercise_id}/machine-photos/last-used",
+    response_model=list[MachinePhotoRead],
+)
+def last_used_machine_photos(exercise_id: str, db: DbSession) -> list[MachinePhoto]:
+    if not db.get(Exercise, exercise_id):
+        raise HTTPException(status_code=404, detail="Exercise was not found.")
+    movement_id = db.scalar(
+        select(WorkoutMovement.id)
+        .join(TrainingWorkout, WorkoutMovement.workout_id == TrainingWorkout.id)
+        .join(
+            movement_machine_photos,
+            movement_machine_photos.c.movement_id == WorkoutMovement.id,
+        )
+        .where(WorkoutMovement.exercise_id == exercise_id)
+        .order_by(TrainingWorkout.workout_date.desc(), TrainingWorkout.created_at.desc())
+        .limit(1)
+    )
+    if not movement_id:
+        return []
+    return list(
+        db.scalars(
+            select(MachinePhoto)
+            .join(
+                movement_machine_photos,
+                movement_machine_photos.c.machine_photo_id == MachinePhoto.id,
+            )
+            .where(movement_machine_photos.c.movement_id == movement_id)
+            .order_by(MachinePhoto.created_at)
         )
     )
 
@@ -773,16 +885,8 @@ def training_preferences(db: Session) -> TrainingPreferencesRead:
     )
 
 
-def automatically_qualifies_for_zone2(movement: WorkoutMovement) -> bool:
-    if movement.exercise.kind != ExerciseKind.CARDIO:
-        return False
-    name = movement.exercise.name.casefold()
-    return "walking" in name or "walk" in name
-
-
 def zone2_week(
     sessions: list[CardioSession],
-    workouts: list[TrainingWorkout],
     week: date,
     goal: int,
 ) -> Zone2WeekRead:
@@ -792,16 +896,7 @@ def zone2_week(
         for item in sessions
         if item.qualifies_zone2 and week <= item.session_date <= end
     )
-    workout_seconds = sum(
-        item.duration_seconds or 0
-        for workout in workouts
-        if week <= workout.workout_date <= end
-        for movement in workout.movements
-        if automatically_qualifies_for_zone2(movement)
-        for item in movement.sets
-        if item.completed
-    )
-    completed = session_minutes + workout_seconds // 60
+    completed = session_minutes
     return Zone2WeekRead(
         week_start=week,
         week_end=end,
@@ -835,15 +930,13 @@ def update_training_preferences(
 def cardio_overview(db: DbSession) -> CardioOverviewRead:
     preferences = training_preferences(db)
     sessions = list(db.scalars(select(CardioSession).order_by(CardioSession.session_date.desc())))
-    workouts = list(db.scalars(select(TrainingWorkout).options(*workout_options())))
     current_start = start_of_week(date.today(), preferences.week_start)
     return CardioOverviewRead(
         preferences=preferences,
-        current_week=zone2_week(sessions, workouts, current_start, preferences.zone2_goal_minutes),
+        current_week=zone2_week(sessions, current_start, preferences.zone2_goal_minutes),
         previous_weeks=[
             zone2_week(
                 sessions,
-                workouts,
                 current_start - timedelta(days=7 * offset),
                 preferences.zone2_goal_minutes,
             )
@@ -869,6 +962,8 @@ def update_cardio_session(
     session = db.get(CardioSession, session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Cardio session was not found.")
+    if session.source_workout_id:
+        raise HTTPException(status_code=409, detail="Edit imported cardio in its workout.")
     for key, value in payload.model_dump().items():
         setattr(session, key, value)
     db.commit()
@@ -881,6 +976,8 @@ def delete_cardio_session(session_id: str, db: DbSession) -> None:
     session = db.get(CardioSession, session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Cardio session was not found.")
+    if session.source_workout_id:
+        raise HTTPException(status_code=409, detail="Delete imported cardio from its workout.")
     db.delete(session)
     db.commit()
 
@@ -1003,6 +1100,7 @@ def create_workout(payload: TrainingWorkoutCreate, db: DbSession) -> TrainingWor
     db.add(workout)
     replace_workout_contents(db, workout, payload)
     db.flush()
+    sync_workout_cardio_sessions(db, workout)
     rebuild_personal_records(db)
     db.commit()
     backfill_completed_video_links(db, workout.workout_date)
@@ -1066,6 +1164,7 @@ def update_workout(
     workout = load_workout(db, workout_id)
     replace_workout_contents(db, workout, payload)
     db.flush()
+    sync_workout_cardio_sessions(db, workout)
     rebuild_personal_records(db)
     db.commit()
     backfill_completed_video_links(db, workout.workout_date)
@@ -1075,6 +1174,7 @@ def update_workout(
 @router.delete("/workouts/{workout_id}", status_code=204)
 def delete_workout(workout_id: str, db: DbSession) -> None:
     workout = load_workout(db, workout_id)
+    db.execute(delete(CardioSession).where(CardioSession.source_workout_id == workout.id))
     db.delete(workout)
     db.flush()
     rebuild_personal_records(db)
@@ -1285,7 +1385,6 @@ def dashboard(db: DbSession) -> DashboardRead:
         ],
         zone2=zone2_week(
             cardio_sessions,
-            workouts,
             start_of_week(today, preferences.week_start),
             preferences.zone2_goal_minutes,
         ),

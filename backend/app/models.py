@@ -561,6 +561,10 @@ class CardioSession(Base):
     zone: Mapped[str | None] = mapped_column(String(30), nullable=True)
     qualifies_zone2: Mapped[bool] = mapped_column(Boolean, default=False)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_workout_id: Mapped[str | None] = mapped_column(
+        ForeignKey("training_workouts.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    source_movement_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, server_default=func.now()
     )
@@ -571,5 +575,15 @@ class CardioSession(Base):
     __table_args__ = (
         CheckConstraint(
             "duration_minutes > 0 AND duration_minutes <= 1440", name="cardio_duration_range"
+        ),
+        CheckConstraint(
+            "(source_workout_id IS NULL AND source_movement_index IS NULL) OR "
+            "(source_workout_id IS NOT NULL AND source_movement_index IS NOT NULL)",
+            name="cardio_source_fields_together",
+        ),
+        UniqueConstraint(
+            "source_workout_id",
+            "source_movement_index",
+            name="uq_cardio_source_workout_movement",
         ),
     )
