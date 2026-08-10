@@ -2472,15 +2472,96 @@ button.metric-card:focus-visible {
   margin: 0;
 }
 
-.movement-switch-exercise {
-  width: calc(100% - 1.8rem);
+.movement-card-shortcuts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
   margin: 0.7rem 0.9rem 0;
+}
+
+.movement-switch-exercise,
+.movement-history-toggle {
+  width: 100%;
   border: 1px solid color-mix(in srgb, var(--green) 45%, var(--line));
   border-radius: 10px;
   padding: 0.55rem 0.75rem;
   background: color-mix(in srgb, var(--green) 8%, var(--card));
   color: var(--green);
   font-weight: 850;
+}
+
+.movement-history-toggle {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+  background: color-mix(in srgb, var(--accent) 8%, var(--card));
+  color: var(--accent-dark);
+}
+
+.movement-history-toggle.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 15%, var(--card));
+}
+
+.movement-history {
+  margin: 0.65rem 0.9rem 0;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  padding: 0.8rem;
+  background: color-mix(in srgb, var(--page) 82%, var(--card));
+}
+
+.movement-history > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.65rem;
+}
+
+.movement-history h3,
+.movement-history p {
+  margin: 0;
+}
+
+.movement-history h3 {
+  margin-top: 0.15rem;
+  font-size: 0.82rem;
+}
+
+.movement-history-entry {
+  padding: 0.7rem 0;
+  border-top: 1px solid var(--line);
+}
+
+.movement-history-entry:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.movement-history-entry > header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.movement-history-entry > header strong {
+  font-size: 0.72rem;
+}
+
+.movement-history-entry > header small,
+.movement-history-set-note,
+.movement-history-empty {
+  color: var(--muted-ink);
+  font-size: 0.62rem;
+}
+
+.movement-history-set-note {
+  display: block;
+  margin-top: 0.4rem;
+  font-style: italic;
+}
+
+.movement-history-empty {
+  padding: 0.4rem 0;
 }
 
 .machine-photo-picker {
@@ -5047,10 +5128,35 @@ body,
   opacity: 0.38;
 }
 
-.exercise-picker .add-selected-button {
+.exercise-picker-actions {
   z-index: 1;
   align-self: end;
+  display: grid;
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+  gap: 0.65rem;
   margin-top: 0.65rem;
+}
+
+.exercise-picker-actions.single-action {
+  grid-template-columns: 1fr;
+}
+
+.create-superset-button {
+  width: 100%;
+  border: 1px solid var(--accent);
+  border-radius: 11px;
+  padding: 0.85rem;
+  background: rgb(255 99 84 / 10%);
+  color: var(--accent-dark);
+  font-weight: 900;
+}
+
+.create-superset-button:disabled {
+  border-color: var(--line);
+  background: #1b211f;
+  color: var(--muted-ink);
+  opacity: 0.48;
+  cursor: not-allowed;
 }
 
 .exercise-picker.keyboard-visible {
@@ -5068,7 +5174,7 @@ body,
 }
 
 .exercise-picker.keyboard-visible .exercise-picker-heading,
-.exercise-picker.keyboard-visible .add-selected-button {
+.exercise-picker.keyboard-visible .exercise-picker-actions {
   display: none;
 }
 

@@ -19,6 +19,7 @@ import type {
   WorkoutCategory,
   WorkoutInput,
   WorkoutRecommendation,
+  WorkoutSetInput,
   WeeklyGoal,
 } from './types';
 import {
@@ -29,6 +30,7 @@ import {
 } from './bodyTrend';
 import type { BodyTrendRange } from './bodyTrend';
 import { InlineConfirmButton } from './InlineConfirmButton';
+import { recentExerciseHistory, type ExerciseHistoryEntry } from './exerciseHistory';
 import { formatMinutesDuration, localDate, mergeUniqueById, reorder } from './utils';
 import { VideoUpload } from './VideoUpload';
 import {
@@ -36,7 +38,8 @@ import {
   readActiveWorkoutDraft,
   writeActiveWorkoutDraft,
 } from './workoutDraft';
-import { createWorkoutSet, isCompletedWorkingSet } from './workoutSets';
+import { createWorkoutSet, isCompletedWorkingSet, latestExerciseSet } from './workoutSets';
+import { inferWorkoutCategory } from './workoutCategory';
 import {
   replaceMovementExercise,
   type WorkoutDraftMovement as DraftMovement,
@@ -68,13 +71,17 @@ const categoryColors: Record<WorkoutCategory, string> = {
   other: '#94a3b8',
 };
 
-const restOptions = [30, 45, 60, 90, 120, 150, 180, 240, 300];
+const restOptions = [60, 90, 120, 150, 180, 210, 240, 270, 300];
 const HISTORY_PAGE_SIZE = 8;
 
-function emptySet(kind: Exercise['kind'], previous?: DraftSet): DraftSet {
+function emptySet(
+  kind: Exercise['kind'],
+  previous?: WorkoutSetInput,
+  isFirstSet = previous === undefined,
+): DraftSet {
   return {
     key: crypto.randomUUID(),
-    ...createWorkoutSet(kind, previous),
+    ...createWorkoutSet(kind, previous, isFirstSet),
   };
 }
 
@@ -1691,6 +1698,14 @@ function WorkoutLogger({
       : Math.max(0, Math.floor((Date.now() - startedAt) / 1000)),
   );
   const [restLeft, setRestLeft] = useState(0);
+  const movementExerciseSignature = movements
+    .map((movement) => movement.exercise.id)
+    .sort()
+    .join('|');
+  const inferredWorkoutCategory = inferWorkoutCategory(
+    movements.map((movement) => movement.exercise),
+  );
+  const previousMovementExerciseSignature = useRef(movementExerciseSignature);
 
   useEffect(() => {
     if (initialWorkout) return;
@@ -1743,6 +1758,12 @@ function WorkoutLogger({
     return () => window.clearInterval(timer);
   }, [restLeft]);
 
+  useEffect(() => {
+    if (previousMovementExerciseSignature.current === movementExerciseSignature) return;
+    previousMovementExerciseSignature.current = movementExerciseSignature;
+    if (inferredWorkoutCategory) setCategory(inferredWorkoutCategory);
+  }, [inferredWorkoutCategory, movementExerciseSignature]);
+
   const [undoDeletion, setUndoDeletion] = useState<{
     movementKey: string;
     set: DraftSet;
@@ -1767,27 +1788,42 @@ function WorkoutLogger({
     return recent.slice(0, 10);
   }, [historicalWorkouts]);
 
-  function addExercises(selected: Exercise[]) {
+  function addExercises(selected: Exercise[], createSuperset = false) {
     setMovements((current) => {
       const merged = mergeUniqueById(
         current.map((item) => item.exercise),
         selected,
       );
-      const additions = merged.slice(current.length);
-      return [
-        ...current,
-        ...additions.map((exercise) => ({
-          key: crypto.randomUUID(),
-          exercise,
-          notes: '',
-          machinePhotoIds: [],
-          machinePhotosInitialized: false,
-          supersetKey: null,
-          sets: [emptySet(exercise.kind)],
-        })),
-      ];
+      const additions = merged.slice(current.length).map((exercise) => ({
+        key: crypto.randomUUID(),
+        exercise,
+        notes: '',
+        machinePhotoIds: [],
+        machinePhotosInitialized: false,
+        supersetKey: null,
+        sets: [
+          emptySet(
+            exercise.kind,
+            latestExerciseSet(historicalWorkouts, exercise.id, workoutDate, initialWorkout?.id),
+            true,
+          ),
+        ],
+      }));
+      const nextMovements = [...current, ...additions];
+      return createSuperset && additions.length >= 2
+        ? applySupersetSelection(
+            nextMovements,
+            additions[0].key,
+            additions.slice(1).map((item) => item.key),
+            crypto.randomUUID(),
+          )
+        : nextMovements;
     });
-    if (!name) setName(`${categoryNames[category]} workout`);
+    const nextCategory = inferWorkoutCategory([
+      ...movements.map((movement) => movement.exercise),
+      ...selected,
+    ]);
+    if (!name) setName(`${categoryNames[nextCategory ?? category]} workout`);
     setPickerOpen(false);
   }
 
@@ -2114,6 +2150,11 @@ function WorkoutLogger({
                 : null
             }
             currentBodyweight={currentBodyweight}
+            history={recentExerciseHistory(
+              historicalWorkouts,
+              movement.exercise.id,
+              initialWorkout?.id,
+            )}
             onUpdateSet={(setKey, update) => updateSet(movement.key, setKey, update)}
             onToggleSet={(item) => toggleSet(movement, item)}
             onAddSet={() => addSet(movement)}
@@ -2216,6 +2257,7 @@ function WorkoutLogger({
           onFavoriteChange={onExerciseFavorite}
           singleSelect={switchingMovementKey !== null}
           onChoose={switchingMovementKey ? switchExercise : addExercises}
+          onCreateSuperset={(selected) => addExercises(selected, true)}
           onClose={closeExercisePicker}
         />
       )}
@@ -2517,6 +2559,7 @@ function MovementCard({
   movement,
   number,
   currentBodyweight,
+  history,
   onUpdateSet,
   onToggleSet,
   onAddSet,
@@ -2537,6 +2580,7 @@ function MovementCard({
   movement: DraftMovement;
   number: number;
   currentBodyweight: number | null;
+  history: ExerciseHistoryEntry[];
   onUpdateSet: (setKey: string, update: Partial<DraftSet>) => void;
   onToggleSet: (item: DraftSet) => void;
   onAddSet: () => void;
@@ -2559,6 +2603,7 @@ function MovementCard({
     cardio && (movement.exercise.equipment?.toLowerCase().includes('treadmill') ?? false);
   const completedWorkingSetCount = movement.sets.filter(isCompletedWorkingSet).length;
   const [expanded, setExpanded] = useState(completedWorkingSetCount < 3);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const previousCompletedWorkingSetCount = useRef(completedWorkingSetCount);
 
   useEffect(() => {
@@ -2618,9 +2663,55 @@ function MovementCard({
         </div>
       </header>
 
-      <button className="movement-switch-exercise" type="button" onClick={onSwitch}>
-        Switch exercise
-      </button>
+      <div className="movement-card-shortcuts">
+        <button
+          className={`movement-history-toggle ${historyOpen ? 'active' : ''}`}
+          type="button"
+          onClick={() => setHistoryOpen((current) => !current)}
+          aria-expanded={historyOpen}
+        >
+          {historyOpen ? 'Hide history' : 'History'}
+        </button>
+        <button className="movement-switch-exercise" type="button" onClick={onSwitch}>
+          Switch exercise
+        </button>
+      </div>
+
+      {historyOpen && (
+        <section className="movement-history" aria-label={`${movement.exercise.name} history`}>
+          <header>
+            <div>
+              <p className="section-kicker">RECENT HISTORY</p>
+              <h3>
+                Last {history.length} {history.length === 1 ? 'session' : 'sessions'}
+              </h3>
+            </div>
+          </header>
+          {history.length ? (
+            history.map((entry) => (
+              <article className="movement-history-entry" key={entry.workoutId}>
+                <header>
+                  <strong>{prettyDate(entry.workoutDate)}</strong>
+                  <small>{entry.workoutName}</small>
+                </header>
+                {entry.sets.length > 0 && (
+                  <HistorySetFlow sets={entry.sets} personalRecords={[]} />
+                )}
+                {entry.sets
+                  .filter((item) => item.notes)
+                  .map((item) => (
+                    <small className="movement-history-set-note" key={item.id}>
+                      Set {item.order_index + 1}: {item.notes}
+                    </small>
+                  ))}
+                {entry.movementNotes && <MovementNotes notes={entry.movementNotes} />}
+              </article>
+            ))
+          ) : (
+            <p className="movement-history-empty">No previous entries for this exercise yet.</p>
+          )}
+        </section>
+      )}
 
       {!cardio && (
         <MachinePhotoChooser
@@ -2824,7 +2915,7 @@ function MovementCard({
                     >
                       {restOptions.map((seconds) => (
                         <option key={seconds} value={seconds}>
-                          {seconds < 60 ? `${seconds}s` : `${seconds / 60}m`}
+                          {formatDuration(seconds)}
                         </option>
                       ))}
                     </select>
@@ -3293,6 +3384,7 @@ function ExercisePicker({
   onFavoriteChange,
   singleSelect = false,
   onChoose,
+  onCreateSuperset,
   onClose,
 }: {
   exercises: Exercise[];
@@ -3303,6 +3395,7 @@ function ExercisePicker({
   onFavoriteChange: (exerciseId: string, isFavorite: boolean) => Promise<void>;
   singleSelect?: boolean;
   onChoose: (exercises: Exercise[]) => void;
+  onCreateSuperset?: (exercises: Exercise[]) => void;
   onClose: () => void;
 }) {
   const [search, setSearch] = useState('');
@@ -3571,17 +3664,34 @@ function ExercisePicker({
           )}
           {pickerError && <p className="inline-error">{pickerError}</p>}
         </div>
-        <button
-          className="add-selected-button"
-          disabled={!selectedIds.length}
-          onClick={() =>
-            onChoose(exercises.filter((exercise) => selectedIds.includes(exercise.id)))
-          }
-        >
-          {singleSelect
-            ? 'Switch exercise'
-            : `Add selected exercises (${selectedIds.length})`}
-        </button>
+        <div className={`exercise-picker-actions ${singleSelect ? 'single-action' : ''}`}>
+          {!singleSelect && (
+            <button
+              className="create-superset-button"
+              type="button"
+              disabled={selectedIds.length < 2}
+              onClick={() =>
+                onCreateSuperset?.(
+                  exercises.filter((exercise) => selectedIds.includes(exercise.id)),
+                )
+              }
+            >
+              Create super set
+            </button>
+          )}
+          <button
+            className="add-selected-button"
+            type="button"
+            disabled={!selectedIds.length}
+            onClick={() =>
+              onChoose(exercises.filter((exercise) => selectedIds.includes(exercise.id)))
+            }
+          >
+            {singleSelect
+              ? 'Switch exercise'
+              : `Add selected exercises (${selectedIds.length})`}
+          </button>
+        </div>
       </section>
     </div>,
     document.body,
