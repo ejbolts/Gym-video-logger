@@ -2435,6 +2435,55 @@ button.metric-card:focus-visible {
   margin-top: 0.8rem;
 }
 
+.workout-category-notice {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 0.65rem;
+  margin-top: 0.8rem;
+  border: 1px solid color-mix(in srgb, var(--green) 50%, var(--line));
+  border-radius: 12px;
+  padding: 0.75rem;
+  background: color-mix(in srgb, var(--green) 9%, var(--card));
+}
+
+.workout-category-notice > span {
+  width: 1.5rem;
+  height: 1.5rem;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--green);
+  color: #07130f;
+  font-size: 0.72rem;
+  font-weight: 950;
+}
+
+.workout-category-notice strong,
+.workout-category-notice p {
+  margin: 0;
+}
+
+.workout-category-notice strong {
+  display: block;
+  font-size: 0.72rem;
+}
+
+.workout-category-notice p {
+  margin-top: 0.2rem;
+  color: var(--muted-ink);
+  font-size: 0.64rem;
+  line-height: 1.45;
+}
+
+.workout-category-notice > button {
+  border: 0;
+  padding: 0.1rem 0.25rem;
+  background: transparent;
+  color: var(--muted-ink);
+  font-size: 1rem;
+}
+
 .movement-card {
   overflow: hidden;
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { WorkoutCategory } from './types';
-import { inferWorkoutCategory } from './workoutCategory';
+import { inferWorkoutCategory, workoutNameForCategory } from './workoutCategory';
 
 const exercises = (...categories: WorkoutCategory[]) =>
   categories.map((category) => ({ category }));
@@ -27,5 +27,11 @@ describe('automatic workout category', () => {
   it('handles empty and uncategorized exercise lists', () => {
     expect(inferWorkoutCategory([])).toBeNull();
     expect(inferWorkoutCategory(exercises('other', 'other'))).toBe('other');
+  });
+
+  it('provides the matching automatic workout name', () => {
+    expect(workoutNameForCategory('pull')).toBe('Pull workout');
+    expect(workoutNameForCategory('upper')).toBe('Upper body workout');
+    expect(workoutNameForCategory('full_body')).toBe('Full body workout');
   });
 });

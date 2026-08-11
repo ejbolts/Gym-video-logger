@@ -39,7 +39,7 @@ import {
   writeActiveWorkoutDraft,
 } from './workoutDraft';
 import { createWorkoutSet, isCompletedWorkingSet, latestExerciseSet } from './workoutSets';
-import { inferWorkoutCategory } from './workoutCategory';
+import { inferWorkoutCategory, workoutNameForCategory } from './workoutCategory';
 import {
   replaceMovementExercise,
   type WorkoutDraftMovement as DraftMovement,
@@ -1689,6 +1689,7 @@ function WorkoutLogger({
   const [closeConfirmationOpen, setCloseConfirmationOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [categoryNotice, setCategoryNotice] = useState<string | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const supersetButtonRef = useRef<HTMLButtonElement>(null);
   const startedAt = useState(() => restoredDraft?.startedAt ?? activeStartedAt ?? Date.now())[0];
@@ -1761,8 +1762,19 @@ function WorkoutLogger({
   useEffect(() => {
     if (previousMovementExerciseSignature.current === movementExerciseSignature) return;
     previousMovementExerciseSignature.current = movementExerciseSignature;
-    if (inferredWorkoutCategory) setCategory(inferredWorkoutCategory);
-  }, [inferredWorkoutCategory, movementExerciseSignature]);
+    if (!inferredWorkoutCategory) return;
+
+    const nextName = workoutNameForCategory(inferredWorkoutCategory);
+    const categoryChanged = category !== inferredWorkoutCategory;
+    const nameChanged = name !== nextName;
+    if (categoryChanged) setCategory(inferredWorkoutCategory);
+    if (nameChanged) setName(nextName);
+    if (categoryChanged || nameChanged) {
+      setCategoryNotice(
+        `Workout type changed to ${categoryNames[inferredWorkoutCategory]} and the name was updated to “${nextName}” based on the selected exercises.`,
+      );
+    }
+  }, [category, inferredWorkoutCategory, movementExerciseSignature, name]);
 
   const [undoDeletion, setUndoDeletion] = useState<{
     movementKey: string;
@@ -1819,11 +1831,6 @@ function WorkoutLogger({
           )
         : nextMovements;
     });
-    const nextCategory = inferWorkoutCategory([
-      ...movements.map((movement) => movement.exercise),
-      ...selected,
-    ]);
-    if (!name) setName(`${categoryNames[nextCategory ?? category]} workout`);
     setPickerOpen(false);
   }
 
@@ -2131,6 +2138,23 @@ function WorkoutLogger({
           )}
         </div>
       </section>
+
+      {categoryNotice && (
+        <div className="workout-category-notice" role="status">
+          <span aria-hidden="true">✓</span>
+          <div>
+            <strong>Workout updated</strong>
+            <p>{categoryNotice}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setCategoryNotice(null)}
+            aria-label="Dismiss workout update"
+          >
+            ×
+          </button>
+        </div>
+      )}
 
       {error && <p className="inline-error">{error}</p>}
 

@@ -2,6 +2,20 @@ import type { Exercise, WorkoutCategory } from './types';
 
 type CategorizedExercise = Pick<Exercise, 'category'>;
 
+const automaticWorkoutNames: Record<WorkoutCategory, string> = {
+  upper: 'Upper body workout',
+  lower: 'Lower body workout',
+  push: 'Push workout',
+  pull: 'Pull workout',
+  full_body: 'Full body workout',
+  cardio: 'Cardio workout',
+  other: 'Other workout',
+};
+
+export function workoutNameForCategory(category: WorkoutCategory): string {
+  return automaticWorkoutNames[category];
+}
+
 function focusedUpperCategory(counts: Record<WorkoutCategory, number>): WorkoutCategory {
   const push = counts.push;
   const pull = counts.pull;
