@@ -502,6 +502,7 @@ export function App() {
             currentBodyweight={measurements[0]?.weight_kg ?? null}
             onStart={startWorkout}
             activeWorkout={activeWorkoutStartedAt !== null}
+            totalWorkouts={workouts.length}
             onReplaceActiveWorkout={(workoutDate) => startWorkout(workoutDate, true)}
             onBody={() => setTab('body')}
             onOpenWorkout={(id) => {
@@ -515,6 +516,11 @@ export function App() {
           />
         )}
         {!loading && tab === 'log' && (
+            onHistory={() => {
+              setHistoryOpenId(null);
+              setTab('history');
+            }}
+            onVideos={() => setTab('videos')}
           <WorkoutLogger
             key={
               editingWorkout
@@ -734,6 +740,7 @@ function DashboardScreen({
   currentBodyweight,
   onStart,
   activeWorkout,
+  totalWorkouts,
   onReplaceActiveWorkout,
   onBody,
   onOpenWorkout,
@@ -741,8 +748,11 @@ function DashboardScreen({
 }: {
   data: DashboardData;
   currentBodyweight: number | null;
+  onHistory,
+  onVideos,
   onStart: (workoutDate?: string) => void;
   activeWorkout: boolean;
+  totalWorkouts: number;
   onReplaceActiveWorkout: (workoutDate: string) => void;
   onBody: () => void;
   onOpenWorkout: (workoutId: string) => void;
@@ -750,13 +760,85 @@ function DashboardScreen({
 }) {
   const [activeMetric, setActiveMetric] = useState<DashboardMetric | null>(null);
   const [selectedDay, setSelectedDay] = useState<DashboardData['heatmap'][number] | null>(null);
+  onHistory: () => void;
+  onVideos: () => void;
   const [pendingWorkoutDate, setPendingWorkoutDate] = useState<string | null>(null);
 
   return (
     <section className="dashboard-screen content-page">
+  const trainingScore = Math.min(100, Math.max(0, Math.round(data.weekly_goal.overall_percent)));
+  const trainingStars = Math.min(5, Math.max(1, Math.round(trainingScore / 20)));
       <div className="metric-grid">
         <MetricCard
           value={data.workouts_this_week}
+      <section className="profile-hero" aria-label="Training profile">
+        <div className="profile-cover">
+          <div className="profile-brand">
+            <span className="profile-mark" aria-hidden="true">
+              GL
+            </span>
+            <span>
+              <small>GYM VIDEO LOGGER</small>
+              <strong>Training dashboard</strong>
+            </span>
+          </div>
+          <span className="profile-privacy">Private log</span>
+        </div>
+        <div className="profile-stats">
+          <div>
+            <span>Workouts</span>
+            <strong>{totalWorkouts}</strong>
+          </div>
+          <div>
+            <span>This week</span>
+            <strong>{data.workouts_this_week}</strong>
+          </div>
+          <div>
+            <span>Day streak</span>
+            <strong>{data.current_streak}</strong>
+          </div>
+        </div>
+      </section>
+
+      <section className="training-level-strip" aria-label={`Training level ${trainingScore}%`}>
+        <span>Training Level</span>
+        <span className="training-stars" aria-hidden="true">
+          {Array.from({ length: 5 }, (_, index) => (
+            <i className={index < trainingStars ? 'filled' : ''} key={index}>
+              ★
+            </i>
+          ))}
+        </span>
+        <strong>{trainingScore}%</strong>
+      </section>
+
+      <div className="dashboard-shortcuts" aria-label="Quick actions">
+        <button type="button" onClick={() => onStart()}>
+          <span aria-hidden="true">＋</span>
+          <strong>Start workout</strong>
+          <small>Open the live logger</small>
+        </button>
+        <button type="button" onClick={onHistory}>
+          <span aria-hidden="true">☷</span>
+          <strong>Workouts</strong>
+          <small>Review your training log</small>
+        </button>
+        <button type="button" onClick={onBody}>
+          <span aria-hidden="true">◒</span>
+          <strong>Bodyweight</strong>
+          <small>Measurements and goals</small>
+        </button>
+        <button type="button" onClick={onVideos}>
+          <span aria-hidden="true">▷</span>
+          <strong>Video library</strong>
+          <small>Review recorded sets</small>
+        </button>
+      </div>
+
+      <div className="dashboard-section-heading">
+        <p className="section-kicker">THIS WEEK</p>
+        <h2>Training overview</h2>
+      </div>
           label="Workouts"
           suffix="this week"
           onClick={() => setActiveMetric('workouts')}
@@ -1935,11 +2017,24 @@ function WorkoutLogger({
     if (nextCompleted && item.rest_seconds) setRestLeft(item.rest_seconds);
   }
 
-  function addSet(movement: DraftMovement) {
+  function addSet(movement: DraftMovement, count = 1, update: Partial<DraftSet> = {}) {
     setMovements((current) =>
       current.map((item) =>
         item.key === movement.key
-          ? { ...item, sets: [...item.sets, emptySet(item.exercise.kind, item.sets.at(-1))] }
+          ? {
+              ...item,
+              sets: Array.from({ length: Math.min(20, Math.max(1, count)) }).reduce<DraftSet[]>(
+                (sets) => {
+                  const created = {
+                    ...emptySet(item.exercise.kind, sets.at(-1)),
+                    ...update,
+                    key: crypto.randomUUID(),
+                  };
+                  return [...sets, created];
+                },
+                item.sets,
+              ),
+            }
           : item,
       ),
     );
@@ -2181,7 +2276,7 @@ function WorkoutLogger({
             )}
             onUpdateSet={(setKey, update) => updateSet(movement.key, setKey, update)}
             onToggleSet={(item) => toggleSet(movement, item)}
-            onAddSet={() => addSet(movement)}
+            onAddSet={(count, update) => addSet(movement, count, update)}
             onSwitch={() => {
               setSwitchingMovementKey(movement.key);
               setPickerOpen(true);
@@ -2373,8 +2468,8 @@ function SupersetPicker({
       >
         <header>
           <div>
-            <p className="section-kicker">SUPERSET BUILDER</p>
-            <h2 id="superset-picker-title">Group {movement.exercise.name}</h2>
+            <p className="section-kicker">SUPERSET / CIRCUIT</p>
+            <h2 id="superset-picker-title">Add Group</h2>
           </div>
           <button
             ref={closeButtonRef}
@@ -2386,7 +2481,8 @@ function SupersetPicker({
           </button>
         </header>
         <p id="superset-picker-description">
-          Choose one or more exercises to perform back-to-back with little or no rest.
+          Alternate exercises in a superset or circuit. Choose the exercises to group with{' '}
+          {movement.exercise.name}.
         </p>
 
         <div className="superset-options" aria-label="Exercises in this workout">
@@ -2449,7 +2545,7 @@ function SupersetPicker({
               disabled={selectedKeys.length === 0}
               onClick={() => onSave(selectedKeys)}
             >
-              {movement.supersetKey ? 'Update group' : 'Create superset'}
+              {movement.supersetKey ? 'Update Group' : 'Add Group'}
             </button>
           </div>
         </footer>
@@ -2607,7 +2703,7 @@ function MovementCard({
   history: ExerciseHistoryEntry[];
   onUpdateSet: (setKey: string, update: Partial<DraftSet>) => void;
   onToggleSet: (item: DraftSet) => void;
-  onAddSet: () => void;
+  onAddSet: (count: number, update: Partial<DraftSet>) => void;
   onSwitch: () => void;
   onRemove: () => void;
   onMachinePhotos: (photoIds: string[]) => void;
@@ -2622,7 +2718,14 @@ function MovementCard({
   onDeleteSet: (index: number) => void;
   onSuperset: (button: HTMLButtonElement) => void;
 }) {
+  const [addSetOpen, setAddSetOpen] = useState(false);
   const cardio = movement.exercise.kind === 'cardio';
+  const movementMenuRef = useRef<HTMLDetailsElement>(null);
+  const movementNoteRef = useRef<HTMLInputElement>(null);
+
+  function closeMovementMenu() {
+    if (movementMenuRef.current) movementMenuRef.current.open = false;
+  }
   const treadmill =
     cardio && (movement.exercise.equipment?.toLowerCase().includes('treadmill') ?? false);
   const completedWorkingSetCount = movement.sets.filter(isCompletedWorkingSet).length;
@@ -2657,49 +2760,97 @@ function MovementCard({
             </span>
           )}
         </div>
-        <div className="movement-actions">
-          <button
-            className="movement-collapse-toggle"
-            onClick={() => setExpanded((current) => !current)}
-            aria-expanded={expanded}
-            aria-label={`${expanded ? 'Minimise' : 'Expand'} ${movement.exercise.name}`}
-          >
-            {expanded ? 'Minimise' : 'Expand'}
-            <span aria-hidden="true">{expanded ? '⌃' : '⌄'}</span>
-          </button>
-          <button disabled={!canMoveUp} onClick={onMoveUp} aria-label="Move exercise up">
-            ↑
-          </button>
-          <button disabled={!canMoveDown} onClick={onMoveDown} aria-label="Move exercise down">
-            ↓
-          </button>
-          <button
-            className={supersetLabel ? 'active' : ''}
-            onClick={(event) => onSuperset(event.currentTarget)}
-            aria-label={`Choose superset exercises for ${movement.exercise.name}`}
-            aria-haspopup="dialog"
-          >
-            S
-          </button>
-          <button onClick={onRemove} aria-label={`Remove ${movement.exercise.name}`}>
-            ×
-          </button>
-        </div>
+        <details className="movement-overflow" ref={movementMenuRef}>
+          <summary aria-label={`Actions for ${movement.exercise.name}`}>⋮</summary>
+          <div className="movement-overflow-menu">
+            <button
+              type="button"
+              onClick={() => {
+                setExpanded((current) => !current);
+                closeMovementMenu();
+              }}
+            >
+              <span aria-hidden="true">{expanded ? '⌃' : '⌄'}</span>
+              {expanded ? 'Minimise' : 'Expand'}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setHistoryOpen((current) => !current);
+                closeMovementMenu();
+              }}
+            >
+              <span aria-hidden="true">◷</span>
+              {historyOpen ? 'Hide history' : 'Exercise history'}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                closeMovementMenu();
+                window.requestAnimationFrame(() => movementNoteRef.current?.focus());
+              }}
+            >
+              <span aria-hidden="true">✎</span>
+              Edit notes
+            </button>
+            <button
+              type="button"
+              className={supersetLabel ? 'active' : ''}
+              onClick={(event) => {
+                closeMovementMenu();
+                onSuperset(event.currentTarget);
+              }}
+              aria-haspopup="dialog"
+            >
+              <span aria-hidden="true">▰</span>
+              {supersetLabel ? 'Edit group' : 'Group superset'}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                onSwitch();
+                closeMovementMenu();
+              }}
+            >
+              <span aria-hidden="true">⇄</span>
+              Switch exercise
+            </button>
+            <button
+              type="button"
+              disabled={!canMoveUp}
+              onClick={() => {
+                onMoveUp();
+                closeMovementMenu();
+              }}
+            >
+              <span aria-hidden="true">↑</span>
+              Move earlier
+            </button>
+            <button
+              type="button"
+              disabled={!canMoveDown}
+              onClick={() => {
+                onMoveDown();
+                closeMovementMenu();
+              }}
+            >
+              <span aria-hidden="true">↓</span>
+              Move later
+            </button>
+            <button
+              type="button"
+              className="movement-menu-danger"
+              onClick={() => {
+                onRemove();
+                closeMovementMenu();
+              }}
+            >
+              <span aria-hidden="true">■</span>
+              Delete
+            </button>
+          </div>
+        </details>
       </header>
-
-      <div className="movement-card-shortcuts">
-        <button
-          className={`movement-history-toggle ${historyOpen ? 'active' : ''}`}
-          type="button"
-          onClick={() => setHistoryOpen((current) => !current)}
-          aria-expanded={historyOpen}
-        >
-          {historyOpen ? 'Hide history' : 'History'}
-        </button>
-        <button className="movement-switch-exercise" type="button" onClick={onSwitch}>
-          Switch exercise
-        </button>
-      </div>
 
       {historyOpen && (
         <section className="movement-history" aria-label={`${movement.exercise.name} history`}>
@@ -3018,15 +3169,236 @@ function MovementCard({
               </div>
             )}
           </Fragment>
+        ref={movementNoteRef}
         ))}
       </div>
-      <button className="add-set-button" onClick={onAddSet}>
+      <button className="add-set-button" onClick={() => setAddSetOpen(true)}>
         ＋ Add set
       </button>
+      {addSetOpen && (
+        <AddSetDialog
+          movement={movement}
+          onClose={() => setAddSetOpen(false)}
+          onAdd={(count, update) => {
+            onAddSet(count, update);
+            setAddSetOpen(false);
+          }}
+        />
+      )}
       <input
         className="movement-note"
         value={movement.notes}
         onChange={(event) => onMovementNotes(event.target.value)}
+function AddSetDialog({
+  movement,
+  onClose,
+  onAdd,
+}: {
+  movement: DraftMovement;
+  onClose: () => void;
+  onAdd: (count: number, update: Partial<DraftSet>) => void;
+}) {
+  const previous = movement.sets.at(-1);
+  const cardio = movement.exercise.kind === 'cardio';
+  const [weight, setWeight] = useState(previous?.weight_kg?.toString() ?? '');
+  const [reps, setReps] = useState(previous?.reps?.toString() ?? '');
+  const [duration, setDuration] = useState(
+    previous?.duration_seconds ? Math.round(previous.duration_seconds / 60).toString() : '',
+  );
+  const [distance, setDistance] = useState(previous?.distance_km?.toString() ?? '');
+  const [count, setCount] = useState('1');
+  const [warmup, setWarmup] = useState(false);
+  const [dropSet, setDropSet] = useState(false);
+  const [rpe, setRpe] = useState(previous?.rpe?.toString() ?? '');
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const onCloseRef = useRef(onClose);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
+    const root = document.getElementById('root');
+    const rootWasInert = root?.hasAttribute('inert') ?? false;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    root?.setAttribute('inert', '');
+
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onCloseRef.current();
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      if (!rootWasInert) root?.removeAttribute('inert');
+      window.removeEventListener('keydown', closeOnEscape);
+    };
+  }, []);
+
+  const submit = () => {
+    const setCount = Math.min(20, Math.max(1, Number(count) || 1));
+    onAdd(setCount, {
+      weight_kg: cardio ? null : numberOrNull(weight),
+      reps: cardio ? null : numberOrNull(reps),
+      duration_seconds: cardio && numberOrNull(duration) !== null ? Number(duration) * 60 : null,
+      distance_km: cardio ? numberOrNull(distance) : null,
+      rpe: numberOrNull(rpe),
+      warmup,
+      set_type: warmup ? 'warmup' : dropSet ? 'drop' : 'normal',
+      completed: false,
+    });
+  };
+
+  return createPortal(
+    <div
+      className="modal-backdrop add-set-backdrop"
+      onPointerDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <section
+        className="add-set-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="add-set-title"
+      >
+        <header>
+          <h2 id="add-set-title">Add Set</h2>
+          <button ref={closeButtonRef} type="button" onClick={onClose} aria-label="Close add set">
+            ×
+          </button>
+        </header>
+        <div className="add-set-content">
+          <div className="add-set-previous">
+            <strong>Previous</strong>
+            <div>
+              <span>Last set</span>
+              <span>
+                {previous ? completedSetPerformance(previous, cardio) : 'No previous set'}
+              </span>
+            </div>
+          </div>
+          <div className="add-set-fields">
+            {cardio ? (
+              <>
+                <label>
+                  Minutes
+                  <input
+                    type="number"
+                    min="0"
+                    inputMode="numeric"
+                    value={duration}
+                    onChange={(event) => setDuration(event.target.value)}
+                  />
+                </label>
+                <label>
+                  Distance
+                  <span className="unit-input">
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.1"
+                      inputMode="decimal"
+                      value={distance}
+                      onChange={(event) => setDistance(event.target.value)}
+                    />
+                    <b>km</b>
+                  </span>
+                </label>
+              </>
+            ) : (
+              <>
+                <label>
+                  Weight
+                  <span className="unit-input">
+                    <input
+                      autoFocus
+                      type="number"
+                      min="0"
+                      step="0.5"
+                      inputMode="decimal"
+                      value={weight}
+                      onChange={(event) => setWeight(event.target.value)}
+                    />
+                    <b>kg</b>
+                  </span>
+                </label>
+                <label>
+                  Reps
+                  <input
+                    type="number"
+                    min="0"
+                    inputMode="numeric"
+                    value={reps}
+                    onChange={(event) => setReps(event.target.value)}
+                  />
+                </label>
+              </>
+            )}
+            <label>
+              Sets
+              <input
+                type="number"
+                min="1"
+                max="20"
+                inputMode="numeric"
+                value={count}
+                onChange={(event) => setCount(event.target.value)}
+              />
+            </label>
+            <label>
+              RPE
+              <select value={rpe} onChange={(event) => setRpe(event.target.value)}>
+                <option value="">Optional</option>
+                {[5, 6, 7, 7.5, 8, 8.5, 9, 9.5, 10].map((value) => (
+                  <option value={value} key={value}>
+                    {value}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          {!cardio && (
+            <div className="add-set-toggles">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={warmup}
+                  onChange={(event) => {
+                    setWarmup(event.target.checked);
+                    if (event.target.checked) setDropSet(false);
+                  }}
+                />
+                Warmup
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={dropSet}
+                  onChange={(event) => {
+                    setDropSet(event.target.checked);
+                    if (event.target.checked) setWarmup(false);
+                  }}
+                />
+                Dropset
+              </label>
+            </div>
+          )}
+        </div>
+        <footer>
+          <button type="button" className="add-set-confirm" onClick={submit}>
+            Add Set
+          </button>
+          <button type="button" onClick={onClose}>
+            Close
+          </button>
+        </footer>
+      </section>
+    </div>,
+    document.body,
+  );
+}
+
         placeholder="Exercise note for next time…"
       />
     </article>
@@ -3616,7 +3988,7 @@ function ExercisePicker({
           <div className="exercise-picker-heading">
             <p className="section-kicker">EXERCISE LIBRARY</p>
             <h2 id="exercise-picker-title">
-              {singleSelect ? 'Switch exercise' : 'Add exercises'}
+              {singleSelect ? 'Switch Exercise' : 'Select Exercise'}
             </h2>
             <small>{singleSelect ? 'Choose one exercise' : `${selectedIds.length} selected`}</small>
           </div>
@@ -3630,7 +4002,7 @@ function ExercisePicker({
           autoFocus
           value={search}
           onChange={(event) => setSearch(event.target.value)}
-          placeholder="Search exercises or muscles…"
+          placeholder="Search…"
         />
         <div className="filter-pills">
           <button
@@ -5354,6 +5726,17 @@ function HistoryScreen({
               body="Your completed workouts will show up here."
             />
           )}
+            const completedWorkoutSets = workout.movements
+              .flatMap((movement) => movement.sets)
+              .filter((item) => item.completed);
+            const totalReps = completedWorkoutSets.reduce(
+              (total, item) => total + (item.reps ?? 0),
+              0,
+            );
+            const totalVolume = completedWorkoutSets.reduce(
+              (total, item) => total + (item.weight_kg ?? 0) * (item.reps ?? 0),
+              0,
+            );
           {pagedWorkouts.map((workout) => {
             const open = openId === workout.id;
             const workoutBodyweight =
@@ -5382,6 +5765,26 @@ function HistoryScreen({
                   </div>
                   <b>{open ? '−' : '+'}</b>
                 </button>
+                    <div className="history-workout-stats" aria-label="Workout totals">
+                      <span>
+                        <small>Time</small>
+                        <strong>{formatMinutesDuration(workout.duration_minutes)}</strong>
+                      </span>
+                      <span>
+                        <small>Sets</small>
+                        <strong>{completedWorkoutSets.length}</strong>
+                      </span>
+                      <span>
+                        <small>Reps</small>
+                        <strong>{totalReps || '–'}</strong>
+                      </span>
+                      <span>
+                        <small>Volume</small>
+                        <strong>
+                          {totalVolume ? `${Math.round(totalVolume).toLocaleString()} kg` : '–'}
+                        </strong>
+                      </span>
+                    </div>
                 {open && (
                   <div className="history-detail">
                     {workout.movements.map((movement) => (
