@@ -4835,11 +4835,11 @@ button.metric-card:focus-visible {
 }
 
 .set-details.completed:nth-of-type(2n) {
-  background: var(--gold-row);
+  background: transparent;
 }
 
 .set-details.completed[open] {
-  background: var(--gold-row);
+  background: transparent;
 }
 
 .set-grid-strength .set-row {
@@ -7944,13 +7944,13 @@ body,
 
 .set-details.completed {
   border-radius: 0;
-  background: var(--gold-row);
+  background: transparent;
 }
 
 .set-details.completed[open] > .set-row,
 .set-row.completed {
   border-radius: 0;
-  background: rgb(93 83 0 / 72%);
+  background: transparent;
 }
 
 .completed-set-summary {
@@ -7982,9 +7982,9 @@ body,
 }
 
 .completed .complete-set {
-  border-color: var(--gold);
-  background: var(--gold);
-  color: #252000;
+  border-color: #2b9250;
+  background: #2f9f57;
+  color: white;
 }
 
 .rest-between {
@@ -8532,7 +8532,7 @@ body,
 
 .set-details.completed:last-of-type,
 .set-details.completed:last-of-type[open] > .set-row {
-  background: var(--gold-row);
+  background: transparent;
 }
 
 .exercise-picker-backdrop .exercise-picker {
@@ -8656,10 +8656,10 @@ body,
 
 /* Compact set entry and completed-state refinement. */
 :root {
-  --completed-set: #bfeac7;
-  --completed-set-open: #d9f3de;
-  --completed-set-ink: #17351e;
-  --completed-set-line: #8fd09d;
+  --completed-set: #b8cebb;
+  --completed-set-open: #171d19;
+  --completed-set-ink: #17271b;
+  --completed-set-line: #718d77;
 }
 
 .set-grid .set-details.completed,
@@ -8680,11 +8680,11 @@ body,
 }
 
 .set-details.completed .completed-set-menu {
-  color: #287941;
+  color: #356f45;
 }
 
 .set-details.completed .strength-level-stars i:not(.filled) {
-  color: #668c6e;
+  color: #607665;
 }
 
 .set-details.completed[open] > .set-row,
@@ -8692,19 +8692,36 @@ body,
 .set-row.completed {
   border-color: var(--completed-set-line);
   background: var(--completed-set-open);
-  color: var(--completed-set-ink);
+  color: var(--ink);
+}
+
+.set-details.completed[open] .set-row > input,
+.set-details.completed[open] .set-row > select,
+.set-details.completed[open] .set-extras input,
+.set-details.completed[open] .set-extras select {
+  border-color: #4b5b50;
+  background: #121715;
+  color: #e2e0dc;
+}
+
+.set-details.completed[open] .set-extras label {
+  color: #adb6af;
 }
 
 .set-details.completed .complete-set {
-  border-color: #2b9c51;
-  background: #37ad60;
+  border-color: #278b49;
+  background: #2f9f57;
   color: white;
+}
+
+.set-details.completed .completed-set-check {
+  color: #2f7f46;
 }
 
 .set-details.completed + .completed-set-note {
   border-color: var(--completed-set-line);
-  background: #e5f7e8;
-  color: var(--completed-set-ink);
+  background: #171d19;
+  color: #cbd3cc;
 }
 
 .set-grid-strength .set-details:not(.completed) > .set-row,
