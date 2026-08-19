@@ -10,6 +10,7 @@ export interface DraftStorage {
 
 export interface StoredDraftSet extends WorkoutSetInput {
   key: string;
+  fromPrevious?: boolean;
 }
 
 export interface StoredDraftMovement {
@@ -18,6 +19,7 @@ export interface StoredDraftMovement {
   notes: string;
   machinePhotoIds: string[];
   supersetKey: string | null;
+  isComplete?: boolean;
   sets: StoredDraftSet[];
 }
 
@@ -60,6 +62,7 @@ function isStoredSet(value: unknown): value is StoredDraftSet {
     isRecord(value) &&
     typeof value.key === 'string' &&
     typeof value.completed === 'boolean' &&
+    (value.fromPrevious === undefined || typeof value.fromPrevious === 'boolean') &&
     (value.notes === null || typeof value.notes === 'string')
   );
 }
@@ -73,6 +76,7 @@ function isStoredMovement(value: unknown): value is StoredDraftMovement {
     Array.isArray(value.machinePhotoIds) &&
     value.machinePhotoIds.every((id) => typeof id === 'string') &&
     (value.supersetKey === null || typeof value.supersetKey === 'string') &&
+    (value.isComplete === undefined || typeof value.isComplete === 'boolean') &&
     Array.isArray(value.sets) &&
     value.sets.every(isStoredSet)
   );

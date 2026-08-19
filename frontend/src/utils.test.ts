@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  decimalNumberOrNull,
   formatBytes,
   formatMinutesDuration,
   formatSeconds,
@@ -8,6 +9,12 @@ import {
 } from './utils';
 
 describe('display formatting', () => {
+  it('parses decimal weights from dot and comma keyboards', () => {
+    expect(decimalNumberOrNull('7.5')).toBe(7.5);
+    expect(decimalNumberOrNull('7,5')).toBe(7.5);
+    expect(decimalNumberOrNull('.')).toBeNull();
+  });
+
   it('formats a video size and a timestamp', () => {
     expect(formatBytes(1.5 * 1024 * 1024)).toBe('1.5 MB');
     expect(formatSeconds(3599)).toBe('59:59');

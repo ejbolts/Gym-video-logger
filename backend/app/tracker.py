@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from collections import defaultdict
 from datetime import date, timedelta
 from typing import Annotated
@@ -73,7 +74,9 @@ from .tracker_schemas import (
     WeeklyExerciseBreakdown,
     WeeklyGoalRead,
     WeeklyMuscleGoalRead,
+    WorkoutCacheRevisionRead,
     WorkoutRecommendationRead,
+    WorkoutSnapshotRead,
     Zone2WeekRead,
 )
 from .training_metrics import (
@@ -91,6 +94,15 @@ from .training_metrics import (
 router = APIRouter(prefix="/api", tags=["workout tracking"])
 DbSession = Annotated[Session, Depends(get_db)]
 SettingsDependency = Annotated[Settings, Depends(get_settings)]
+WORKOUT_CACHE_REVISION_KEY = "workout_cache_revision"
+
+
+def workout_cache_revision(db: Session) -> str:
+    return get_setting(db, WORKOUT_CACHE_REVISION_KEY, "0")
+
+
+def bump_workout_cache_revision(db: Session) -> None:
+    set_setting(db, WORKOUT_CACHE_REVISION_KEY, str(uuid.uuid4()))
 
 
 DEFAULT_EXERCISES = (
@@ -704,6 +716,7 @@ def update_exercise_favorite(
     if not exercise:
         raise HTTPException(status_code=404, detail="Exercise was not found.")
     exercise.is_favorite = payload.is_favorite
+    bump_workout_cache_revision(db)
     db.commit()
     db.refresh(exercise)
     return exercise
@@ -807,6 +820,7 @@ def update_machine_photo_caption(
     if not photo:
         raise HTTPException(status_code=404, detail="Machine photo was not found.")
     photo.caption = payload.caption
+    bump_workout_cache_revision(db)
     db.commit()
     db.refresh(photo)
     return photo
@@ -1075,16 +1089,26 @@ def weekly_muscle_volume(
 
 
 @router.get("/workouts", response_model=list[TrainingWorkoutRead])
-def list_workouts(
-    db: DbSession, limit: int = Query(default=100, ge=1, le=500)
-) -> list[TrainingWorkout]:
+def list_workouts(db: DbSession) -> list[TrainingWorkout]:
     return list(
         db.scalars(
             select(TrainingWorkout)
             .options(*workout_options())
             .order_by(TrainingWorkout.workout_date.desc(), TrainingWorkout.created_at.desc())
-            .limit(limit)
         )
+    )
+
+
+@router.get("/workouts/revision", response_model=WorkoutCacheRevisionRead)
+def get_workout_cache_revision(db: DbSession) -> WorkoutCacheRevisionRead:
+    return WorkoutCacheRevisionRead(revision=workout_cache_revision(db))
+
+
+@router.get("/workouts/snapshot", response_model=WorkoutSnapshotRead)
+def get_workout_snapshot(db: DbSession) -> WorkoutSnapshotRead:
+    return WorkoutSnapshotRead(
+        revision=workout_cache_revision(db),
+        workouts=list_workouts(db),
     )
 
 
@@ -1102,6 +1126,7 @@ def create_workout(payload: TrainingWorkoutCreate, db: DbSession) -> TrainingWor
     db.flush()
     sync_workout_cardio_sessions(db, workout)
     rebuild_personal_records(db)
+    bump_workout_cache_revision(db)
     db.commit()
     backfill_completed_video_links(db, workout.workout_date)
     return load_workout(db, workout.id)
@@ -1148,6 +1173,7 @@ async def import_workout_csv(
         db.rollback()
         raise HTTPException(status_code=422, detail=str(error)) from error
     rebuild_personal_records(db)
+    bump_workout_cache_revision(db)
     db.commit()
     return CsvImportRead(**summary.__dict__)
 
@@ -1166,6 +1192,7 @@ def update_workout(
     db.flush()
     sync_workout_cardio_sessions(db, workout)
     rebuild_personal_records(db)
+    bump_workout_cache_revision(db)
     db.commit()
     backfill_completed_video_links(db, workout.workout_date)
     return load_workout(db, workout.id)
@@ -1178,6 +1205,7 @@ def delete_workout(workout_id: str, db: DbSession) -> None:
     db.delete(workout)
     db.flush()
     rebuild_personal_records(db)
+    bump_workout_cache_revision(db)
     db.commit()
 
 
@@ -1192,6 +1220,7 @@ def delete_sample_data(db: DbSession) -> None:
         db.delete(measurement)
     db.flush()
     rebuild_personal_records(db)
+    bump_workout_cache_revision(db)
     db.commit()
 
 
@@ -1374,6 +1403,7 @@ def dashboard(db: DbSession) -> DashboardRead:
         sets_this_week=sum(len(completed_sets(workout)) for workout in this_week),
         volume_this_week_kg=round(volume_this_week, 1),
         current_streak=streak,
+        total_cardio_sessions=len(cardio_sessions),
         heatmap=heatmap,
         weekly_days=weekly_days,
         recommendation=workout_recommendation(workouts, today, training_mode),

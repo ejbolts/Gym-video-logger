@@ -1,6 +1,6 @@
 import type { TrainingMode } from './types';
 
-export type BodyTrendRange = '3m' | '9m' | '1y' | 'all';
+export type BodyTrendRange = '1m' | '3m' | '9m' | '1y' | 'all';
 
 export interface DatedMeasurement {
   measurement_date: string;
@@ -45,7 +45,7 @@ export function filterMeasurementsByRange<T extends DatedMeasurement>(
     (latest, item) => (item.measurement_date > latest ? item.measurement_date : latest),
     measurements[0].measurement_date,
   );
-  const months = range === '3m' ? 3 : range === '9m' ? 9 : 12;
+  const months = range === '1m' ? 1 : range === '3m' ? 3 : range === '9m' ? 9 : 12;
   const cutoff = subtractCalendarMonths(latestDate, months);
   return measurements.filter((item) => item.measurement_date >= cutoff);
 }

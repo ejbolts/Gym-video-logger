@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
-import type { CSSProperties } from 'react';
+import type { CSSProperties, FormEvent, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from './api';
 import type {
@@ -29,17 +29,32 @@ import {
   trainingPhaseAtDate,
 } from './bodyTrend';
 import type { BodyTrendRange } from './bodyTrend';
+import { monthCountFromOldestWorkout } from './calendarRange';
 import { InlineConfirmButton } from './InlineConfirmButton';
 import { recentExerciseHistory, type ExerciseHistoryEntry } from './exerciseHistory';
-import { formatMinutesDuration, formatSeconds, localDate, mergeUniqueById, reorder } from './utils';
+import { fuzzyHighlightIndices, fuzzyScoreFields } from './exerciseSearch';
+import {
+  decimalNumberOrNull,
+  formatMinutesDuration,
+  formatSeconds,
+  localDate,
+  mergeUniqueById,
+  reorder,
+} from './utils';
 import { VideoUpload } from './VideoUpload';
 import {
   clearActiveWorkoutDraft,
   readActiveWorkoutDraft,
   writeActiveWorkoutDraft,
 } from './workoutDraft';
-import { createWorkoutSet, isCompletedWorkingSet, latestExerciseSet } from './workoutSets';
-import { inferWorkoutCategory, workoutNameForCategory } from './workoutCategory';
+import {
+  createSuggestedWorkoutSet,
+  createWorkoutSet,
+  DEFAULT_REST_SECONDS,
+  isCompletedWorkingSet,
+  latestExerciseSets,
+} from './workoutSets';
+import { finalizeWorkoutIdentity } from './workoutCategory';
 import {
   replaceMovementExercise,
   type WorkoutDraftMovement as DraftMovement,
@@ -47,9 +62,9 @@ import {
 } from './workoutMovements';
 import { applySupersetSelection, clearSuperset } from './workoutSupersets';
 
-type AppTab = 'dashboard' | 'log' | 'body' | 'history' | 'videos';
+type AppTab = 'dashboard' | 'log' | 'body' | 'history' | 'videos' | 'settings';
 type ProgressMetric = 'estimated_1rm' | 'best_weight_kg' | 'volume_kg';
-type DashboardMetric = 'workouts' | 'sets' | 'streak';
+type DashboardMetric = 'workouts' | 'sets' | 'cardio';
 
 const categoryNames: Record<WorkoutCategory, string> = {
   upper: 'Upper body',
@@ -73,6 +88,7 @@ const categoryColors: Record<WorkoutCategory, string> = {
 
 const restOptions = [60, 90, 120, 150, 180, 210, 240, 270, 300];
 const HISTORY_PAGE_SIZE = 8;
+const IMPORTED_BODYWEIGHT_NOTE = 'Imported from workout CSV.';
 
 function emptySet(
   kind: Exercise['kind'],
@@ -113,10 +129,24 @@ function strengthLevelPercent(item: DraftSet): number | null {
 }
 
 function StrengthLevelStars({ item }: { item: DraftSet }) {
+  if (item.set_type === 'drop') {
+    return (
+      <span className="drop-set-level" aria-label="Drop set">
+        dropset
+      </span>
+    );
+  }
   const percent = strengthLevelPercent(item);
-  const filled = percent === null ? 0 : percent >= 90 ? 5 : percent >= 80 ? 4 : percent >= 70 ? 3 : 2;
+  if (percent === null) {
+    return (
+      <span className="warmup-level" aria-label="Warm-up set">
+        warmup
+      </span>
+    );
+  }
+  const filled = percent >= 90 ? 5 : percent >= 80 ? 4 : percent >= 70 ? 3 : 2;
   return (
-    <span className="strength-level-stars" aria-label={percent === null ? 'Warmup' : `${filled} out of 5 level`}>
+    <span className="strength-level-stars" aria-label={`${filled} out of 5 level`}>
       {[0, 1, 2, 3, 4].map((star) => (
         <i className={star < filled ? 'filled' : ''} key={star} aria-hidden="true">
           ★
@@ -277,7 +307,7 @@ function bodyweightForDate(measurements: BodyMeasurement[], workoutDate: string)
 export function App() {
   const [tab, setTab] = useState<AppTab>(() => {
     const requested = window.location.hash.slice(1) as AppTab;
-    return ['dashboard', 'log', 'body', 'history', 'videos'].includes(requested)
+    return ['dashboard', 'log', 'body', 'history', 'videos', 'settings'].includes(requested)
       ? requested
       : 'dashboard';
   });
@@ -296,11 +326,15 @@ export function App() {
   });
   const [historyOpenId, setHistoryOpenId] = useState<string | null>(null);
   const [historyExerciseId, setHistoryExerciseId] = useState<string | null>(null);
-  const [historyStartSection, setHistoryStartSection] = useState<
-    'history' | 'progress' | 'cardio'
-  >('history');
+  const [historyStartSection, setHistoryStartSection] = useState<'history' | 'progress' | 'cardio'>(
+    'history',
+  );
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
+  const activeWorkoutDate =
+    activeWorkoutStartedAt === null
+      ? null
+      : (readActiveWorkoutDraft()?.workoutDate ?? workoutStartDate);
 
   async function refreshData() {
     try {
@@ -370,10 +404,11 @@ export function App() {
     try {
       const result = await api.importWorkouts(file);
       await refreshData();
+      const bodyweightCount = result.body_measurements_created + result.body_measurements_updated;
       setMessage(
         `Imported ${result.sets_imported} sets across ${result.workouts_created} workouts${
           result.exercises_created ? ` and added ${result.exercises_created} exercises` : ''
-        }.`,
+        }${bodyweightCount ? `; synced ${bodyweightCount} body-weight check-ins` : ''}.`,
       );
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Could not import that CSV file.');
@@ -508,7 +543,15 @@ export function App() {
           <button type="button" onClick={() => setTab('dashboard')} aria-label="Back to home">
             ‹
           </button>
-          <strong>{tab === 'body' ? 'Bodyweight' : tab === 'history' ? 'Workouts' : 'Videos'}</strong>
+          <strong>
+            {tab === 'body'
+              ? 'Bodyweight'
+              : tab === 'history'
+                ? 'Workouts'
+                : tab === 'settings'
+                  ? 'Settings'
+                  : 'Videos'}
+          </strong>
           <span aria-hidden="true" />
         </header>
       )}
@@ -523,6 +566,8 @@ export function App() {
             currentBodyweight={measurements[0]?.weight_kg ?? null}
             onStart={startWorkout}
             activeWorkout={activeWorkoutStartedAt !== null}
+            activeWorkoutDate={activeWorkoutDate}
+            onResumeWorkout={() => setTab('log')}
             onReplaceActiveWorkout={(workoutDate) => startWorkout(workoutDate, true)}
             onBody={() => setTab('body')}
             onOpenWorkout={(id) => {
@@ -548,12 +593,7 @@ export function App() {
               setTab('history');
             }}
             onMeasurements={() => setTab('body')}
-            onImport={() => {
-              setHistoryOpenId(null);
-              setHistoryExerciseId(null);
-              setHistoryStartSection('history');
-              setTab('history');
-            }}
+            onSettings={() => setTab('settings')}
             onVideos={() => setTab('videos')}
           />
         )}
@@ -581,11 +621,18 @@ export function App() {
             onSave={saveWorkout}
             activeStartedAt={activeWorkoutStartedAt}
             onClose={() => {
-              if (!editingWorkout) {
+              setTab(editingWorkout ? 'history' : 'dashboard');
+              setEditingWorkout(null);
+            }}
+            onDelete={() => {
+              if (editingWorkout) {
+                void deleteWorkout(editingWorkout);
+                setTab('history');
+              } else {
                 clearActiveWorkoutDraft();
                 setActiveWorkoutStartedAt(null);
+                setTab('dashboard');
               }
-              setTab(editingWorkout ? 'history' : 'dashboard');
               setEditingWorkout(null);
             }}
           />
@@ -609,15 +656,27 @@ export function App() {
             currentBodyweight={measurements[0]?.weight_kg ?? null}
             onEdit={editWorkout}
             onDelete={deleteWorkout}
-            onImport={importWorkoutCsv}
-            onExport={exportWorkoutCsv}
-            onDeleteSamples={deleteSampleData}
             personalRecords={personalRecords}
             onDataChange={refreshData}
             initialOpenId={historyOpenId}
             initialSection={historyStartSection}
             initialExerciseId={historyExerciseId}
-            onStartWorkout={() => startWorkout()}
+            heatmap={dashboard?.heatmap ?? []}
+            activeWorkout={activeWorkoutStartedAt !== null}
+            activeWorkoutDate={activeWorkoutDate}
+            onResumeWorkout={() => setTab('log')}
+            onStartWorkout={(workoutDate) => startWorkout(workoutDate)}
+            onReplaceActiveWorkout={(workoutDate) => startWorkout(workoutDate, true)}
+          />
+        )}
+        {!loading && tab === 'settings' && (
+          <SettingsScreen
+            workouts={workouts}
+            measurements={measurements}
+            onImportWorkouts={importWorkoutCsv}
+            onExportWorkouts={exportWorkoutCsv}
+            onDeleteSamples={deleteSampleData}
+            onDataChange={refreshData}
           />
         )}
         {tab === 'videos' && <VideoUpload />}
@@ -790,6 +849,8 @@ function DashboardScreen({
   currentBodyweight,
   onStart,
   activeWorkout,
+  activeWorkoutDate,
+  onResumeWorkout,
   onReplaceActiveWorkout,
   onBody,
   onOpenWorkout,
@@ -797,7 +858,7 @@ function DashboardScreen({
   onHistory,
   onExercises,
   onMeasurements,
-  onImport,
+  onSettings,
   onVideos,
 }: {
   data: DashboardData;
@@ -806,6 +867,8 @@ function DashboardScreen({
   currentBodyweight: number | null;
   onStart: (workoutDate?: string) => void;
   activeWorkout: boolean;
+  activeWorkoutDate: string | null;
+  onResumeWorkout: () => void;
   onReplaceActiveWorkout: (workoutDate: string) => void;
   onBody: () => void;
   onOpenWorkout: (workoutId: string) => void;
@@ -813,7 +876,7 @@ function DashboardScreen({
   onHistory: () => void;
   onExercises: () => void;
   onMeasurements: () => void;
-  onImport: () => void;
+  onSettings: () => void;
   onVideos: () => void;
 }) {
   const [activeMetric, setActiveMetric] = useState<DashboardMetric | null>(null);
@@ -839,8 +902,8 @@ function DashboardScreen({
               <strong>{totalExercises}</strong>
             </div>
             <div>
-              <span>Day streak</span>
-              <strong>{data.current_streak}</strong>
+              <span>Cardio sessions</span>
+              <strong>{data.total_cardio_sessions}</strong>
             </div>
           </div>
         </div>
@@ -875,9 +938,9 @@ function DashboardScreen({
           <span aria-hidden="true">⌁</span>
           <strong>Measurements</strong>
         </button>
-        <button type="button" onClick={onImport}>
-          <span aria-hidden="true">⇥</span>
-          <strong>Import</strong>
+        <button type="button" onClick={onSettings}>
+          <span aria-hidden="true">⚙</span>
+          <strong>Settings</strong>
         </button>
       </div>
 
@@ -914,10 +977,10 @@ function DashboardScreen({
           onClick={onBody}
         />
         <MetricCard
-          value={data.current_streak}
-          label="Day streak"
-          suffix={data.current_streak ? 'keep it going' : 'ready to begin'}
-          onClick={() => setActiveMetric('streak')}
+          value={data.total_cardio_sessions}
+          label="Cardio sessions"
+          suffix="all time"
+          onClick={() => setActiveMetric('cardio')}
         />
       </div>
       {activeMetric && (
@@ -967,7 +1030,6 @@ function DashboardScreen({
             <p className="muted-empty">Complete a working set to see muscle volume.</p>
           )}
         </div>
-          monthCount={2}
       </section>
 
       <section className="panel heatmap-panel">
@@ -979,6 +1041,8 @@ function DashboardScreen({
         </div>
         <WorkoutHeatmap
           entries={data.heatmap}
+          activeWorkoutDate={activeWorkoutDate}
+          onActiveWorkoutClick={onResumeWorkout}
           onDayClick={(workoutDate, entry) => {
             if (entry) setSelectedDay(entry);
             else setPendingWorkoutDate(workoutDate);
@@ -1255,14 +1319,14 @@ function WeeklyGoalDetail({ goal, onClose }: { goal: WeeklyGoal; onClose: () => 
       </header>
       {infoOpen && (
         <div className="goal-explainer" id="weekly-goal-information">
-        <strong>
-          {goal.target_sets_per_muscle} sets for larger muscles ·{' '}
-          {Math.floor(goal.target_sets_per_muscle / 2)} for smaller muscles
-        </strong>
-        <p>
-          Completed strength sets at RPE 7–10 count. Warmups, cardio, and lower-effort sets do not
-          fill the bar; secondary muscles receive half credit.
-        </p>
+          <strong>
+            {goal.target_sets_per_muscle} sets for larger muscles ·{' '}
+            {Math.floor(goal.target_sets_per_muscle / 2)} for smaller muscles
+          </strong>
+          <p>
+            Completed strength sets at RPE 7–10 count. Warmups, cardio, and lower-effort sets do not
+            fill the bar; secondary muscles receive half credit.
+          </p>
         </div>
       )}
       <div className="muscle-goal-list">
@@ -1358,14 +1422,16 @@ function WeeklyInsight({
   const title = {
     workouts: 'This week’s workouts',
     sets: 'Weekly sets by muscle',
-    streak: 'Training streak',
+    cardio: 'Cardio sessions',
   }[metric];
 
   return (
     <section className="weekly-insight inline-detail panel" aria-label={title}>
       <header>
         <div>
-          <p className="section-kicker">WEEKLY DETAIL</p>
+          <p className="section-kicker">
+            {metric === 'cardio' ? 'CARDIO DETAIL' : 'WEEKLY DETAIL'}
+          </p>
           <h2>{title}</h2>
         </div>
         <button type="button" className="icon-button" onClick={onClose} aria-label="Close">
@@ -1374,15 +1440,15 @@ function WeeklyInsight({
       </header>
 
       <div className="weekly-insight-body">
-        {data.weekly_days.length === 0 ? (
+        {metric === 'cardio' ? (
+          <CardioSessionBreakdown data={data} />
+        ) : data.weekly_days.length === 0 ? (
           <div className="weekly-empty">Log a workout to start building your weekly view.</div>
         ) : metric === 'sets' ? (
           <MuscleGroupBreakdown groups={muscleGroups} />
         ) : metric === 'workouts' ? (
           data.weekly_days.map((day) => <WeeklyWorkoutDay key={day.workout_date} day={day} />)
-        ) : (
-          <StreakBreakdown data={data} />
-        )}
+        ) : null}
       </div>
     </section>
   );
@@ -1453,37 +1519,26 @@ function WeeklyWorkoutDay({ day }: { day: DashboardData['weekly_days'][number] }
   );
 }
 
-function StreakBreakdown({ data }: { data: DashboardData }) {
-  const trainedDates = new Set(data.heatmap.map((entry) => entry.workout_date));
-  const days = Array.from({ length: 7 }, (_, index) => {
-    const value = new Date();
-    value.setHours(12, 0, 0, 0);
-    value.setDate(value.getDate() - (6 - index));
-    return value;
-  });
+function CardioSessionBreakdown({ data }: { data: DashboardData }) {
   return (
-    <div className="streak-breakdown">
-      <strong>{data.current_streak}</strong>
+    <div className="streak-breakdown cardio-session-breakdown">
+      <strong>{data.total_cardio_sessions}</strong>
       <span>
-        {data.current_streak === 1 ? 'day in your current streak' : 'days in your current streak'}
+        {data.total_cardio_sessions === 1 ? 'cardio session logged' : 'cardio sessions logged'}
       </span>
-      <div className="streak-week">
-        {days.map((day) => {
-          const key = day.toISOString().slice(0, 10);
-          const trained = trainedDates.has(key);
-          return (
-            <div key={key}>
-              <i className={trained ? 'trained' : ''}>{trained ? '✓' : '·'}</i>
-              <small>{day.toLocaleDateString(undefined, { weekday: 'narrow' })}</small>
-            </div>
-          );
-        })}
+      <div className="cardio-session-stats">
+        <div>
+          <strong>{data.zone2.completed_minutes} min</strong>
+          <small>Zone 2 this week</small>
+        </div>
+        <div>
+          <strong>{data.zone2.goal_minutes} min</strong>
+          <small>Weekly goal</small>
+        </div>
       </div>
-  monthCount,
-      <p>A training day counts whether you lift, do cardio, or combine both.</p>
+      <p>Includes standalone cardio and cardio completed inside a workout.</p>
     </div>
   );
-  monthCount: number | 'all';
 }
 
 function weekday(value: string): string {
@@ -1492,9 +1547,13 @@ function weekday(value: string): string {
 
 function WorkoutHeatmap({
   entries,
+  activeWorkoutDate = null,
+  onActiveWorkoutClick,
   onDayClick,
 }: {
   entries: DashboardData['heatmap'];
+  activeWorkoutDate?: string | null;
+  onActiveWorkoutClick?: () => void;
   onDayClick: (workoutDate: string, entry: DashboardData['heatmap'][number] | undefined) => void;
 }) {
   const calendarScrollRef = useRef<HTMLDivElement>(null);
@@ -1502,14 +1561,11 @@ function WorkoutHeatmap({
   const months = useMemo(() => {
     const today = new Date();
     today.setHours(12, 0, 0, 0);
-    const earliest = entries[0] ? new Date(`${entries[0].workout_date}T12:00:00`) : today;
-    const allMonthCount =
-      (today.getFullYear() - earliest.getFullYear()) * 12 +
-      today.getMonth() -
-      earliest.getMonth() +
-      1;
-    const resolvedMonthCount = monthCount === 'all' ? Math.max(allMonthCount, 1) : monthCount;
-    return Array.from({ length: resolvedMonthCount }, (_, offset) => {
+    const datedEntries = activeWorkoutDate
+      ? [...entries, { workout_date: activeWorkoutDate }]
+      : entries;
+    const allMonthCount = monthCountFromOldestWorkout(datedEntries, today);
+    return Array.from({ length: Math.max(allMonthCount, 1) }, (_, offset) => {
       const first = new Date(today.getFullYear(), today.getMonth() - offset, 1, 12);
       const dayCount = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate();
       const leading = (first.getDay() + 6) % 7;
@@ -1527,7 +1583,7 @@ function WorkoutHeatmap({
         cells,
       };
     }).reverse();
-  }, [entries, monthCount]);
+  }, [activeWorkoutDate, entries]);
   const todayKey = localCalendarDate(new Date());
 
   useEffect(() => {
@@ -1554,6 +1610,7 @@ function WorkoutHeatmap({
               if (!day) return <span className="calendar-day empty" key={`empty-${index}`} />;
               const key = localCalendarDate(day);
               const entry = map.get(key);
+              const inProgress = key === activeWorkoutDate;
               const colours = entry?.categories.map((category) => categoryColors[category]) ?? [];
               const background =
                 colours.length > 1
@@ -1562,20 +1619,27 @@ function WorkoutHeatmap({
               return (
                 <button
                   type="button"
-                  className={`calendar-day ${entry ? 'trained' : ''} ${key === todayKey ? 'today' : ''} ${key > todayKey ? 'future' : ''}`}
+                  className={`calendar-day ${entry ? 'trained' : ''} ${inProgress ? 'in-progress' : ''} ${key === todayKey ? 'today' : ''} ${key > todayKey ? 'future' : ''}`}
                   key={key}
-                  style={background ? { background } : undefined}
-                  onClick={() => onDayClick(key, entry)}
+                  style={!inProgress && background ? { background } : undefined}
+                  onClick={() => {
+                    if (inProgress && onActiveWorkoutClick) onActiveWorkoutClick();
+                    else onDayClick(key, entry);
+                  }}
                   aria-current={key === todayKey ? 'date' : undefined}
                   aria-label={
-                    entry
-                      ? `View ${entry.workout_count} ${entry.workout_count === 1 ? 'workout' : 'workouts'} for ${prettyDate(key)}`
-                      : `Create workout for ${prettyDate(key)}`
+                    inProgress
+                      ? `Resume workout in progress for ${prettyDate(key)}`
+                      : entry
+                        ? `View ${entry.workout_count} ${entry.workout_count === 1 ? 'workout' : 'workouts'} for ${prettyDate(key)}`
+                        : `Create workout for ${prettyDate(key)}`
                   }
                   title={
-                    entry
-                      ? `${prettyDate(key)}: ${entry.workout_count} ${entry.workout_count === 1 ? 'workout' : 'workouts'}, ${entry.set_count} sets`
-                      : prettyDate(key)
+                    inProgress
+                      ? `${prettyDate(key)}: workout in progress`
+                      : entry
+                        ? `${prettyDate(key)}: ${entry.workout_count} ${entry.workout_count === 1 ? 'workout' : 'workouts'}, ${entry.set_count} sets`
+                        : prettyDate(key)
                   }
                 >
                   {day.getDate()}
@@ -1753,6 +1817,7 @@ function WorkoutLogger({
   onSave,
   activeStartedAt,
   onClose,
+  onDelete,
 }: {
   exercises: Exercise[];
   recommendation: WorkoutRecommendation | null;
@@ -1766,6 +1831,7 @@ function WorkoutLogger({
   onSave: (payload: WorkoutInput) => Promise<PersonalRecord[]>;
   activeStartedAt: number | null;
   onClose: () => void;
+  onDelete: () => void;
 }) {
   const restoredDraft = useState(() => (initialWorkout ? null : readActiveWorkoutDraft()))[0];
   const [name, setName] = useState(initialWorkout?.name ?? restoredDraft?.name ?? '');
@@ -1788,6 +1854,7 @@ function WorkoutLogger({
           machinePhotoIds: movement.machine_photos.map((photo) => photo.id),
           machinePhotosInitialized: true,
           supersetKey: movement.superset_group_id,
+          isComplete: false,
           sets: movement.sets.map((item) => ({
             key: crypto.randomUUID(),
             reps: item.reps,
@@ -1819,6 +1886,7 @@ function WorkoutLogger({
                   machinePhotoIds: movement.machinePhotoIds,
                   machinePhotosInitialized: true,
                   supersetKey: movement.supersetKey,
+                  isComplete: movement.isComplete ?? false,
                   sets: movement.sets,
                 },
               ]
@@ -1828,11 +1896,10 @@ function WorkoutLogger({
   const [pickerOpen, setPickerOpen] = useState(false);
   const [switchingMovementKey, setSwitchingMovementKey] = useState<string | null>(null);
   const [supersetPickerKey, setSupersetPickerKey] = useState<string | null>(null);
-  const [closeConfirmationOpen, setCloseConfirmationOpen] = useState(false);
+  const [deleteConfirmationOpen, setDeleteConfirmationOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [categoryNotice, setCategoryNotice] = useState<string | null>(null);
-  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const deleteButtonRef = useRef<HTMLButtonElement>(null);
   const supersetButtonRef = useRef<HTMLButtonElement>(null);
   const startedAt = useState(() => restoredDraft?.startedAt ?? activeStartedAt ?? Date.now())[0];
   const [elapsed, setElapsed] = useState(
@@ -1841,14 +1908,6 @@ function WorkoutLogger({
       : Math.max(0, Math.floor((Date.now() - startedAt) / 1000)),
   );
   const [restLeft, setRestLeft] = useState(0);
-  const movementExerciseSignature = movements
-    .map((movement) => movement.exercise.id)
-    .sort()
-    .join('|');
-  const inferredWorkoutCategory = inferWorkoutCategory(
-    movements.map((movement) => movement.exercise),
-  );
-  const previousMovementExerciseSignature = useRef(movementExerciseSignature);
 
   useEffect(() => {
     if (initialWorkout) return;
@@ -1876,6 +1935,7 @@ function WorkoutLogger({
           notes: movement.notes,
           machinePhotoIds: movement.machinePhotoIds,
           supersetKey: movement.supersetKey,
+          isComplete: movement.isComplete,
           sets: movement.sets,
         })),
       });
@@ -1901,23 +1961,6 @@ function WorkoutLogger({
     return () => window.clearInterval(timer);
   }, [restLeft]);
 
-  useEffect(() => {
-    if (previousMovementExerciseSignature.current === movementExerciseSignature) return;
-    previousMovementExerciseSignature.current = movementExerciseSignature;
-    if (!inferredWorkoutCategory) return;
-
-    const nextName = workoutNameForCategory(inferredWorkoutCategory);
-    const categoryChanged = category !== inferredWorkoutCategory;
-    const nameChanged = name !== nextName;
-    if (categoryChanged) setCategory(inferredWorkoutCategory);
-    if (nameChanged) setName(nextName);
-    if (categoryChanged || nameChanged) {
-      setCategoryNotice(
-        `Workout type changed to ${categoryNames[inferredWorkoutCategory]} and the name was updated to “${nextName}” based on the selected exercises.`,
-      );
-    }
-  }, [category, inferredWorkoutCategory, movementExerciseSignature, name]);
-
   const [undoDeletion, setUndoDeletion] = useState<{
     movementKey: string;
     set: DraftSet;
@@ -1942,6 +1985,21 @@ function WorkoutLogger({
     return recent.slice(0, 10);
   }, [historicalWorkouts]);
 
+  function suggestedSetsForExercise(exercise: Exercise): DraftSet[] {
+    const previousSets = latestExerciseSets(
+      historicalWorkouts,
+      exercise.id,
+      workoutDate,
+      initialWorkout?.id,
+    );
+    if (!previousSets.length) return [emptySet(exercise.kind)];
+    return previousSets.map((previous) => ({
+      key: crypto.randomUUID(),
+      ...createSuggestedWorkoutSet(exercise.kind, previous),
+      fromPrevious: true,
+    }));
+  }
+
   function addExercises(selected: Exercise[], createSuperset = false) {
     setMovements((current) => {
       const merged = mergeUniqueById(
@@ -1955,13 +2013,8 @@ function WorkoutLogger({
         machinePhotoIds: [],
         machinePhotosInitialized: false,
         supersetKey: null,
-        sets: [
-          emptySet(
-            exercise.kind,
-            latestExerciseSet(historicalWorkouts, exercise.id, workoutDate, initialWorkout?.id),
-            true,
-          ),
-        ],
+        isComplete: false,
+        sets: suggestedSetsForExercise(exercise),
       }));
       const nextMovements = [...current, ...additions];
       return createSuperset && additions.length >= 2
@@ -1984,8 +2037,11 @@ function WorkoutLogger({
   function switchExercise(selected: Exercise[]) {
     const replacement = selected[0];
     if (!switchingMovementKey || !replacement) return;
+    const suggestedSets = suggestedSetsForExercise(replacement);
     setMovements((current) =>
-      replaceMovementExercise(current, switchingMovementKey, replacement),
+      replaceMovementExercise(current, switchingMovementKey, replacement).map((movement) =>
+        movement.key === switchingMovementKey ? { ...movement, sets: suggestedSets } : movement,
+      ),
     );
     closeExercisePicker();
   }
@@ -2063,7 +2119,7 @@ function WorkoutLogger({
           ? {
               ...movement,
               sets: movement.sets.map((item) =>
-                item.key === setKey ? { ...item, ...update } : item,
+                item.key === setKey ? { ...item, ...update, fromPrevious: false } : item,
               ),
             }
           : movement,
@@ -2114,11 +2170,17 @@ function WorkoutLogger({
     }
     setSaving(true);
     setError(null);
+    const completedIdentity = finalizeWorkoutIdentity(
+      movements.map((movement) => movement.exercise),
+      category,
+      name,
+      !initialWorkout,
+    );
     try {
       await onSave({
-        name: name.trim() || `${categoryNames[category]} workout`,
+        name: completedIdentity.name,
         workout_date: workoutDate,
-        category,
+        category: completedIdentity.category,
         notes: notes.trim() || null,
         duration_minutes: initialWorkout
           ? editedDurationMinutes
@@ -2169,10 +2231,20 @@ function WorkoutLogger({
   return (
     <section className="logger-screen content-page">
       <div className="live-workout-bar">
-        <button ref={closeButtonRef} type="button" onClick={() => setCloseConfirmationOpen(true)}>
-          Close
-        </button>
-        <div>
+        <div className="live-workout-left-actions">
+          <button type="button" onClick={onClose}>
+            Close
+          </button>
+          <button
+            ref={deleteButtonRef}
+            type="button"
+            className="delete-live-workout"
+            onClick={() => setDeleteConfirmationOpen(true)}
+          >
+            Delete
+          </button>
+        </div>
+        <div className="live-workout-status">
           {!initialWorkout && <span className="live-dot" />}
           {initialWorkout ? 'EDIT WORKOUT' : ` LIVE · ${formatDuration(elapsed)}`}
         </div>
@@ -2327,23 +2399,6 @@ function WorkoutLogger({
         </div>
       </section>
 
-      {categoryNotice && (
-        <div className="workout-category-notice" role="status">
-          <span aria-hidden="true">✓</span>
-          <div>
-            <strong>Workout updated</strong>
-            <p>{categoryNotice}</p>
-          </div>
-          <button
-            type="button"
-            onClick={() => setCategoryNotice(null)}
-            aria-label="Dismiss workout update"
-          >
-            ×
-          </button>
-        </div>
-      )}
-
       {error && <p className="inline-error">{error}</p>}
 
       <div className="movement-stack">
@@ -2368,6 +2423,11 @@ function WorkoutLogger({
               initialWorkout?.id,
             )}
             onExerciseHistory={() => onExerciseHistory(movement.exercise.id)}
+            onExerciseComplete={(isComplete) =>
+              setMovements((current) =>
+                current.map((item) => (item.key === movement.key ? { ...item, isComplete } : item)),
+              )
+            }
             onUpdateSet={(setKey, update) => updateSet(movement.key, setKey, update)}
             onToggleSet={(item) => toggleSet(movement, item)}
             onAddSet={(count, update) => addSet(movement, count, update)}
@@ -2445,14 +2505,14 @@ function WorkoutLogger({
         {saving ? 'Saving…' : initialWorkout ? 'Save workout' : 'Finish workout'}
       </button>
 
-      {closeConfirmationOpen && (
+      {deleteConfirmationOpen && (
         <WorkoutCloseDialog
           editing={Boolean(initialWorkout)}
           onCancel={() => {
-            setCloseConfirmationOpen(false);
-            window.requestAnimationFrame(() => closeButtonRef.current?.focus());
+            setDeleteConfirmationOpen(false);
+            window.requestAnimationFrame(() => deleteButtonRef.current?.focus());
           }}
-          onConfirm={onClose}
+          onConfirm={onDelete}
         />
       )}
 
@@ -2566,9 +2626,7 @@ function SupersetPicker({
             ×
           </button>
         </header>
-        <p id="superset-picker-description">
-          Alternate exercises in a superset/circuit.
-        </p>
+        <p id="superset-picker-description">Alternate exercises in a superset/circuit.</p>
 
         <div className="superset-options" aria-label="Exercises in this workout">
           {candidates.length === 0 ? (
@@ -2687,19 +2745,19 @@ function WorkoutCloseDialog({
         </div>
         <p className="section-kicker">PLEASE CONFIRM</p>
         <h2 id="workout-close-title">
-          {editing ? 'Discard your changes?' : 'Discard this workout?'}
+          {editing ? 'Delete this saved workout?' : 'Delete this workout?'}
         </h2>
         <p id="workout-close-description">
           {editing
-            ? 'Your recent edits will be lost. The previously saved workout will stay in your history.'
-            : 'Your unsaved sets and notes will be removed. This cannot be undone.'}
+            ? 'This workout will be permanently removed from your history. This cannot be undone.'
+            : 'Your active workout, sets, and notes will be permanently removed. This cannot be undone.'}
         </p>
         <div className="workout-close-actions">
           <button ref={safeButtonRef} type="button" onClick={onCancel}>
-            {editing ? 'Keep editing' : 'Keep workout'}
+            Keep workout
           </button>
           <button className="discard-workout-button" type="button" onClick={onConfirm}>
-            {editing ? 'Discard changes' : 'Discard workout'}
+            Delete workout
           </button>
         </div>
       </section>
@@ -2759,6 +2817,7 @@ function MovementCard({
   currentBodyweight,
   history,
   onExerciseHistory,
+  onExerciseComplete,
   onUpdateSet,
   onToggleSet,
   onAddSet,
@@ -2781,6 +2840,7 @@ function MovementCard({
   currentBodyweight: number | null;
   history: ExerciseHistoryEntry[];
   onExerciseHistory: () => void;
+  onExerciseComplete: (isComplete: boolean) => void;
   onUpdateSet: (setKey: string, update: Partial<DraftSet>) => void;
   onToggleSet: (item: DraftSet) => void;
   onAddSet: (count: number, update: Partial<DraftSet>) => void;
@@ -2802,37 +2862,79 @@ function MovementCard({
   const treadmill =
     cardio && (movement.exercise.equipment?.toLowerCase().includes('treadmill') ?? false);
   const completedWorkingSetCount = movement.sets.filter(isCompletedWorkingSet).length;
-  const [expanded] = useState(true);
+  const [expanded, setExpanded] = useState(!movement.isComplete);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [addSetOpen, setAddSetOpen] = useState(false);
   const [openSetActionsKey, setOpenSetActionsKey] = useState<string | null>(null);
+  const [editingSetKey, setEditingSetKey] = useState<string | null>(null);
+  const [weightDrafts, setWeightDrafts] = useState<Record<string, string>>({});
   const movementMenuRef = useRef<HTMLDetailsElement>(null);
   const movementNoteRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!movement.isComplete) setExpanded(true);
+  }, [movement.isComplete]);
 
   function closeMovementMenu() {
     if (movementMenuRef.current) movementMenuRef.current.open = false;
   }
 
-  function toggleSetActionsFromSummary(trigger: HTMLElement, setKey: string) {
-    const setDetails = trigger.closest('.set-details');
-    if (setDetails instanceof HTMLDetailsElement) setDetails.open = true;
-    setOpenSetActionsKey((current) => (current === setKey ? null : setKey));
+  function updateWeightDraft(item: DraftSet, rawValue: string) {
+    const draft = rawValue.replace(',', '.');
+    if (!/^\d*(?:\.\d*)?$/.test(draft)) return;
+    setWeightDrafts((current) => ({ ...current, [item.key]: draft }));
+    if (draft === '') {
+      onUpdateSet(item.key, { weight_kg: null });
+      return;
+    }
+    if (!draft.endsWith('.')) {
+      onUpdateSet(item.key, { weight_kg: decimalNumberOrNull(draft) });
+    }
   }
+
+  function commitWeightDraft(item: DraftSet) {
+    const draft = weightDrafts[item.key];
+    if (draft === undefined) return;
+    onUpdateSet(item.key, { weight_kg: decimalNumberOrNull(draft) });
+    setWeightDrafts((current) => {
+      const next = { ...current };
+      delete next[item.key];
+      return next;
+    });
+  }
+
+  const editingSetIndex = movement.sets.findIndex((item) => item.key === editingSetKey);
+  const editingSet = editingSetIndex >= 0 ? movement.sets[editingSetIndex] : null;
 
   return (
     <article
       className={`movement-card panel ${expanded ? '' : 'is-collapsed'} ${supersetLabel ? 'superset-card' : ''}`}
     >
       {supersetLabel && <div className="superset-ribbon">{supersetLabel}</div>}
-      <header>
+      <header
+        onClick={() => {
+          if (!expanded) setExpanded(true);
+        }}
+      >
         <ExerciseIcon exercise={movement.exercise} number={number} />
         <div>
           <h2>
             <button
               type="button"
               className="movement-history-link"
-              onClick={onExerciseHistory}
-              aria-label={`View full history for ${movement.exercise.name}`}
+              onClick={(event) => {
+                if (!expanded) {
+                  event.stopPropagation();
+                  setExpanded(true);
+                  return;
+                }
+                onExerciseHistory();
+              }}
+              aria-label={
+                expanded
+                  ? `View full history for ${movement.exercise.name}`
+                  : `Expand ${movement.exercise.name}`
+              }
             >
               {movement.exercise.name}
             </button>
@@ -2848,86 +2950,106 @@ function MovementCard({
             </span>
           )}
         </div>
-        <details className="movement-overflow" ref={movementMenuRef}>
-          <summary aria-label={`Actions for ${movement.exercise.name}`}>⋮</summary>
-          <div className="movement-overflow-menu">
-            <button
-              type="button"
-              onClick={() => {
-                setHistoryOpen((current) => !current);
-                closeMovementMenu();
-              }}
-            >
-              <span aria-hidden="true">▰</span>
-              {historyOpen ? 'Hide Recent History' : 'Recent History'}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                closeMovementMenu();
-                window.requestAnimationFrame(() => movementNoteRef.current?.focus());
-              }}
-            >
-              <span aria-hidden="true">✎</span>
-              Edit Notes
-            </button>
-            <button
-              type="button"
-              className={supersetLabel ? 'active' : ''}
-              onClick={(event) => {
-                closeMovementMenu();
-                onSuperset(event.currentTarget);
-              }}
-              aria-haspopup="dialog"
-            >
-              <span aria-hidden="true">▰</span>
-              {supersetLabel ? 'Edit Group' : 'Group Superset'}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                onSwitch();
-                closeMovementMenu();
-              }}
-            >
-              <span aria-hidden="true">⇄</span>
-              Switch Exercise
-            </button>
-            <button
-              type="button"
-              disabled={!canMoveUp}
-              onClick={() => {
-                onMoveUp();
-                closeMovementMenu();
-              }}
-            >
-              <span aria-hidden="true">↑</span>
-              Move Earlier
-            </button>
-            <button
-              type="button"
-              disabled={!canMoveDown}
-              onClick={() => {
-                onMoveDown();
-                closeMovementMenu();
-              }}
-            >
-              <span aria-hidden="true">↓</span>
-              Move Later
-            </button>
-            <button
-              type="button"
-              className="movement-menu-danger"
-              onClick={() => {
-                onRemove();
-                closeMovementMenu();
-              }}
-            >
-              <span aria-hidden="true">■</span>
-              Delete
-            </button>
-          </div>
-        </details>
+        <div className="movement-header-actions" onClick={(event) => event.stopPropagation()}>
+          <button
+            type="button"
+            className={`exercise-complete-button ${movement.isComplete ? 'active' : ''}`}
+            aria-label={
+              movement.isComplete
+                ? `Mark ${movement.exercise.name} as not finished`
+                : `Finish ${movement.exercise.name}`
+            }
+            aria-pressed={movement.isComplete}
+            onClick={() => {
+              const next = !movement.isComplete;
+              onExerciseComplete(next);
+              setExpanded(!next);
+              closeMovementMenu();
+            }}
+          >
+            ✓
+          </button>
+          <details className="movement-overflow" ref={movementMenuRef}>
+            <summary aria-label={`Actions for ${movement.exercise.name}`}>⋮</summary>
+            <div className="movement-overflow-menu">
+              <button
+                type="button"
+                onClick={() => {
+                  setHistoryOpen((current) => !current);
+                  closeMovementMenu();
+                }}
+              >
+                <span aria-hidden="true">▰</span>
+                {historyOpen ? 'Hide Recent History' : 'Recent History'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  closeMovementMenu();
+                  window.requestAnimationFrame(() => movementNoteRef.current?.focus());
+                }}
+              >
+                <span aria-hidden="true">✎</span>
+                Edit Notes
+              </button>
+              <button
+                type="button"
+                className={supersetLabel ? 'active' : ''}
+                onClick={(event) => {
+                  closeMovementMenu();
+                  onSuperset(event.currentTarget);
+                }}
+                aria-haspopup="dialog"
+              >
+                <span aria-hidden="true">▰</span>
+                {supersetLabel ? 'Edit Group' : 'Group Superset'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onSwitch();
+                  closeMovementMenu();
+                }}
+              >
+                <span aria-hidden="true">⇄</span>
+                Switch Exercise
+              </button>
+              <button
+                type="button"
+                disabled={!canMoveUp}
+                onClick={() => {
+                  onMoveUp();
+                  closeMovementMenu();
+                }}
+              >
+                <span aria-hidden="true">↑</span>
+                Move Earlier
+              </button>
+              <button
+                type="button"
+                disabled={!canMoveDown}
+                onClick={() => {
+                  onMoveDown();
+                  closeMovementMenu();
+                }}
+              >
+                <span aria-hidden="true">↓</span>
+                Move Later
+              </button>
+              <button
+                type="button"
+                className="movement-menu-danger"
+                onClick={() => {
+                  onRemove();
+                  closeMovementMenu();
+                }}
+              >
+                <span aria-hidden="true">■</span>
+                Delete
+              </button>
+            </div>
+          </details>
+        </div>
       </header>
 
       {historyOpen && (
@@ -2948,9 +3070,7 @@ function MovementCard({
                   <strong>{prettyDate(entry.workoutDate)}</strong>
                   <small>{entry.workoutName}</small>
                 </header>
-                {entry.sets.length > 0 && (
-                  <HistorySetFlow sets={entry.sets} personalRecords={[]} />
-                )}
+                {entry.sets.length > 0 && <HistorySetFlow sets={entry.sets} personalRecords={[]} />}
                 {entry.sets
                   .filter((item) => item.notes)
                   .map((item) => (
@@ -2999,16 +3119,28 @@ function MovementCard({
         {movement.sets.map((item, index) => (
           <Fragment key={item.key}>
             <details
-              className={`set-details ${item.completed ? 'completed' : ''}`}
-              open={!item.completed}
+              className={`set-details ${item.completed ? 'completed' : ''} ${item.fromPrevious ? 'previous-set-details' : ''}`}
+              open={!item.completed && !item.fromPrevious}
+              onToggle={(event) => {
+                if ((item.completed || item.fromPrevious) && event.currentTarget.open) {
+                  event.currentTarget.open = false;
+                }
+              }}
             >
-              <summary className="completed-set-summary">
+              <summary
+                className="completed-set-summary"
+                onClick={(event) => {
+                  if (!item.completed && !item.fromPrevious) return;
+                  event.preventDefault();
+                  setEditingSetKey(item.key);
+                }}
+              >
                 {cardio ? (
                   <>
                     <span>{index + 1}</span>
                     <strong>{completedSetPerformance(item, true)}</strong>
                     <span>{item.rpe ?? '–'}</span>
-                    <b className="completed-set-check">✓</b>
+                    <b className="completed-set-check">{item.completed ? '✓' : ''}</b>
                     <span
                       className="completed-set-menu"
                       role="button"
@@ -3017,13 +3149,13 @@ function MovementCard({
                       onClick={(event) => {
                         event.preventDefault();
                         event.stopPropagation();
-                        toggleSetActionsFromSummary(event.currentTarget, item.key);
+                        setEditingSetKey(item.key);
                       }}
                       onKeyDown={(event) => {
                         if (event.key !== 'Enter' && event.key !== ' ') return;
                         event.preventDefault();
                         event.stopPropagation();
-                        toggleSetActionsFromSummary(event.currentTarget, item.key);
+                        setEditingSetKey(item.key);
                       }}
                     >
                       ⋮
@@ -3041,9 +3173,7 @@ function MovementCard({
                     </strong>
                     <strong>{item.reps ?? '–'}</strong>
                     <span>
-                      {strengthLevelPercent(item) === null
-                        ? '–'
-                        : `${strengthLevelPercent(item)}%`}
+                      {strengthLevelPercent(item) === null ? '–' : `${strengthLevelPercent(item)}%`}
                     </span>
                     <StrengthLevelStars item={item} />
                     <span
@@ -3054,13 +3184,13 @@ function MovementCard({
                       onClick={(event) => {
                         event.preventDefault();
                         event.stopPropagation();
-                        toggleSetActionsFromSummary(event.currentTarget, item.key);
+                        setEditingSetKey(item.key);
                       }}
                       onKeyDown={(event) => {
                         if (event.key !== 'Enter' && event.key !== ' ') return;
                         event.preventDefault();
                         event.stopPropagation();
-                        toggleSetActionsFromSummary(event.currentTarget, item.key);
+                        setEditingSetKey(item.key);
                       }}
                     >
                       ⋮
@@ -3069,7 +3199,7 @@ function MovementCard({
                 )}
               </summary>
               <div
-                className={`set-row ${item.completed ? 'completed' : ''} ${item.failed ? 'failed-set' : ''} set-type-${item.set_type ?? 'normal'}`}
+                className={`set-row ${item.completed ? 'completed' : ''} ${item.failed ? 'failed-set' : ''} ${item.fromPrevious ? 'previous-set' : ''} set-type-${item.set_type ?? 'normal'}`}
               >
                 <span className="set-index">
                   {index + 1}
@@ -3114,24 +3244,44 @@ function MovementCard({
                   <>
                     <input
                       inputMode="decimal"
-                      type="number"
-                      min="0"
-                      step="0.5"
-                      value={item.weight_kg ?? ''}
-                      onChange={(event) =>
-                        onUpdateSet(item.key, { weight_kg: numberOrNull(event.target.value) })
+                      type="text"
+                      value={weightDrafts[item.key] ?? item.weight_kg ?? ''}
+                      onFocus={(event) => {
+                        setWeightDrafts((current) => ({
+                          ...current,
+                          [item.key]: event.currentTarget.value,
+                        }));
+                        if (item.weight_kg !== null) event.currentTarget.select();
+                      }}
+                      onClick={(event) => {
+                        if (item.weight_kg !== null) event.currentTarget.select();
+                      }}
+                      onChange={(event) => updateWeightDraft(item, event.target.value)}
+                      onBlur={() => commitWeightDraft(item)}
+                      aria-label={
+                        item.fromPrevious
+                          ? 'Weight kilograms, suggested from the last workout'
+                          : 'Weight kilograms'
                       }
-                      aria-label="Weight kilograms"
                     />
                     <input
                       inputMode="numeric"
-                      type="number"
-                      min="0"
+                      type="text"
                       value={item.reps ?? ''}
+                      onFocus={(event) => {
+                        if (item.reps !== null) event.currentTarget.select();
+                      }}
+                      onClick={(event) => {
+                        if (item.reps !== null) event.currentTarget.select();
+                      }}
                       onChange={(event) =>
                         onUpdateSet(item.key, { reps: numberOrNull(event.target.value) })
                       }
-                      aria-label="Repetitions"
+                      aria-label={
+                        item.fromPrevious
+                          ? 'Repetitions, suggested from the last workout'
+                          : 'Repetitions'
+                      }
                     />
                   </>
                 )}
@@ -3213,7 +3363,7 @@ function MovementCard({
                   <label>
                     Rest
                     <select
-                      value={item.rest_seconds ?? 120}
+                      value={item.rest_seconds ?? DEFAULT_REST_SECONDS}
                       onChange={(event) =>
                         onUpdateSet(item.key, { rest_seconds: Number(event.target.value) })
                       }
@@ -3225,32 +3375,6 @@ function MovementCard({
                       ))}
                     </select>
                   </label>
-                  {!cardio && (
-                    <label className="failed-toggle">
-                      <input
-                        type="checkbox"
-                        checked={item.failed ?? false}
-                        onChange={(event) =>
-                          onUpdateSet(item.key, { failed: event.target.checked })
-                        }
-                      />
-                      Failed
-                    </label>
-                  )}
-                  {item.failed && !cardio && (
-                    <label>
-                      Target reps
-                      <input
-                        type="number"
-                        min="0"
-                        inputMode="numeric"
-                        value={item.target_reps ?? ''}
-                        onChange={(event) =>
-                          onUpdateSet(item.key, { target_reps: numberOrNull(event.target.value) })
-                        }
-                      />
-                    </label>
-                  )}
                   <input
                     value={item.notes ?? ''}
                     onChange={(event) =>
@@ -3267,9 +3391,7 @@ function MovementCard({
                       aria-label={`Options for set ${index + 1}`}
                       aria-expanded={openSetActionsKey === item.key}
                       onClick={() =>
-                        setOpenSetActionsKey((current) =>
-                          current === item.key ? null : item.key,
-                        )
+                        setOpenSetActionsKey((current) => (current === item.key ? null : item.key))
                       }
                     >
                       ⋮
@@ -3320,14 +3442,12 @@ function MovementCard({
                 )}
               </div>
             </details>
-            {item.completed && item.notes && (
-              <div className="completed-set-note">{item.notes}</div>
-            )}
+            {item.completed && item.notes && <div className="completed-set-note">{item.notes}</div>}
             {index < movement.sets.length - 1 && (
               <div className="rest-between" aria-label={`Rest after set ${index + 1}`}>
                 <i />
                 <span>
-                  <b>{formatDuration(item.rest_seconds ?? 120)}</b> rest
+                  <b>{formatDuration(item.rest_seconds ?? DEFAULT_REST_SECONDS)}</b> rest
                 </span>
                 <i />
               </div>
@@ -3335,6 +3455,19 @@ function MovementCard({
           </Fragment>
         ))}
       </div>
+      {editingSet && (
+        <CompletedSetEditDialog
+          key={editingSet.key}
+          exerciseName={movement.exercise.name}
+          setNumber={editingSetIndex + 1}
+          item={editingSet}
+          cardio={cardio}
+          treadmill={treadmill}
+          onSave={(update) => onUpdateSet(editingSet.key, update)}
+          onDelete={() => onDeleteSet(editingSetIndex)}
+          onClose={() => setEditingSetKey(null)}
+        />
+      )}
       <button className="add-set-button" onClick={() => setAddSetOpen(true)}>
         ＋ Add set
       </button>
@@ -3356,6 +3489,351 @@ function MovementCard({
         />
       )}
     </article>
+  );
+}
+
+function CompletedSetEditDialog({
+  exerciseName,
+  setNumber,
+  item,
+  cardio,
+  treadmill,
+  onSave,
+  onDelete,
+  onClose,
+}: {
+  exerciseName: string;
+  setNumber: number;
+  item: DraftSet;
+  cardio: boolean;
+  treadmill: boolean;
+  onSave: (update: Partial<DraftSet>) => void;
+  onDelete: () => void;
+  onClose: () => void;
+}) {
+  const [weight, setWeight] = useState(item.weight_kg?.toString() ?? '');
+  const [reps, setReps] = useState(item.reps?.toString() ?? '');
+  const [duration, setDuration] = useState(
+    item.duration_seconds === null ? '' : String(Math.round(item.duration_seconds / 60)),
+  );
+  const [distance, setDistance] = useState(item.distance_km?.toString() ?? '');
+  const [incline, setIncline] = useState(item.incline_percent?.toString() ?? '');
+  const [speed, setSpeed] = useState(item.speed_kph?.toString() ?? '');
+  const [rpe, setRpe] = useState(item.rpe?.toString() ?? '');
+  const [setType, setSetType] = useState<DraftSet['set_type']>(
+    item.set_type ?? (item.warmup ? 'warmup' : 'normal'),
+  );
+  const [restSeconds, setRestSeconds] = useState(String(item.rest_seconds ?? DEFAULT_REST_SECONDS));
+  const [notes, setNotes] = useState(item.notes ?? '');
+  const [deleteConfirmationOpen, setDeleteConfirmationOpen] = useState(false);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const onCloseRef = useRef(onClose);
+  const initialViewportHeightRef = useRef(window.visualViewport?.height ?? window.innerHeight);
+  const [viewport, setViewport] = useState(() => ({
+    height: window.visualViewport?.height ?? window.innerHeight,
+    top: window.visualViewport?.offsetTop ?? 0,
+    keyboardVisible: false,
+  }));
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
+    const visualViewport = window.visualViewport;
+    const updateViewport = () =>
+      setViewport({
+        height: visualViewport?.height ?? window.innerHeight,
+        top: visualViewport?.offsetTop ?? 0,
+        keyboardVisible:
+          initialViewportHeightRef.current - (visualViewport?.height ?? window.innerHeight) > 100,
+      });
+
+    updateViewport();
+    visualViewport?.addEventListener('resize', updateViewport);
+    visualViewport?.addEventListener('scroll', updateViewport);
+    window.addEventListener('resize', updateViewport);
+    return () => {
+      visualViewport?.removeEventListener('resize', updateViewport);
+      visualViewport?.removeEventListener('scroll', updateViewport);
+      window.removeEventListener('resize', updateViewport);
+    };
+  }, []);
+
+  useEffect(() => {
+    const root = document.getElementById('root');
+    const rootWasInert = root?.hasAttribute('inert') ?? false;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    root?.setAttribute('inert', '');
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onCloseRef.current();
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      if (!rootWasInert) root?.removeAttribute('inert');
+      window.removeEventListener('keydown', closeOnEscape);
+    };
+  }, []);
+
+  function updateDecimalDraft(value: string, update: (next: string) => void) {
+    const next = value.replace(',', '.');
+    if (/^\d*(?:\.\d*)?$/.test(next)) update(next);
+  }
+
+  function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const durationMinutes = numberOrNull(duration);
+    onSave({
+      weight_kg: cardio ? null : decimalNumberOrNull(weight),
+      reps: cardio ? null : numberOrNull(reps),
+      duration_seconds: cardio && durationMinutes !== null ? durationMinutes * 60 : null,
+      distance_km: cardio ? decimalNumberOrNull(distance) : null,
+      incline_percent: treadmill ? decimalNumberOrNull(incline) : item.incline_percent,
+      speed_kph: treadmill ? decimalNumberOrNull(speed) : item.speed_kph,
+      rpe: numberOrNull(rpe),
+      rest_seconds: Number(restSeconds),
+      set_type: setType,
+      warmup: setType === 'warmup',
+      notes: notes.trim() || null,
+      completed: true,
+    });
+    onClose();
+  }
+
+  const viewportStyle = {
+    '--set-dialog-viewport-top': `${viewport.top}px`,
+    '--set-dialog-viewport-height': `${viewport.height}px`,
+  } as CSSProperties;
+
+  return createPortal(
+    <div
+      className="modal-backdrop add-set-backdrop set-dialog-backdrop"
+      style={viewportStyle}
+      onPointerDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <form
+        className="add-set-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="completed-set-edit-title"
+        onSubmit={save}
+      >
+        {deleteConfirmationOpen && (
+          <div
+            className="set-delete-confirmation"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="set-delete-confirmation-title"
+          >
+            <div>
+              <h3 id="set-delete-confirmation-title">Delete this set?</h3>
+              <p>This set will be removed from the workout. This can’t be undone.</p>
+              <footer>
+                <button type="button" onClick={() => setDeleteConfirmationOpen(false)}>
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="confirm-delete-set"
+                  onClick={() => {
+                    onDelete();
+                    onClose();
+                  }}
+                >
+                  Delete set
+                </button>
+              </footer>
+            </div>
+          </div>
+        )}
+        <header>
+          <h2 id="completed-set-edit-title">{item.completed ? 'Edit Set' : 'Add Set'}</h2>
+          <div className="set-dialog-header-actions">
+            <button
+              type="button"
+              className="set-dialog-delete"
+              onClick={() => {
+                if (document.activeElement instanceof HTMLElement) {
+                  document.activeElement.blur();
+                }
+                setDeleteConfirmationOpen(true);
+              }}
+              aria-label="Delete set"
+            >
+              <span className="trash-can-icon" aria-hidden="true" />
+            </button>
+            {viewport.keyboardVisible && (
+              <button type="submit" className="set-dialog-confirm" aria-label="Save set">
+                ✓
+              </button>
+            )}
+            <button
+              ref={closeButtonRef}
+              type="button"
+              onClick={onClose}
+              aria-label="Close set editor"
+            >
+              ×
+            </button>
+          </div>
+        </header>
+
+        <div className="add-set-content">
+          <div className="add-set-previous">
+            <strong>{exerciseName}</strong>
+            <div>
+              <span>Current</span>
+              <span>Set {setNumber}</span>
+              <span>{completedSetPerformance(item, cardio)}</span>
+            </div>
+          </div>
+          <div className="add-set-fields">
+            {cardio ? (
+              <>
+                <label>
+                  Minutes
+                  <input
+                    autoFocus
+                    inputMode="numeric"
+                    value={duration}
+                    onChange={(event) => {
+                      if (/^\d*$/.test(event.target.value)) setDuration(event.target.value);
+                    }}
+                  />
+                </label>
+                <label>
+                  Distance
+                  <span className="unit-input">
+                    <input
+                      inputMode="decimal"
+                      value={distance}
+                      onChange={(event) => updateDecimalDraft(event.target.value, setDistance)}
+                    />
+                    <b>km</b>
+                  </span>
+                </label>
+              </>
+            ) : (
+              <>
+                <label>
+                  Weight
+                  <span className="unit-input">
+                    <input
+                      autoFocus
+                      inputMode="decimal"
+                      value={weight}
+                      onFocus={(event) => {
+                        if (event.currentTarget.value) event.currentTarget.select();
+                      }}
+                      onClick={(event) => {
+                        if (event.currentTarget.value) event.currentTarget.select();
+                      }}
+                      onChange={(event) => updateDecimalDraft(event.target.value, setWeight)}
+                    />
+                    <b>kg</b>
+                  </span>
+                </label>
+                <label>
+                  Reps
+                  <input
+                    inputMode="numeric"
+                    value={reps}
+                    onFocus={(event) => {
+                      if (event.currentTarget.value) event.currentTarget.select();
+                    }}
+                    onClick={(event) => {
+                      if (event.currentTarget.value) event.currentTarget.select();
+                    }}
+                    onChange={(event) => {
+                      if (/^\d*$/.test(event.target.value)) setReps(event.target.value);
+                    }}
+                  />
+                </label>
+              </>
+            )}
+            <div className="set-dialog-secondary-fields">
+              <label>
+                RPE
+                <select value={rpe} onChange={(event) => setRpe(event.target.value)}>
+                  <option value="">–</option>
+                  {[5, 6, 7, 7.5, 8, 8.5, 9, 9.5, 10].map((value) => (
+                    <option key={value} value={value}>
+                      {value}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Type
+                <select
+                  value={setType}
+                  onChange={(event) => setSetType(event.target.value as DraftSet['set_type'])}
+                >
+                  <option value="normal">Working</option>
+                  <option value="warmup">Warm-up</option>
+                  <option value="drop">Drop set</option>
+                </select>
+              </label>
+              <label>
+                Rest
+                <select
+                  value={restSeconds}
+                  onChange={(event) => setRestSeconds(event.target.value)}
+                >
+                  {restOptions.map((seconds) => (
+                    <option key={seconds} value={seconds}>
+                      {formatDuration(seconds)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            {treadmill && (
+              <>
+                <label>
+                  Incline %
+                  <input
+                    inputMode="decimal"
+                    value={incline}
+                    onChange={(event) => updateDecimalDraft(event.target.value, setIncline)}
+                  />
+                </label>
+                <label>
+                  Speed km/h
+                  <input
+                    inputMode="decimal"
+                    value={speed}
+                    onChange={(event) => updateDecimalDraft(event.target.value, setSpeed)}
+                  />
+                </label>
+              </>
+            )}
+            <label className="add-set-notes-field">
+              Set note
+              <textarea
+                value={notes}
+                onChange={(event) => setNotes(event.target.value)}
+                placeholder="Optional note"
+                rows={2}
+              />
+            </label>
+          </div>
+        </div>
+
+        {!viewport.keyboardVisible && (
+          <footer className="set-dialog-footer">
+            <button type="submit" className="add-set-confirm">
+              {item.completed ? 'Save changes' : 'Add Set'}
+            </button>
+          </footer>
+        )}
+      </form>
+    </div>,
+    document.body,
   );
 }
 
@@ -3448,7 +3926,9 @@ function AddSetDialog({
             <div>
               <span>Last</span>
               <span>Set {Math.max(1, movement.sets.length)}</span>
-              <span>{previous ? completedSetPerformance(previous, cardio) : 'No previous set'}</span>
+              <span>
+                {previous ? completedSetPerformance(previous, cardio) : 'No previous set'}
+              </span>
             </div>
           </div>
           <div className="add-set-fields">
@@ -3490,6 +3970,12 @@ function AddSetDialog({
                       step="0.5"
                       inputMode="decimal"
                       value={weight}
+                      onFocus={(event) => {
+                        if (event.currentTarget.value) event.currentTarget.select();
+                      }}
+                      onClick={(event) => {
+                        if (event.currentTarget.value) event.currentTarget.select();
+                      }}
                       onChange={(event) => setWeight(event.target.value)}
                     />
                     <b>kg</b>
@@ -3502,6 +3988,12 @@ function AddSetDialog({
                     min="0"
                     inputMode="numeric"
                     value={reps}
+                    onFocus={(event) => {
+                      if (event.currentTarget.value) event.currentTarget.select();
+                    }}
+                    onClick={(event) => {
+                      if (event.currentTarget.value) event.currentTarget.select();
+                    }}
                     onChange={(event) => setReps(event.target.value)}
                   />
                 </label>
@@ -3545,34 +4037,42 @@ function AddSetDialog({
           <div className="add-set-toggles">
             {!cardio && (
               <>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={warmup}
-                  onChange={(event) => {
-                    setWarmup(event.target.checked);
-                    if (event.target.checked) setDropSet(false);
-                  }}
-                />
-                Warmup
-              </label>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={dropSet}
-                  onChange={(event) => {
-                    setDropSet(event.target.checked);
-                    if (event.target.checked) setWarmup(false);
-                  }}
-                />
-                Dropset
-              </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={warmup}
+                    onChange={(event) => {
+                      setWarmup(event.target.checked);
+                      if (event.target.checked) setDropSet(false);
+                    }}
+                  />
+                  Warmup
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={dropSet}
+                    onChange={(event) => {
+                      setDropSet(event.target.checked);
+                      if (event.target.checked) setWarmup(false);
+                    }}
+                  />
+                  Dropset
+                </label>
               </>
             )}
-            <button type="button" className={showRpe ? 'active' : ''} onClick={() => setShowRpe((value) => !value)}>
+            <button
+              type="button"
+              className={showRpe ? 'active' : ''}
+              onClick={() => setShowRpe((value) => !value)}
+            >
               ＋ RPE
             </button>
-            <button type="button" className={showNotes ? 'active' : ''} onClick={() => setShowNotes((value) => !value)}>
+            <button
+              type="button"
+              className={showNotes ? 'active' : ''}
+              onClick={() => setShowNotes((value) => !value)}
+            >
               ＋ Notes
             </button>
           </div>
@@ -3723,7 +4223,7 @@ function MachinePhotoChooser({
     ? `${primaryPinnedPhoto.caption}${pinnedPhotos.length > 1 ? ` +${pinnedPhotos.length - 1} more` : ''}`
     : photos.length > 0
       ? `${photos.length} saved · none pinned`
-      : 'No equipment photo pinned';
+      : 'Take or choose a photo';
 
   return (
     <details
@@ -3741,7 +4241,7 @@ function MachinePhotoChooser({
           </span>
         )}
         <span className="machine-photo-summary-copy">
-          <strong>Machine used</strong>
+          <strong>Equipment photo</strong>
           <small>{photoSummary}</small>
         </span>
         {selectedIds.length > 0 && <b>{selectedIds.length} pinned</b>}
@@ -3957,6 +4457,25 @@ function MachinePhotoDetail({
 
 type ExercisePickerFilter = WorkoutCategory | 'all' | 'favorites' | 'recent';
 
+function FuzzyHighlightedText({ value, query }: { value: string; query: string }) {
+  const highlighted = new Set(fuzzyHighlightIndices(value, query));
+  if (!highlighted.size) return value;
+
+  return (
+    <>
+      {[...value].map((character, index) =>
+        highlighted.has(index) ? (
+          <b className="exercise-search-match" key={`${character}-${index}`}>
+            {character}
+          </b>
+        ) : (
+          <Fragment key={`${character}-${index}`}>{character}</Fragment>
+        ),
+      )}
+    </>
+  );
+}
+
 function ExercisePicker({
   exercises,
   excludedIds,
@@ -3993,7 +4512,7 @@ function ExercisePicker({
   const searchRef = useRef<HTMLInputElement>(null);
   const onCloseRef = useRef(onClose);
   const initialViewportHeightRef = useRef(window.visualViewport?.height ?? window.innerHeight);
-  const query = search.trim().toLowerCase();
+  const query = search.trim();
   const available = exercises.filter((exercise) => !excludedIds.includes(exercise.id));
   const recent = recentExerciseIds
     .map((id) => available.find((exercise) => exercise.id === id))
@@ -4001,13 +4520,26 @@ function ExercisePicker({
   const sections: Array<{ title: string; exercises: Exercise[] }> = [];
 
   if (query) {
+    const rankedMatches = available
+      .map((exercise, originalIndex) => ({
+        exercise,
+        originalIndex,
+        score: fuzzyScoreFields(
+          [exercise.name, exercise.muscle_group, exercise.equipment ?? ''],
+          query,
+        ),
+      }))
+      .filter(
+        (match): match is { exercise: Exercise; originalIndex: number; score: number } =>
+          match.score !== null,
+      )
+      .sort(
+        (first, second) => first.score - second.score || first.originalIndex - second.originalIndex,
+      )
+      .map((match) => match.exercise);
     sections.push({
       title: 'Search results',
-      exercises: available.filter((exercise) =>
-        `${exercise.name} ${exercise.muscle_group} ${exercise.equipment ?? ''}`
-          .toLowerCase()
-          .includes(query),
-      ),
+      exercises: rankedMatches,
     });
   } else if (filter === 'favorites') {
     sections.push({ title: 'Favorites', exercises: available.filter((item) => item.is_favorite) });
@@ -4051,7 +4583,10 @@ function ExercisePicker({
 
   function renderExercise(exercise: Exercise) {
     const selected = selectedIds.includes(exercise.id);
-    const nameScore = [...exercise.name].reduce((total, character) => total + character.charCodeAt(0), 0);
+    const nameScore = [...exercise.name].reduce(
+      (total, character) => total + character.charCodeAt(0),
+      0,
+    );
     const rating = exercise.is_favorite ? 5 : 3 + (nameScore % 3);
     return (
       <div className={`exercise-option ${selected ? 'selected' : ''}`} key={exercise.id}>
@@ -4072,7 +4607,9 @@ function ExercisePicker({
         >
           <ExerciseIcon exercise={exercise} />
           <span className="exercise-option-copy">
-            <strong>{exercise.name}</strong>
+            <strong>
+              <FuzzyHighlightedText value={exercise.name} query={query} />
+            </strong>
             <small className="exercise-option-tags">
               <em>{exercise.muscle_group}</em>
               {exercise.equipment && <em>{exercise.equipment}</em>}
@@ -4201,13 +4738,21 @@ function ExercisePicker({
             onChange={(event) => setFilter(event.target.value as WorkoutCategory | 'all')}
           >
             <option value="all">Any Body Part</option>
-          {(
-            ['push', 'pull', 'lower', 'upper', 'full_body', 'cardio', 'other'] as WorkoutCategory[]
-          ).map((category) => (
-            <option key={category} value={category}>
-              {categoryNames[category]}
-            </option>
-          ))}
+            {(
+              [
+                'push',
+                'pull',
+                'lower',
+                'upper',
+                'full_body',
+                'cardio',
+                'other',
+              ] as WorkoutCategory[]
+            ).map((category) => (
+              <option key={category} value={category}>
+                {categoryNames[category]}
+              </option>
+            ))}
           </select>
           <select
             aria-label="Exercise category"
@@ -4263,9 +4808,7 @@ function ExercisePicker({
               onChoose(exercises.filter((exercise) => selectedIds.includes(exercise.id)))
             }
           >
-            {singleSelect
-              ? 'Switch exercise'
-              : `Add selected exercises (${selectedIds.length})`}
+            {singleSelect ? 'Switch exercise' : `Add selected exercises (${selectedIds.length})`}
           </button>
         </div>
       </section>
@@ -4292,6 +4835,106 @@ function RestTimer({
       <button onClick={onAdd}>+30s</button>
       <button onClick={onSkip}>Skip</button>
     </aside>
+  );
+}
+
+type LockableScreenOrientation = ScreenOrientation & {
+  lock?: (orientation: 'landscape') => Promise<void>;
+  unlock?: () => void;
+};
+
+function LandscapeChartFrame({
+  title,
+  controls,
+  children,
+}: {
+  title: string;
+  controls: ReactNode;
+  children: ReactNode;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const frameRef = useRef<HTMLDivElement>(null);
+
+  async function enterLandscape() {
+    setExpanded(true);
+    try {
+      if (frameRef.current?.requestFullscreen && !document.fullscreenElement) {
+        await frameRef.current.requestFullscreen();
+      }
+    } catch {
+      // The fixed landscape layout below is the fallback on browsers without fullscreen support.
+    }
+    try {
+      await (screen.orientation as LockableScreenOrientation).lock?.('landscape');
+    } catch {
+      // Orientation locking is not supported on every mobile browser.
+    }
+  }
+
+  async function exitLandscape() {
+    try {
+      (screen.orientation as LockableScreenOrientation).unlock?.();
+    } catch {
+      // The CSS layout can still close when orientation APIs are unavailable.
+    }
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen();
+    } catch {
+      // Continue closing the fixed fallback if the browser has already left fullscreen.
+    }
+    setExpanded(false);
+  }
+
+  useEffect(() => {
+    if (!expanded) return;
+    document.body.classList.add('chart-fullscreen-open');
+    const closeFallback = () => {
+      try {
+        (screen.orientation as LockableScreenOrientation).unlock?.();
+      } catch {
+        // Orientation locking is optional, so the visual fallback can still close.
+      }
+      setExpanded(false);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
+      closeFallback();
+    };
+    const handleFullscreenChange = () => {
+      if (!document.fullscreenElement) closeFallback();
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => {
+      document.body.classList.remove('chart-fullscreen-open');
+      document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+    };
+  }, [expanded]);
+
+  return (
+    <div
+      className={`landscape-chart-frame ${expanded ? 'landscape-chart-expanded' : ''}`}
+      ref={frameRef}
+    >
+      <div className="landscape-chart-toolbar">
+        <strong className="landscape-chart-title">{title}</strong>
+        <div className="landscape-chart-options">{controls}</div>
+        <button
+          type="button"
+          className="landscape-chart-toggle"
+          aria-label={
+            expanded ? `Exit full-screen ${title}` : `View ${title} full screen in landscape`
+          }
+          onClick={() => void (expanded ? exitLandscape() : enterLandscape())}
+        >
+          <span aria-hidden="true">{expanded ? '×' : '⛶'}</span>
+          {expanded ? 'Exit' : 'Landscape'}
+        </button>
+      </div>
+      <div className="landscape-chart-content">{children}</div>
+    </div>
   );
 }
 
@@ -4356,28 +4999,7 @@ function ProgressScreen({
             ))}
           </select>
         </label>
-        <div className="metric-tabs">
-          <button
-            className={metric === 'estimated_1rm' ? 'active' : ''}
-            onClick={() => setMetric('estimated_1rm')}
-          >
-            Est. 1RM
-          </button>
-          <button
-            className={metric === 'best_weight_kg' ? 'active' : ''}
-            onClick={() => setMetric('best_weight_kg')}
-          >
-            Top weight
-          </button>
-          <button
-            className={metric === 'volume_kg' ? 'active' : ''}
-            onClick={() => setMetric('volume_kg')}
-          >
-            Volume
-          </button>
-        </div>
       </section>
-      {metric === 'estimated_1rm' && <p className="metric-note">Epley formula</p>}
       {loading && <LoadingState />}
       {!loading && progress && (
         <>
@@ -4405,7 +5027,25 @@ function ProgressScreen({
               <small>{progress.points.length} sessions</small>
             </div>
             {progress.points.length ? (
-              <ProgressChart progress={progress} metric={metric} />
+              <LandscapeChartFrame
+                title={`${progress.exercise.name} progress`}
+                controls={
+                  <label className="chart-option-field">
+                    <span>Metric</span>
+                    <select
+                      aria-label="Progress graph metric"
+                      value={metric}
+                      onChange={(event) => setMetric(event.target.value as ProgressMetric)}
+                    >
+                      <option value="estimated_1rm">Estimated 1RM (Epley)</option>
+                      <option value="best_weight_kg">Top weight</option>
+                      <option value="volume_kg">Volume</option>
+                    </select>
+                  </label>
+                }
+              >
+                <ProgressChart progress={progress} metric={metric} />
+              </LandscapeChartFrame>
             ) : (
               <EmptyState
                 title="No data yet"
@@ -4620,6 +5260,175 @@ function ProgressChart({
   );
 }
 
+function SettingsScreen({
+  workouts,
+  measurements,
+  onImportWorkouts,
+  onExportWorkouts,
+  onDeleteSamples,
+  onDataChange,
+}: {
+  workouts: TrackedWorkout[];
+  measurements: BodyMeasurement[];
+  onImportWorkouts: (file: File) => Promise<void>;
+  onExportWorkouts: () => Promise<void>;
+  onDeleteSamples: () => Promise<void>;
+  onDataChange: () => Promise<void>;
+}) {
+  const workoutCsvInput = useRef<HTMLInputElement>(null);
+  const bodyCsvInput = useRef<HTMLInputElement>(null);
+  const [importingWorkouts, setImportingWorkouts] = useState(false);
+  const [importingBodyCsv, setImportingBodyCsv] = useState(false);
+  const [exportingBodyCsv, setExportingBodyCsv] = useState(false);
+  const [bodyCsvMessage, setBodyCsvMessage] = useState<string | null>(null);
+  const [bodyCsvError, setBodyCsvError] = useState<string | null>(null);
+
+  async function exportBodyCsv() {
+    if (exportingBodyCsv) return;
+    setExportingBodyCsv(true);
+    setBodyCsvError(null);
+    setBodyCsvMessage(null);
+    try {
+      const blob = await api.exportBodyMeasurements();
+      const href = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = href;
+      link.download = `body-weight-${localDate()}.csv`;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(href);
+      setBodyCsvMessage(
+        measurements.length
+          ? `Exported ${measurements.length} body-weight ${measurements.length === 1 ? 'entry' : 'entries'}.`
+          : 'Exported an empty body-weight CSV template.',
+      );
+    } catch (reason) {
+      setBodyCsvError(reason instanceof Error ? reason.message : 'Could not export body weight.');
+    } finally {
+      setExportingBodyCsv(false);
+    }
+  }
+
+  async function importBodyCsv(file: File) {
+    if (importingBodyCsv) return;
+    setImportingBodyCsv(true);
+    setBodyCsvError(null);
+    setBodyCsvMessage(null);
+    try {
+      const result = await api.importBodyMeasurements(file);
+      await onDataChange();
+      setBodyCsvMessage(
+        `Imported ${result.rows_imported} ${result.rows_imported === 1 ? 'row' : 'rows'}: ${result.measurements_created} created and ${result.measurements_updated} updated.`,
+      );
+    } catch (reason) {
+      setBodyCsvError(reason instanceof Error ? reason.message : 'Could not import body weight.');
+    } finally {
+      setImportingBodyCsv(false);
+    }
+  }
+
+  return (
+    <section className="settings-screen content-page">
+      <div className="screen-intro settings-intro">
+        <div>
+          <p className="section-kicker">APP SETTINGS</p>
+          <h1>Data &amp; backups</h1>
+          <p>Manage occasional imports, exports, and sample data in one place.</p>
+        </div>
+      </div>
+
+      <section className="settings-panel panel" aria-labelledby="workout-data-title">
+        <header>
+          <div>
+            <p className="section-kicker">WORKOUTS</p>
+            <h2 id="workout-data-title">Workout data</h2>
+          </div>
+        </header>
+        <p>Import a workout CSV or download a backup of your complete training history.</p>
+        <input
+          ref={workoutCsvInput}
+          className="sr-only"
+          type="file"
+          accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (!file) return;
+            setImportingWorkouts(true);
+            void onImportWorkouts(file).finally(() => {
+              setImportingWorkouts(false);
+              event.target.value = '';
+            });
+          }}
+        />
+        <div className="settings-actions">
+          <button
+            type="button"
+            disabled={importingWorkouts}
+            onClick={() => workoutCsvInput.current?.click()}
+          >
+            {importingWorkouts ? 'Importing…' : '↑ Import workout CSV'}
+          </button>
+          <button type="button" onClick={() => void onExportWorkouts()}>
+            ↓ Export workout CSV
+          </button>
+          {workouts.some((workout) => workout.is_sample) && (
+            <InlineConfirmButton
+              className="sample-clear"
+              label="Remove sample workouts"
+              confirmLabel="Confirm removal"
+              onConfirm={onDeleteSamples}
+            />
+          )}
+        </div>
+      </section>
+
+      <section className="settings-panel panel" aria-labelledby="bodyweight-data-title">
+        <header>
+          <div>
+            <p className="section-kicker">BODYWEIGHT</p>
+            <h2 id="bodyweight-data-title">Bodyweight data</h2>
+          </div>
+        </header>
+        <p>Date and Weight (kg) are required; Body Fat (%) and Notes are optional.</p>
+        <input
+          ref={bodyCsvInput}
+          className="sr-only"
+          type="file"
+          accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values"
+          onChange={(event) => {
+            const file = event.currentTarget.files?.[0];
+            event.currentTarget.value = '';
+            if (file) void importBodyCsv(file);
+          }}
+        />
+        <div className="settings-actions">
+          <button
+            type="button"
+            disabled={importingBodyCsv}
+            onClick={() => bodyCsvInput.current?.click()}
+          >
+            {importingBodyCsv ? 'Importing…' : '↑ Import bodyweight CSV'}
+          </button>
+          <button type="button" disabled={exportingBodyCsv} onClick={() => void exportBodyCsv()}>
+            {exportingBodyCsv ? 'Exporting…' : '↓ Export bodyweight CSV'}
+          </button>
+        </div>
+        {bodyCsvMessage && (
+          <p className="body-csv-status" role="status">
+            {bodyCsvMessage}
+          </p>
+        )}
+        {bodyCsvError && (
+          <p className="inline-error" role="alert">
+            {bodyCsvError}
+          </p>
+        )}
+      </section>
+    </section>
+  );
+}
+
 function BodyCompositionScreen({
   measurements,
   trainingMode,
@@ -4659,11 +5468,6 @@ function BodyCompositionScreen({
   const [editBodyFat, setEditBodyFat] = useState('');
   const [editSaving, setEditSaving] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
-  const bodyCsvInput = useRef<HTMLInputElement>(null);
-  const [importingBodyCsv, setImportingBodyCsv] = useState(false);
-  const [exportingBodyCsv, setExportingBodyCsv] = useState(false);
-  const [bodyCsvMessage, setBodyCsvMessage] = useState<string | null>(null);
-  const [bodyCsvError, setBodyCsvError] = useState<string | null>(null);
   const [checkInPage, setCheckInPage] = useState(1);
   const checkInPageCount = Math.max(1, Math.ceil(measurements.length / HISTORY_PAGE_SIZE));
   const pagedMeasurements = measurements.slice(
@@ -4797,7 +5601,8 @@ function BodyCompositionScreen({
         measurement_date: editingMeasurement.measurement_date,
         weight_kg: weightValue,
         body_fat_pct: bodyFatValue,
-        notes: editingMeasurement.notes,
+        notes:
+          editingMeasurement.notes === IMPORTED_BODYWEIGHT_NOTE ? null : editingMeasurement.notes,
       });
       setEditingMeasurement(null);
     } catch (saveError) {
@@ -4806,51 +5611,6 @@ function BodyCompositionScreen({
       );
     } finally {
       setEditSaving(false);
-    }
-  }
-
-  async function exportBodyCsv() {
-    if (exportingBodyCsv) return;
-    setExportingBodyCsv(true);
-    setBodyCsvError(null);
-    setBodyCsvMessage(null);
-    try {
-      const blob = await api.exportBodyMeasurements();
-      const href = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = href;
-      link.download = `body-weight-${localDate()}.csv`;
-      document.body.append(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(href);
-      setBodyCsvMessage(
-        measurements.length
-          ? `Exported ${measurements.length} body-weight ${measurements.length === 1 ? 'entry' : 'entries'}.`
-          : 'Exported an empty body-weight CSV template.',
-      );
-    } catch (reason) {
-      setBodyCsvError(reason instanceof Error ? reason.message : 'Could not export body weight.');
-    } finally {
-      setExportingBodyCsv(false);
-    }
-  }
-
-  async function importBodyCsv(file: File) {
-    if (importingBodyCsv) return;
-    setImportingBodyCsv(true);
-    setBodyCsvError(null);
-    setBodyCsvMessage(null);
-    try {
-      const result = await api.importBodyMeasurements(file);
-      await onDataChange();
-      setBodyCsvMessage(
-        `Imported ${result.rows_imported} ${result.rows_imported === 1 ? 'row' : 'rows'}: ${result.measurements_created} created and ${result.measurements_updated} updated.`,
-      );
-    } catch (reason) {
-      setBodyCsvError(reason instanceof Error ? reason.message : 'Could not import body weight.');
-    } finally {
-      setImportingBodyCsv(false);
     }
   }
 
@@ -4896,7 +5656,7 @@ function BodyCompositionScreen({
             setEntryOpen(false);
           }}
         >
-         ⌁ Add Goal
+          ⌁ Add Goal
         </button>
       </div>
 
@@ -5053,7 +5813,7 @@ function BodyCompositionScreen({
           </div>
           <BodyTrendChart
             measurements={measurements}
-            goal={activeGoal}
+            goals={goals}
             phases={[...goals, ...phases]}
             currentMode={trainingMode}
           />
@@ -5084,43 +5844,7 @@ function BodyCompositionScreen({
             <p className="section-kicker">HISTORY</p>
             <h2>Check-ins</h2>
           </div>
-          <div className="body-csv-actions">
-            <input
-              ref={bodyCsvInput}
-              type="file"
-              accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values"
-              hidden
-              onChange={(event) => {
-                const file = event.currentTarget.files?.[0];
-                event.currentTarget.value = '';
-                if (file) void importBodyCsv(file);
-              }}
-            />
-            <button
-              type="button"
-              disabled={importingBodyCsv}
-              onClick={() => bodyCsvInput.current?.click()}
-            >
-              {importingBodyCsv ? 'Importing…' : 'Import CSV'}
-            </button>
-            <button type="button" disabled={exportingBodyCsv} onClick={() => void exportBodyCsv()}>
-              {exportingBodyCsv ? 'Exporting…' : 'Export CSV'}
-            </button>
-          </div>
         </div>
-        <p className="body-csv-format">
-          Date and Weight (kg); Body Fat (%) and Notes are optional.
-        </p>
-        {bodyCsvMessage && (
-          <p className="body-csv-status" role="status">
-            {bodyCsvMessage}
-          </p>
-        )}
-        {bodyCsvError && (
-          <p className="inline-error" role="alert">
-            {bodyCsvError}
-          </p>
-        )}
         {!measurements.length && (
           <p className="body-empty">Your first check-in will appear here.</p>
         )}
@@ -5244,12 +5968,12 @@ function BodyCompositionScreen({
 
 function BodyTrendChart({
   measurements,
-  goal,
+  goals,
   phases,
   currentMode,
 }: {
   measurements: BodyMeasurement[];
-  goal: BodyWeightGoal | null;
+  goals: BodyWeightGoal[];
   phases: Array<Pick<TrainingPhase, 'start_date' | 'mode'>>;
   currentMode: TrainingMode;
 }) {
@@ -5267,6 +5991,22 @@ function BodyTrendChart({
   const bottom = 34;
   const weightValues = ordered.map((item) => item.weight_kg);
   const fatValues = ordered.map((item) => item.body_fat_pct);
+  const dateTime = (value: string) => new Date(`${value}T12:00:00`).getTime();
+  const firstMeasurementTime = dateTime(ordered[0].measurement_date);
+  const relevantGoals = goals
+    .filter((item) => item.active || dateTime(item.target_date) >= firstMeasurementTime)
+    .sort((first, second) => dateTime(first.target_date) - dateTime(second.target_date));
+  const domainTimes = [
+    ...ordered.map((item) => dateTime(item.measurement_date)),
+    ...relevantGoals.flatMap((item) => [dateTime(item.start_date), dateTime(item.target_date)]),
+  ];
+  const domainStart = Math.min(...domainTimes);
+  const domainEnd = Math.max(...domainTimes);
+  const domainSpan = Math.max(domainEnd - domainStart, 1);
+  const xForTime = (value: number) =>
+    left +
+    ((Math.min(domainEnd, Math.max(domainStart, value)) - domainStart) / domainSpan) *
+      (width - left - right);
 
   function range(values: Array<number | null>): { min: number; max: number } | null {
     const present = values.filter((value): value is number => value !== null);
@@ -5277,19 +6017,23 @@ function BodyTrendChart({
     return { min: rawMin - spread * 0.15, max: rawMax + spread * 0.15 };
   }
 
-  const weightRange = range(goal ? [...weightValues, goal.target_weight_kg] : weightValues)!;
+  const weightRange = range([
+    ...weightValues,
+    ...relevantGoals.flatMap((item) => [item.start_weight_kg, item.target_weight_kg]),
+  ])!;
   const fatRange = range(fatValues);
   const weightVisible = showWeight || fatRange === null;
   const bodyFatVisible = showBodyFat && fatRange !== null;
+  const displaySeries = weightVisible && bodyFatVisible ? 'both' : weightVisible ? 'weight' : 'fat';
   const weightPoints = weightValues.map((value, index) => {
-    const x = left + (index / Math.max(ordered.length - 1, 1)) * (width - left - right);
+    const x = xForTime(dateTime(ordered[index].measurement_date));
     const ratio = (value - weightRange.min) / Math.max(weightRange.max - weightRange.min, 1);
     const y = height - bottom - ratio * (height - top - bottom);
     return { date: ordered[index].measurement_date, x, y };
   });
   const fatPoints = fatValues.map((value, index) => {
     if (value === null || fatRange === null) return null;
-    const x = left + (index / Math.max(ordered.length - 1, 1)) * (width - left - right);
+    const x = xForTime(dateTime(ordered[index].measurement_date));
     const ratio = (value - fatRange.min) / Math.max(fatRange.max - fatRange.min, 1);
     const y = height - bottom - ratio * (height - top - bottom);
     return { x, y };
@@ -5301,7 +6045,7 @@ function BodyTrendChart({
   const fallbackMode = phases.length ? 'maintenance' : currentMode;
   const weightSegments = splitWeightLineByPhase(weightPoints, phases, fallbackMode);
   const yFractions = [0, 0.5, 1];
-  const xIndexes = [...new Set([0, Math.floor((ordered.length - 1) / 2), ordered.length - 1])];
+  const xTicks = [...new Set([domainStart, domainStart + domainSpan / 2, domainEnd])];
   const activeMeasurement = activePointIndex === null ? null : (ordered[activePointIndex] ?? null);
   const activeWeightPoint =
     activePointIndex === null ? null : (weightPoints[activePointIndex] ?? null);
@@ -5333,7 +6077,12 @@ function BodyTrendChart({
     if (bounds.width === 0) return;
     const chartX = ((clientX - bounds.left) / bounds.width) * width;
     if (weightVisible) {
-      setActivePointIndex(nearestChartPointIndex(chartX, left, width - right, ordered.length));
+      const nearestWeightIndex = weightPoints.reduce(
+        (nearest, point, index) =>
+          Math.abs(point.x - chartX) < Math.abs(weightPoints[nearest].x - chartX) ? index : nearest,
+        0,
+      );
+      setActivePointIndex(nearestWeightIndex);
       return;
     }
     const bodyFatIndexes = fatPoints.flatMap((point, index) => (point ? [index] : []));
@@ -5348,276 +6097,308 @@ function BodyTrendChart({
   }
 
   return (
-    <div className="body-chart">
-      <div className="body-chart-controls">
-        <span>
-          {ordered.length} {ordered.length === 1 ? 'check-in' : 'check-ins'} shown
-        </span>
-        <div role="group" aria-label="Body-composition graph range">
-          {(
-            [
-              ['3m', '3 months'],
-              ['9m', '9 months'],
-              ['1y', '1 year'],
-              ['all', 'All time'],
-            ] as Array<[BodyTrendRange, string]>
-          ).map(([value, label]) => (
-            <button
-              type="button"
-              className={displayRange === value ? 'active' : ''}
-              aria-pressed={displayRange === value}
-              onClick={() => {
-                setDisplayRange(value);
+    <LandscapeChartFrame
+      title="Body composition trend"
+      controls={
+        <>
+          <label className="chart-option-field">
+            <span>Range</span>
+            <select
+              aria-label="Body-composition graph range"
+              value={displayRange}
+              onChange={(event) => {
+                setDisplayRange(event.target.value as BodyTrendRange);
                 setActivePointIndex(null);
               }}
-              key={value}
             >
-              {label}
-            </button>
-          ))}
-        </div>
-      </div>
-      <div className="body-chart-series-controls" role="group" aria-label="Graph measurements">
-        <span>Display</span>
-        <button
-          type="button"
-          className={weightVisible ? 'active' : ''}
-          aria-pressed={weightVisible}
-          disabled={weightVisible && !bodyFatVisible}
-          onClick={() => {
-            setShowWeight((visible) => !visible);
-            setActivePointIndex(null);
-          }}
-        >
-          <i className="weight-series-swatch" />
-          Body weight
-        </button>
-        <button
-          type="button"
-          className={bodyFatVisible ? 'active' : ''}
-          aria-pressed={bodyFatVisible}
-          disabled={fatRange === null || (bodyFatVisible && !weightVisible)}
-          onClick={() => {
-            setShowBodyFat((visible) => !visible);
-            setActivePointIndex(null);
-          }}
-        >
-          <i className="fat-series-swatch" />
-          Body fat
-        </button>
-      </div>
-      <svg
-        viewBox={`0 0 ${width} ${height}`}
-        role="img"
-        aria-label="Body composition trend. Drag horizontally to inspect each check-in. Weight is blue for a cut, green for maintenance, and red for a bulk."
-        onPointerDown={(event) => {
-          event.currentTarget.setPointerCapture(event.pointerId);
-          selectPointAtClientX(event.clientX, event.currentTarget);
-        }}
-        onPointerMove={(event) => {
-          if (
-            event.pointerType === 'mouse' ||
-            event.currentTarget.hasPointerCapture(event.pointerId)
-          ) {
+              <option value="1m">1 month</option>
+              <option value="3m">3 months</option>
+              <option value="9m">9 months</option>
+              <option value="1y">1 year</option>
+              <option value="all">All time</option>
+            </select>
+          </label>
+          <label className="chart-option-field">
+            <span>Display</span>
+            <select
+              aria-label="Measurements shown on body-composition graph"
+              value={displaySeries}
+              onChange={(event) => {
+                const nextDisplay = event.target.value;
+                setShowWeight(nextDisplay !== 'fat');
+                setShowBodyFat(nextDisplay !== 'weight');
+                setActivePointIndex(null);
+              }}
+            >
+              <option value="both" disabled={fatRange === null}>
+                Weight + body fat
+              </option>
+              <option value="weight">Body weight</option>
+              <option value="fat" disabled={fatRange === null}>
+                Body fat
+              </option>
+            </select>
+          </label>
+        </>
+      }
+    >
+      <div className="body-chart">
+        <span className="body-chart-count">
+          {ordered.length} {ordered.length === 1 ? 'check-in' : 'check-ins'} shown
+        </span>
+        <svg
+          viewBox={`0 0 ${width} ${height}`}
+          role="img"
+          aria-label="Body composition trend with dated bodyweight goal paths. Drag horizontally to inspect each check-in."
+          onPointerDown={(event) => {
+            event.currentTarget.setPointerCapture(event.pointerId);
             selectPointAtClientX(event.clientX, event.currentTarget);
-          }
-        }}
-        onPointerUp={(event) => {
-          if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-            event.currentTarget.releasePointerCapture(event.pointerId);
-          }
-        }}
-        onPointerCancel={() => setActivePointIndex(null)}
-        onPointerLeave={(event) => {
-          if (event.pointerType === 'mouse') setActivePointIndex(null);
-        }}
-      >
-        {yFractions.map((fraction) => {
-          const y = height - bottom - fraction * (height - top - bottom);
-          const weightTick = weightRange.min + fraction * (weightRange.max - weightRange.min);
-          const fatTick = fatRange ? fatRange.min + fraction * (fatRange.max - fatRange.min) : null;
-          return (
-            <g className="chart-axis" key={fraction}>
-              <line x1={left} x2={width - right} y1={y} y2={y} />
-              {weightVisible && (
-                <text x={left - 5} y={y + 3} textAnchor="end">
-                  {weightTick.toFixed(1)}
-                </text>
-              )}
-              {bodyFatVisible && fatTick !== null && (
-                <text className="fat-axis-label" x={width - right + 5} y={y + 3} textAnchor="start">
-                  {fatTick.toFixed(1)}
-                </text>
-              )}
-            </g>
-          );
-        })}
-        <line className="chart-axis-line" x1={left} x2={left} y1={top} y2={height - bottom} />
-        <line
-          className="chart-axis-line"
-          x1={left}
-          x2={width - right}
-          y1={height - bottom}
-          y2={height - bottom}
-        />
-        {weightVisible &&
-          weightSegments.map((segment, index) => (
-            <line
-              className={`weight-segment phase-${segment.mode}`}
-              key={`${segment.x1}-${segment.x2}-${index}`}
-              x1={segment.x1}
-              y1={segment.y1}
-              x2={segment.x2}
-              y2={segment.y2}
-            />
-          ))}
-        {weightVisible &&
-          weightPoints.map((point) => {
-            const mode = trainingPhaseAtDate(point.date, phases, fallbackMode);
+          }}
+          onPointerMove={(event) => {
+            if (
+              event.pointerType === 'mouse' ||
+              event.currentTarget.hasPointerCapture(event.pointerId)
+            ) {
+              selectPointAtClientX(event.clientX, event.currentTarget);
+            }
+          }}
+          onPointerUp={(event) => {
+            if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+              event.currentTarget.releasePointerCapture(event.pointerId);
+            }
+          }}
+          onPointerCancel={() => setActivePointIndex(null)}
+          onPointerLeave={(event) => {
+            if (event.pointerType === 'mouse') setActivePointIndex(null);
+          }}
+        >
+          {yFractions.map((fraction) => {
+            const y = height - bottom - fraction * (height - top - bottom);
+            const weightTick = weightRange.min + fraction * (weightRange.max - weightRange.min);
+            const fatTick = fatRange
+              ? fatRange.min + fraction * (fatRange.max - fatRange.min)
+              : null;
             return (
-              <circle
-                className={`weight-point phase-${mode}`}
-                key={point.date}
-                cx={point.x}
-                cy={point.y}
-                r="2.8"
-              />
+              <g className="chart-axis" key={fraction}>
+                <line x1={left} x2={width - right} y1={y} y2={y} />
+                {weightVisible && (
+                  <text x={left - 5} y={y + 3} textAnchor="end">
+                    {weightTick.toFixed(1)}
+                  </text>
+                )}
+                {bodyFatVisible && fatTick !== null && (
+                  <text
+                    className="fat-axis-label"
+                    x={width - right + 5}
+                    y={y + 3}
+                    textAnchor="start"
+                  >
+                    {fatTick.toFixed(1)}
+                  </text>
+                )}
+              </g>
             );
           })}
-        {weightVisible &&
-          goal &&
-          (() => {
-            const ratio =
-              (goal.target_weight_kg - weightRange.min) /
-              Math.max(weightRange.max - weightRange.min, 1);
-            const y = height - bottom - ratio * (height - top - bottom);
+          <line className="chart-axis-line" x1={left} x2={left} y1={top} y2={height - bottom} />
+          <line
+            className="chart-axis-line"
+            x1={left}
+            x2={width - right}
+            y1={height - bottom}
+            y2={height - bottom}
+          />
+          {weightVisible &&
+            weightSegments.map((segment, index) => (
+              <line
+                className={`weight-segment phase-${segment.mode}`}
+                key={`${segment.x1}-${segment.x2}-${index}`}
+                x1={segment.x1}
+                y1={segment.y1}
+                x2={segment.x2}
+                y2={segment.y2}
+              />
+            ))}
+          {weightVisible &&
+            weightPoints.map((point) => {
+              const mode = trainingPhaseAtDate(point.date, phases, fallbackMode);
+              return (
+                <circle
+                  className={`weight-point phase-${mode}`}
+                  key={point.date}
+                  cx={point.x}
+                  cy={point.y}
+                  r="2.8"
+                />
+              );
+            })}
+          {weightVisible &&
+            relevantGoals.map((goal, index) => {
+              const startRatio =
+                (goal.start_weight_kg - weightRange.min) /
+                Math.max(weightRange.max - weightRange.min, 1);
+              const targetRatio =
+                (goal.target_weight_kg - weightRange.min) /
+                Math.max(weightRange.max - weightRange.min, 1);
+              const startX = xForTime(dateTime(goal.start_date));
+              const targetX = xForTime(dateTime(goal.target_date));
+              const startY = height - bottom - startRatio * (height - top - bottom);
+              const targetY = height - bottom - targetRatio * (height - top - bottom);
+              const labelAtEnd = targetX > width - right - 82;
+              const labelY = Math.max(
+                top + 7,
+                Math.min(height - bottom - 4, targetY - 5 - (index % 2) * 7),
+              );
+              return (
+                <g
+                  className={`goal-trajectory ${goal.active ? 'active' : 'archived'}`}
+                  key={goal.id}
+                >
+                  <line x1={startX} y1={startY} x2={targetX} y2={targetY} />
+                  <circle className="goal-start-point" cx={startX} cy={startY} r="2.5" />
+                  <circle className="goal-target-point" cx={targetX} cy={targetY} r="3" />
+                  <text
+                    className="goal-line-label"
+                    x={targetX + (labelAtEnd ? -4 : 4)}
+                    y={labelY}
+                    textAnchor={labelAtEnd ? 'end' : 'start'}
+                  >
+                    Goal {goal.target_weight_kg} kg
+                  </text>
+                </g>
+              );
+            })}
+          {bodyFatVisible && <polyline className="fat-line" points={fatLinePoints} />}
+          {bodyFatVisible &&
+            fatPoints.map((point, index) =>
+              point ? (
+                <circle
+                  className="fat-point"
+                  key={ordered[index].measurement_date}
+                  cx={point.x}
+                  cy={point.y}
+                  r="2.8"
+                />
+              ) : null,
+            )}
+          {xTicks.map((tick, index) => {
+            const x = xForTime(tick);
             return (
-              <>
-                <line className="goal-line" x1={left} x2={width - right} y1={y} y2={y} />
-                <text className="goal-line-label" x={width - right} y={y - 4} textAnchor="end">
-                  Goal {goal.target_weight_kg} kg
-                </text>
-              </>
-            );
-          })()}
-        {bodyFatVisible && <polyline className="fat-line" points={fatLinePoints} />}
-        {bodyFatVisible &&
-          fatPoints.map((point, index) =>
-            point ? (
-              <circle
-                className="fat-point"
-                key={ordered[index].measurement_date}
-                cx={point.x}
-                cy={point.y}
-                r="2.8"
-              />
-            ) : null,
-          )}
-        {xIndexes.map((index) => {
-          const x = left + (index / Math.max(ordered.length - 1, 1)) * (width - left - right);
-          return (
-            <text
-              className="chart-x-label"
-              key={index}
-              x={x}
-              y={height - 11}
-              textAnchor={index === 0 ? 'start' : index === ordered.length - 1 ? 'end' : 'middle'}
-            >
-              {new Date(`${ordered[index].measurement_date}T12:00:00`).toLocaleDateString(
-                undefined,
-                {
+              <text
+                className="chart-x-label"
+                key={tick}
+                x={x}
+                y={height - 11}
+                textAnchor={index === 0 ? 'start' : index === xTicks.length - 1 ? 'end' : 'middle'}
+              >
+                {new Date(tick).toLocaleDateString(undefined, {
                   month: 'short',
-                  day: 'numeric',
-                },
-              )}
-            </text>
-          );
-        })}
-        {weightVisible && (
-          <text className="chart-y-title weight-axis-title" x="4" y="11">
-            Weight kg
-          </text>
-        )}
-        {bodyFatVisible && fatRange && (
-          <text className="chart-y-title fat-axis-title" x={width - 3} y="11" textAnchor="end">
-            Body fat %
-          </text>
-        )}
-        {activeMeasurement && activeWeightPoint && activeMode && (
-          <g className="body-chart-selection" aria-hidden="true">
-            <line
-              className="selection-guide"
-              x1={activeWeightPoint.x}
-              x2={activeWeightPoint.x}
-              y1={top}
-              y2={height - bottom}
-            />
-            {weightVisible && (
-              <circle
-                className={`selected-weight-point phase-${activeMode}`}
-                cx={activeWeightPoint.x}
-                cy={activeWeightPoint.y}
-                r="5"
-              />
-            )}
-            {bodyFatVisible && activeFatPoint && (
-              <circle
-                className="selected-fat-point"
-                cx={activeFatPoint.x}
-                cy={activeFatPoint.y}
-                r="4.5"
-              />
-            )}
-            <g className="measurement-tooltip">
-              <rect x={tooltipX} y={tooltipY} width={tooltipWidth} height={tooltipHeight} rx="6" />
-              <text x={tooltipX + 8} y={tooltipY + 12}>
-                <tspan className="tooltip-date">
-                  {new Date(`${activeMeasurement.measurement_date}T12:00:00`).toLocaleDateString(
-                    undefined,
-                    { month: 'short', day: 'numeric', year: 'numeric' },
-                  )}
-                </tspan>
-                {weightVisible && (
-                  <tspan className={`tooltip-weight phase-${activeMode}`} x={tooltipX + 8} dy="11">
-                    {activeMeasurement.weight_kg} kg
-                  </tspan>
-                )}
-                {bodyFatVisible && activeMeasurement.body_fat_pct !== null && (
-                  <tspan className="tooltip-fat" x={tooltipX + 8} dy="10">
-                    {activeMeasurement.body_fat_pct}% body fat
-                  </tspan>
-                )}
+                  day: domainSpan > 1000 * 60 * 60 * 24 * 370 ? undefined : 'numeric',
+                  year: domainSpan > 1000 * 60 * 60 * 24 * 370 ? '2-digit' : undefined,
+                })}
               </text>
+            );
+          })}
+          {weightVisible && (
+            <text className="chart-y-title weight-axis-title" x="4" y="11">
+              Weight kg
+            </text>
+          )}
+          {bodyFatVisible && fatRange && (
+            <text className="chart-y-title fat-axis-title" x={width - 3} y="11" textAnchor="end">
+              Body fat %
+            </text>
+          )}
+          {activeMeasurement && activeWeightPoint && activeMode && (
+            <g className="body-chart-selection" aria-hidden="true">
+              <line
+                className="selection-guide"
+                x1={activeWeightPoint.x}
+                x2={activeWeightPoint.x}
+                y1={top}
+                y2={height - bottom}
+              />
+              {weightVisible && (
+                <circle
+                  className={`selected-weight-point phase-${activeMode}`}
+                  cx={activeWeightPoint.x}
+                  cy={activeWeightPoint.y}
+                  r="5"
+                />
+              )}
+              {bodyFatVisible && activeFatPoint && (
+                <circle
+                  className="selected-fat-point"
+                  cx={activeFatPoint.x}
+                  cy={activeFatPoint.y}
+                  r="4.5"
+                />
+              )}
+              <g className="measurement-tooltip">
+                <rect
+                  x={tooltipX}
+                  y={tooltipY}
+                  width={tooltipWidth}
+                  height={tooltipHeight}
+                  rx="6"
+                />
+                <text x={tooltipX + 8} y={tooltipY + 12}>
+                  <tspan className="tooltip-date">
+                    {new Date(`${activeMeasurement.measurement_date}T12:00:00`).toLocaleDateString(
+                      undefined,
+                      { month: 'short', day: 'numeric', year: 'numeric' },
+                    )}
+                  </tspan>
+                  {weightVisible && (
+                    <tspan
+                      className={`tooltip-weight phase-${activeMode}`}
+                      x={tooltipX + 8}
+                      dy="11"
+                    >
+                      {activeMeasurement.weight_kg} kg
+                    </tspan>
+                  )}
+                  {bodyFatVisible && activeMeasurement.body_fat_pct !== null && (
+                    <tspan className="tooltip-fat" x={tooltipX + 8} dy="10">
+                      {activeMeasurement.body_fat_pct}% body fat
+                    </tspan>
+                  )}
+                </text>
+              </g>
             </g>
-          </g>
-        )}
-      </svg>
-      <p className="sr-only" aria-live="polite">
-        {activeMeasurement
-          ? `${prettyDate(activeMeasurement.measurement_date)}: ${weightVisible ? `${activeMeasurement.weight_kg} kilograms` : ''}${weightVisible && bodyFatVisible ? ', ' : ''}${bodyFatVisible && activeMeasurement.body_fat_pct !== null ? `${activeMeasurement.body_fat_pct} percent body fat` : ''}`
-          : ''}
-      </p>
-      <div className="body-chart-legend" aria-label="Chart legend">
-        {weightVisible && (
-          <>
+          )}
+        </svg>
+        <p className="sr-only" aria-live="polite">
+          {activeMeasurement
+            ? `${prettyDate(activeMeasurement.measurement_date)}: ${weightVisible ? `${activeMeasurement.weight_kg} kilograms` : ''}${weightVisible && bodyFatVisible ? ', ' : ''}${bodyFatVisible && activeMeasurement.body_fat_pct !== null ? `${activeMeasurement.body_fat_pct} percent body fat` : ''}`
+            : ''}
+        </p>
+        <div className="body-chart-legend" aria-label="Chart legend">
+          {weightVisible && (
+            <>
+              <span>
+                <i className="phase-cut" /> Cut
+              </span>
+              <span>
+                <i className="phase-maintenance" /> Maintenance
+              </span>
+              <span>
+                <i className="phase-bulk" /> Bulk
+              </span>
+            </>
+          )}
+          {bodyFatVisible && (
             <span>
-              <i className="phase-cut" /> Cut
+              <i className="fat" /> Body fat
             </span>
+          )}
+          {weightVisible && relevantGoals.length > 0 && (
             <span>
-              <i className="phase-maintenance" /> Maintenance
+              <i className="goal" /> Goal path
             </span>
-            <span>
-              <i className="phase-bulk" /> Bulk
-            </span>
-          </>
-        )}
-        {bodyFatVisible && (
-          <span>
-            <i className="fat" /> Body fat
-          </span>
-        )}
+          )}
+        </div>
       </div>
-    </div>
+    </LandscapeChartFrame>
   );
 }
 
@@ -5873,15 +6654,17 @@ function HistoryScreen({
   currentBodyweight,
   onEdit,
   onDelete,
-  onImport,
-  onExport,
-  onDeleteSamples,
   personalRecords,
   onDataChange,
   initialOpenId,
   initialSection,
   initialExerciseId,
+  heatmap,
+  activeWorkout,
+  activeWorkoutDate,
+  onResumeWorkout,
   onStartWorkout,
+  onReplaceActiveWorkout,
 }: {
   workouts: TrackedWorkout[];
   measurements: BodyMeasurement[];
@@ -5889,15 +6672,17 @@ function HistoryScreen({
   currentBodyweight: number | null;
   onEdit: (workout: TrackedWorkout) => void;
   onDelete: (workout: TrackedWorkout) => void;
-  onImport: (file: File) => Promise<void>;
-  onExport: () => Promise<void>;
-  onDeleteSamples: () => Promise<void>;
   personalRecords: PersonalRecord[];
   onDataChange: () => Promise<void>;
   initialOpenId: string | null;
   initialSection: 'history' | 'progress' | 'cardio';
   initialExerciseId: string | null;
-  onStartWorkout: () => void;
+  heatmap: DashboardData['heatmap'];
+  activeWorkout: boolean;
+  activeWorkoutDate: string | null;
+  onResumeWorkout: () => void;
+  onStartWorkout: (workoutDate?: string) => void;
+  onReplaceActiveWorkout: (workoutDate: string) => void;
 }) {
   const initialWorkoutIndex = initialOpenId
     ? workouts.findIndex((workout) => workout.id === initialOpenId)
@@ -5907,9 +6692,12 @@ function HistoryScreen({
     initialWorkoutIndex >= 0 ? Math.floor(initialWorkoutIndex / HISTORY_PAGE_SIZE) + 1 : 1,
   );
   const [section, setSection] = useState<'history' | 'progress' | 'cardio'>(initialSection);
-  const [importing, setImporting] = useState(false);
+  const [selectedExerciseId, setSelectedExerciseId] = useState<string | null>(initialExerciseId);
+  const [selectedCalendarDay, setSelectedCalendarDay] = useState<
+    DashboardData['heatmap'][number] | null
+  >(null);
+  const [pendingWorkoutDate, setPendingWorkoutDate] = useState<string | null>(null);
   const [expandedPhoto, setExpandedPhoto] = useState<MachinePhoto | null>(null);
-  const fileInput = useRef<HTMLInputElement>(null);
   const workoutPageCount = Math.max(1, Math.ceil(workouts.length / HISTORY_PAGE_SIZE));
   const pagedWorkouts = workouts.slice(
     (workoutPage - 1) * HISTORY_PAGE_SIZE,
@@ -5947,7 +6735,7 @@ function HistoryScreen({
           exercises={exercises}
           currentBodyweight={currentBodyweight}
           embedded
-          initialExerciseId={initialExerciseId}
+          initialExerciseId={selectedExerciseId}
         />
       ) : section === 'cardio' ? (
         <CardioScreen onDataChange={onDataChange} />
@@ -5959,38 +6747,33 @@ function HistoryScreen({
               <h1>Workout history</h1>
             </div>
             <div className="data-actions">
-              <button className="history-add-workout" type="button" onClick={onStartWorkout}>
+              <button
+                className="history-add-workout"
+                type="button"
+                onClick={() => onStartWorkout()}
+              >
                 ＋ Add Workout
               </button>
-              <button onClick={() => fileInput.current?.click()} disabled={importing}>
-                {importing ? 'Importing…' : '↑ Import CSV'}
-              </button>
-              <button onClick={() => void onExport()}>↓ Export CSV</button>
-              {workouts.some((workout) => workout.is_sample) && (
-                <InlineConfirmButton
-                  className="sample-clear"
-                  label="Remove samples"
-                  confirmLabel="Confirm removal"
-                  onConfirm={onDeleteSamples}
-                />
-              )}
-              <input
-                ref={fileInput}
-                className="sr-only"
-                type="file"
-                accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values"
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  if (!file) return;
-                  setImporting(true);
-                  void onImport(file).finally(() => {
-                    setImporting(false);
-                    event.target.value = '';
-                  });
-                }}
-              />
             </div>
           </div>
+          <section className="history-calendar-panel panel" aria-label="Workout calendar">
+            <div className="panel-heading">
+              <div>
+                <p className="section-kicker">CALENDAR</p>
+                <h2>Workout dates</h2>
+              </div>
+              <small>Swipe for earlier months</small>
+            </div>
+            <WorkoutHeatmap
+              entries={heatmap}
+              activeWorkoutDate={activeWorkoutDate}
+              onActiveWorkoutClick={onResumeWorkout}
+              onDayClick={(workoutDate, entry) => {
+                if (entry) setSelectedCalendarDay(entry);
+                else setPendingWorkoutDate(workoutDate);
+              }}
+            />
+          </section>
           {!workouts.length && (
             <EmptyState
               title="Your log is empty"
@@ -6061,7 +6844,16 @@ function HistoryScreen({
                     {workout.movements.map((movement) => (
                       <div className="history-movement" key={movement.id}>
                         <strong>
-                          {movement.exercise.name}
+                          <button
+                            type="button"
+                            className="history-exercise-link"
+                            onClick={() => {
+                              setSelectedExerciseId(movement.exercise.id);
+                              setSection('progress');
+                            }}
+                          >
+                            {movement.exercise.name}
+                          </button>
                           {workoutBodyweight !== null && ` @ ${workoutBodyweight} kg`}
                         </strong>
                         {movement.machine_photos.length > 0 && (
@@ -6144,6 +6936,35 @@ function HistoryScreen({
             label="workout history"
           />
         </>
+      )}
+      {section === 'history' && selectedCalendarDay && (
+        <CalendarDayDetail
+          day={selectedCalendarDay}
+          onClose={() => setSelectedCalendarDay(null)}
+          onStartWorkout={(workoutDate) => {
+            setSelectedCalendarDay(null);
+            setPendingWorkoutDate(workoutDate);
+          }}
+          onEditWorkout={(workoutId) => {
+            const workout = workouts.find((item) => item.id === workoutId);
+            if (!workout) return;
+            setSelectedCalendarDay(null);
+            onEdit(workout);
+          }}
+        />
+      )}
+      {section === 'history' && pendingWorkoutDate && (
+        <CalendarCreateWorkoutDialog
+          workoutDate={pendingWorkoutDate}
+          activeWorkout={activeWorkout}
+          onCancel={() => setPendingWorkoutDate(null)}
+          onConfirm={() => {
+            const workoutDate = pendingWorkoutDate;
+            setPendingWorkoutDate(null);
+            if (activeWorkout) onReplaceActiveWorkout(workoutDate);
+            else onStartWorkout(workoutDate);
+          }}
+        />
       )}
     </section>
   );

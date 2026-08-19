@@ -16,6 +16,24 @@ export function workoutNameForCategory(category: WorkoutCategory): string {
   return automaticWorkoutNames[category];
 }
 
+export function finalizeWorkoutIdentity(
+  exercises: CategorizedExercise[],
+  currentCategory: WorkoutCategory,
+  currentName: string,
+  inferFromExercises: boolean,
+): { category: WorkoutCategory; name: string } {
+  const category = inferFromExercises
+    ? (inferWorkoutCategory(exercises) ?? currentCategory)
+    : currentCategory;
+  const trimmedName = currentName.trim();
+  const hasAutomaticName =
+    trimmedName === '' || trimmedName === workoutNameForCategory(currentCategory);
+  return {
+    category,
+    name: hasAutomaticName ? workoutNameForCategory(category) : trimmedName,
+  };
+}
+
 function focusedUpperCategory(counts: Record<WorkoutCategory, number>): WorkoutCategory {
   const push = counts.push;
   const pull = counts.pull;

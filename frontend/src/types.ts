@@ -155,6 +155,14 @@ export interface TrackedWorkout {
   movements: TrackedMovement[];
 }
 
+export interface WorkoutCacheRevision {
+  revision: string;
+}
+
+export interface WorkoutSnapshot extends WorkoutCacheRevision {
+  workouts: TrackedWorkout[];
+}
+
 export interface WorkoutSetInput {
   reps: number | null;
   weight_kg: number | null;
@@ -285,6 +293,7 @@ export interface DashboardData {
   sets_this_week: number;
   volume_this_week_kg: number;
   current_streak: number;
+  total_cardio_sessions: number;
   heatmap: HeatmapDay[];
   weekly_days: WeeklyDayBreakdown[];
   recommendation: WorkoutRecommendation;
@@ -396,5 +405,7 @@ export interface CsvImportResult {
   workouts_created: number;
   exercises_created: number;
   sets_imported: number;
+  body_measurements_created: number;
+  body_measurements_updated: number;
   warnings: string[];
 }

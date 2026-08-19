@@ -38,6 +38,7 @@ const draft: ActiveWorkoutDraft = {
       notes: 'Pause reps',
       machinePhotoIds: ['photo-1'],
       supersetKey: null,
+      isComplete: true,
       sets: [
         {
           key: 'set-1',

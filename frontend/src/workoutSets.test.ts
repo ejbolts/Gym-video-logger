@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { Exercise, TrackedSet, TrackedWorkout, WorkoutSetInput } from './types';
-import { createWorkoutSet, isCompletedWorkingSet, latestExerciseSet } from './workoutSets';
+import {
+  createWorkoutSet,
+  createSuggestedWorkoutSet,
+  isCompletedWorkingSet,
+  latestExerciseSet,
+  latestExerciseSets,
+} from './workoutSets';
 
 const previousSet: WorkoutSetInput = {
   reps: 8,
@@ -24,7 +30,13 @@ describe('new workout sets', () => {
   });
 
   it('use the standard rest time for the first set', () => {
-    expect(createWorkoutSet('strength').rest_seconds).toBe(120);
+    expect(createWorkoutSet('strength').rest_seconds).toBe(180);
+  });
+
+  it('uses three minutes for a set suggested from the previous workout', () => {
+    expect(
+      createSuggestedWorkoutSet('strength', { ...previousSet, rest_seconds: 120 }).rest_seconds,
+    ).toBe(180);
   });
 
   it('defaults the first set to a warm-up', () => {
@@ -38,6 +50,22 @@ describe('new workout sets', () => {
     const firstSet = createWorkoutSet('strength', previousSet, true);
 
     expect(firstSet).toMatchObject({
+      weight_kg: 80,
+      reps: 8,
+      set_type: 'warmup',
+      warmup: true,
+      completed: false,
+    });
+  });
+
+  it('preserves a previous warm-up when cloning the prior session set order', () => {
+    const clonedSet = createWorkoutSet(
+      'strength',
+      { ...previousSet, set_type: 'warmup', warmup: true },
+      false,
+    );
+
+    expect(clonedSet).toMatchObject({
       weight_kg: 80,
       reps: 8,
       set_type: 'warmup',
@@ -134,6 +162,21 @@ describe('previous exercise values', () => {
     expect(latestExerciseSet([older, latest], exercise.id, '2026-07-09')?.weight_kg).toBe(50);
   });
 
+  it('returns every completed set from the latest matching workout in set order', () => {
+    const older = workout('older', '2026-07-01', '2026-07-01T09:00:00Z', [
+      trackedSet('older-set', 0, 40),
+    ]);
+    const latest = workout('latest', '2026-07-08', '2026-07-08T09:00:00Z', [
+      trackedSet('latest-working', 1, 80),
+      { ...trackedSet('latest-incomplete', 2, 85), completed: false },
+      trackedSet('latest-warmup', 0, 50),
+    ]);
+
+    expect(
+      latestExerciseSets([older, latest], exercise.id, '2026-07-09').map((set) => set.id),
+    ).toEqual(['latest-warmup', 'latest-working']);
+  });
+
   it('ignores the workout being edited and workouts after the selected date', () => {
     const current = workout('current', '2026-07-08', '2026-07-08T09:00:00Z', [
       trackedSet('current-set', 0, 60),
@@ -154,9 +197,7 @@ describe('previous exercise values', () => {
 
 describe('completed working sets', () => {
   it('does not count completed warm-ups', () => {
-    expect(
-      isCompletedWorkingSet({ ...previousSet, set_type: 'warmup', warmup: true }),
-    ).toBe(false);
+    expect(isCompletedWorkingSet({ ...previousSet, set_type: 'warmup', warmup: true })).toBe(false);
   });
 
   it('counts completed normal and drop sets', () => {

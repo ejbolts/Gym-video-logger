@@ -201,6 +201,14 @@ class TrainingWorkoutRead(BaseModel):
     movements: list[WorkoutMovementRead] = []
 
 
+class WorkoutCacheRevisionRead(BaseModel):
+    revision: str
+
+
+class WorkoutSnapshotRead(WorkoutCacheRevisionRead):
+    workouts: list[TrainingWorkoutRead]
+
+
 class CalendarExerciseRead(BaseModel):
     exercise_name: str
     set_count: int
@@ -427,6 +435,7 @@ class DashboardRead(BaseModel):
     sets_this_week: int
     volume_this_week_kg: float
     current_streak: int
+    total_cardio_sessions: int
     heatmap: list[HeatmapDay]
     weekly_days: list[WeeklyDayBreakdown]
     recommendation: WorkoutRecommendationRead
@@ -458,4 +467,6 @@ class CsvImportRead(BaseModel):
     workouts_created: int
     exercises_created: int
     sets_imported: int
+    body_measurements_created: int
+    body_measurements_updated: int
     warnings: list[str]

@@ -1,6 +1,9 @@
 import type { Exercise, WorkoutSetInput } from './types';
 
-export type WorkoutDraftSet = WorkoutSetInput & { key: string };
+export type WorkoutDraftSet = WorkoutSetInput & {
+  key: string;
+  fromPrevious?: boolean;
+};
 
 export type WorkoutDraftMovement = {
   key: string;
@@ -9,6 +12,7 @@ export type WorkoutDraftMovement = {
   machinePhotoIds: string[];
   machinePhotosInitialized: boolean;
   supersetKey: string | null;
+  isComplete: boolean;
   sets: WorkoutDraftSet[];
 };
 
@@ -24,6 +28,7 @@ export function replaceMovementExercise(
           exercise,
           machinePhotoIds: [],
           machinePhotosInitialized: false,
+          isComplete: false,
         }
       : movement,
   );

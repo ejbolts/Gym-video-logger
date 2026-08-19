@@ -49,6 +49,16 @@ describe('body-composition chart ranges and scrubbing', () => {
 
   it('filters calendar ranges relative to the latest measurement', () => {
     expect(
+      filterMeasurementsByRange(
+        [
+          { measurement_date: '2026-06-29' },
+          { measurement_date: '2026-06-30' },
+          { measurement_date: '2026-07-31' },
+        ],
+        '1m',
+      ).map((item) => item.measurement_date),
+    ).toEqual(['2026-06-30', '2026-07-31']);
+    expect(
       filterMeasurementsByRange(measurements, '3m').map((item) => item.measurement_date),
     ).toEqual(['2026-04-30', '2026-07-31']);
     expect(

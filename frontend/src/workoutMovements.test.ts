@@ -41,6 +41,7 @@ describe('switching an exercise', () => {
       machinePhotoIds: ['seated-photo'],
       machinePhotosInitialized: true,
       supersetKey: 'superset-1',
+      isComplete: true,
       sets,
     };
 
@@ -56,5 +57,6 @@ describe('switching an exercise', () => {
     expect(switched.supersetKey).toBe('superset-1');
     expect(switched.machinePhotoIds).toEqual([]);
     expect(switched.machinePhotosInitialized).toBe(false);
+    expect(switched.isComplete).toBe(false);
   });
 });

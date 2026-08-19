@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { WorkoutCategory } from './types';
-import { inferWorkoutCategory, workoutNameForCategory } from './workoutCategory';
+import {
+  finalizeWorkoutIdentity,
+  inferWorkoutCategory,
+  workoutNameForCategory,
+} from './workoutCategory';
 
 const exercises = (...categories: WorkoutCategory[]) =>
   categories.map((category) => ({ category }));
@@ -33,5 +37,20 @@ describe('automatic workout category', () => {
     expect(workoutNameForCategory('pull')).toBe('Pull workout');
     expect(workoutNameForCategory('upper')).toBe('Upper body workout');
     expect(workoutNameForCategory('full_body')).toBe('Full body workout');
+  });
+
+  it('applies the inferred type and automatic name only at completion', () => {
+    expect(
+      finalizeWorkoutIdentity(exercises('pull', 'pull'), 'push', 'Push workout', true),
+    ).toEqual({ category: 'pull', name: 'Pull workout' });
+    expect(
+      finalizeWorkoutIdentity(exercises('pull', 'pull'), 'push', 'Push workout', false),
+    ).toEqual({ category: 'push', name: 'Push workout' });
+  });
+
+  it('keeps a custom workout name when applying the completed type', () => {
+    expect(
+      finalizeWorkoutIdentity(exercises('pull', 'pull'), 'push', 'Tuesday training', true),
+    ).toEqual({ category: 'pull', name: 'Tuesday training' });
   });
 });

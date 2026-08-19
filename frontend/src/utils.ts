@@ -20,6 +20,13 @@ export function formatSeconds(seconds: number): string {
     : `${minutes}:${String(remaining).padStart(2, '0')}`;
 }
 
+export function decimalNumberOrNull(value: string): number | null {
+  const normalized = value.trim().replace(',', '.');
+  if (normalized === '' || normalized === '.') return null;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 export function formatMinutesDuration(minutes: number | null): string {
   if (minutes === null) return '–';
   const normalized = Math.max(0, Math.floor(minutes));

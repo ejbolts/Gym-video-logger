@@ -2,14 +2,17 @@ from __future__ import annotations
 
 import csv
 import io
+import re
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date
+from statistics import median
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .models import (
+    BodyMeasurement,
     Exercise,
     ExerciseKind,
     TrainingWorkout,
@@ -17,6 +20,7 @@ from .models import (
     WorkoutMovement,
     WorkoutSet,
 )
+from .workout_category import infer_workout_category
 
 CSV_HEADERS = (
     "Date Lifted",
@@ -30,6 +34,7 @@ CSV_HEADERS = (
     "Warmup",
 )
 KG_TO_LB = 2.2046226218
+IMPORTED_BODYWEIGHT_NOTE = "Imported from workout CSV."
 
 
 class CsvImportError(ValueError):
@@ -52,6 +57,8 @@ class ImportSummary:
     workouts_created: int
     exercises_created: int
     sets_imported: int
+    body_measurements_created: int
+    body_measurements_updated: int
     warnings: list[str]
 
 
@@ -113,6 +120,8 @@ def parse_rows(raw: bytes) -> tuple[list[ParsedRow], list[str]]:
         if bodyweight_kg is None and bodyweight_lb is not None:
             bodyweight_kg = round(bodyweight_lb / KG_TO_LB, 3)
             warnings.append(f"Row {row_number}: converted Bodyweight (lb) to kilograms.")
+        if bodyweight_kg is not None and not 0 < bodyweight_kg <= 500:
+            raise CsvImportError(f"Row {row_number}: Bodyweight must be between 0 and 500 kg.")
         percentile = optional_float(row.get("Percentile (%)"), "Percentile (%)", row_number)
         if percentile is not None and not 0 <= percentile <= 100:
             raise CsvImportError(f"Row {row_number}: Percentile (%) must be between 0 and 100.")
@@ -137,31 +146,113 @@ def parse_rows(raw: bytes) -> tuple[list[ParsedRow], list[str]]:
 
 def infer_exercise(name: str) -> tuple[WorkoutCategory, ExerciseKind, str, str | None]:
     lowered = name.casefold()
-    if any(word in lowered for word in ("treadmill", "run", "cycling", "bike", "cardio")):
+    if any(
+        phrase in lowered
+        for phrase in ("crunch", "sit up", "sit-up", "knee raise", "leg raise", "plank")
+    ):
+        return WorkoutCategory.FULL_BODY, ExerciseKind.STRENGTH, "Core", None
+    if (
+        re.search(
+            r"\b(treadmill|run|running|jog|jogging|walk|walking|cycling|bike|bicycle|cardio|rowing)\b",
+            lowered,
+        )
+        or "stair climber" in lowered
+    ):
         return WorkoutCategory.CARDIO, ExerciseKind.CARDIO, "Cardio", None
-    if any(word in lowered for word in ("pulldown", "pull-up", "pullup", "pullover")):
+    if any(word in lowered for word in ("reverse fly", "face pull", "rear delt")):
+        return WorkoutCategory.PULL, ExerciseKind.STRENGTH, "Rear Delts", None
+    if any(
+        word in lowered
+        for word in (
+            "pulldown",
+            "pull down",
+            "pull-up",
+            "pullup",
+            "pull up",
+            "chin-up",
+            "chin up",
+            "pullover",
+            "pull over",
+        )
+    ):
         return WorkoutCategory.PULL, ExerciseKind.STRENGTH, "Lats", None
     if "row" in lowered:
         return WorkoutCategory.PULL, ExerciseKind.STRENGTH, "Mid / Upper Back", None
-    if any(word in lowered for word in ("reverse fly", "face pull", "rear delt")):
-        return WorkoutCategory.PULL, ExerciseKind.STRENGTH, "Rear Delts", None
-    if any(word in lowered for word in ("curl", "bicep")):
+    if any(word in lowered for word in ("curl", "bicep", "grip squeezer")):
         return WorkoutCategory.PULL, ExerciseKind.STRENGTH, "Biceps", None
     if "tricep" in lowered:
         return WorkoutCategory.PUSH, ExerciseKind.STRENGTH, "Triceps", None
-    if any(word in lowered for word in ("bench", "chest", "cable fly", "pec fly")):
-        return WorkoutCategory.PUSH, ExerciseKind.STRENGTH, "Chest", None
-    if any(word in lowered for word in ("shoulder", "overhead press", "lateral raise")):
-        return WorkoutCategory.PUSH, ExerciseKind.STRENGTH, "Shoulders", None
     if any(word in lowered for word in ("romanian deadlift", "leg curl", "hamstring")):
         return WorkoutCategory.LOWER, ExerciseKind.STRENGTH, "Hamstrings", None
-    if any(word in lowered for word in ("hip thrust", "glute")):
+    if any(word in lowered for word in ("hip thrust", "hip adduction", "hip abduction", "glute")):
         return WorkoutCategory.LOWER, ExerciseKind.STRENGTH, "Glutes", None
+    if "back extension" in lowered:
+        return WorkoutCategory.LOWER, ExerciseKind.STRENGTH, "Lower Back", None
     if "calf" in lowered:
         return WorkoutCategory.LOWER, ExerciseKind.STRENGTH, "Calves", None
     if any(word in lowered for word in ("squat", "leg press", "leg extension", "lunge")):
         return WorkoutCategory.LOWER, ExerciseKind.STRENGTH, "Quads", None
+    if any(
+        word in lowered
+        for word in ("shoulder", "overhead press", "military press", "lateral raise")
+    ):
+        return WorkoutCategory.PUSH, ExerciseKind.STRENGTH, "Shoulders", None
+    if any(
+        word in lowered
+        for word in (
+            "bench",
+            "chest",
+            "pec ",
+            "dumbbell fly",
+            "machine fly",
+            "push up",
+            "push-up",
+            "dips",
+            "press",
+        )
+    ):
+        return WorkoutCategory.PUSH, ExerciseKind.STRENGTH, "Chest", None
+    if "deadlift" in lowered:
+        return WorkoutCategory.PULL, ExerciseKind.STRENGTH, "Posterior chain", None
+    if "external rotation" in lowered:
+        return WorkoutCategory.UPPER, ExerciseKind.STRENGTH, "Shoulders", None
     return WorkoutCategory.OTHER, ExerciseKind.STRENGTH, "Other", None
+
+
+def sync_imported_bodyweights(db: Session, bodyweights: dict[date, list[float]]) -> tuple[int, int]:
+    """Create graph check-ins from workout bodyweights without replacing manual entries."""
+    if not bodyweights:
+        return 0, 0
+    existing = {
+        item.measurement_date: item
+        for item in db.scalars(
+            select(BodyMeasurement).where(BodyMeasurement.measurement_date.in_(bodyweights))
+        )
+    }
+    created = 0
+    updated = 0
+    for measurement_date, values in sorted(bodyweights.items()):
+        weight_kg = round(float(median(values)), 3)
+        measurement = existing.get(measurement_date)
+        if measurement is None:
+            db.add(
+                BodyMeasurement(
+                    measurement_date=measurement_date,
+                    weight_kg=weight_kg,
+                    body_fat_pct=None,
+                    notes=IMPORTED_BODYWEIGHT_NOTE,
+                    is_sample=False,
+                )
+            )
+            created += 1
+        elif measurement.is_sample or measurement.notes == IMPORTED_BODYWEIGHT_NOTE:
+            measurement.weight_kg = weight_kg
+            if measurement.is_sample:
+                measurement.body_fat_pct = None
+            measurement.notes = IMPORTED_BODYWEIGHT_NOTE
+            measurement.is_sample = False
+            updated += 1
+    return created, updated
 
 
 def import_workouts(db: Session, raw: bytes) -> ImportSummary:
@@ -169,8 +260,11 @@ def import_workouts(db: Session, raw: bytes) -> ImportSummary:
     exercises = {item.name.casefold(): item for item in db.scalars(select(Exercise))}
     exercises_created = 0
     grouped: dict[date, dict[str, list[ParsedRow]]] = defaultdict(lambda: defaultdict(list))
+    bodyweights: dict[date, list[float]] = defaultdict(list)
     for row in rows:
         grouped[row.workout_date][row.exercise_name].append(row)
+        if row.bodyweight_kg is not None:
+            bodyweights[row.workout_date].append(row.bodyweight_kg)
 
     for workout_date, movement_groups in sorted(grouped.items()):
         movement_categories: list[WorkoutCategory] = []
@@ -212,17 +306,17 @@ def import_workouts(db: Session, raw: bytes) -> ImportSummary:
                     )
                 )
             workout.movements.append(movement)
-        unique_categories = set(movement_categories)
-        workout.category = (
-            next(iter(unique_categories))
-            if len(unique_categories) == 1
-            else WorkoutCategory.FULL_BODY
-        )
-    db.commit()
+        workout.category = infer_workout_category(movement_categories) or WorkoutCategory.OTHER
+    body_measurements_created, body_measurements_updated = sync_imported_bodyweights(
+        db, bodyweights
+    )
+    db.flush()
     return ImportSummary(
         workouts_created=len(grouped),
         exercises_created=exercises_created,
         sets_imported=len(rows),
+        body_measurements_created=body_measurements_created,
+        body_measurements_updated=body_measurements_updated,
         warnings=warnings[:50],
     )
 

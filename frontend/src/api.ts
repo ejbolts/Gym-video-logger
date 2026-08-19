@@ -18,11 +18,14 @@ import type {
   PushConfig,
   TrackedWorkout,
   WorkoutInput,
+  WorkoutCacheRevision,
+  WorkoutSnapshot,
   WorkoutSession,
   TrainingMode,
   TrainingPhase,
   TrainingPreferences,
 } from './types';
+import { cachedWorkoutsForRevision, readWorkoutCache, writeWorkoutCache } from './workoutCache';
 
 export class ApiError extends Error {
   constructor(
@@ -54,6 +57,19 @@ async function requestBlob(path: string): Promise<Blob> {
   if (!response.ok)
     throw new ApiError(`Export failed (${response.status})`, 'export_failed', response.status);
   return response.blob();
+}
+
+async function listCachedWorkouts(): Promise<TrackedWorkout[]> {
+  const [cached, current] = await Promise.all([
+    readWorkoutCache(),
+    request<WorkoutCacheRevision>('/api/workouts/revision'),
+  ]);
+  const reusable = cachedWorkoutsForRevision(cached, current.revision);
+  if (reusable) return reusable;
+
+  const snapshot = await request<WorkoutSnapshot>('/api/workouts/snapshot');
+  await writeWorkoutCache(snapshot);
+  return snapshot.workouts;
 }
 
 export const api = {
@@ -115,7 +131,7 @@ export const api = {
       body: JSON.stringify({ mode, effective_date: effectiveDate }),
     }),
   listTrainingPhases: () => request<TrainingPhase[]>('/api/training-phases'),
-  listWorkouts: () => request<TrackedWorkout[]>('/api/workouts'),
+  listWorkouts: listCachedWorkouts,
   listBodyMeasurements: () => request<BodyMeasurement[]>('/api/body-measurements'),
   saveBodyMeasurement: (payload: {
     measurement_date: string;

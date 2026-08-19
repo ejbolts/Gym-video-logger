@@ -144,9 +144,7 @@ def test_default_exercise_library_is_seeded(client):
     assert single_arm_lat_pulldown["muscle_contributions"] == [
         {"muscle_name": "Lats", "role": "primary", "contribution_factor": 1.0}
     ]
-    seated_machine_row = next(
-        item for item in exercises if item["name"] == "Seated Machine Row"
-    )
+    seated_machine_row = next(item for item in exercises if item["name"] == "Seated Machine Row")
     assert seated_machine_row["category"] == "pull"
     assert seated_machine_row["muscle_group"] == "Mid / Upper Back"
     assert seated_machine_row["equipment"] == "Machine"
@@ -217,9 +215,7 @@ def test_default_exercise_library_is_seeded(client):
                 "contribution_factor": 1.0,
             }
         ]
-    back_extension = next(
-        item for item in exercises if item["name"] == "Back Extension Machine"
-    )
+    back_extension = next(item for item in exercises if item["name"] == "Back Extension Machine")
     assert back_extension["category"] == "lower"
     assert back_extension["muscle_group"] == "Lower Back"
     assert back_extension["equipment"] == "Machine"
@@ -525,6 +521,39 @@ def test_dashboard_and_progress_reflect_completed_workout(client):
     assert progress.json()["points"][0]["estimated_1rm"] == 119.6
 
 
+def test_workout_snapshot_revision_changes_after_mutations(client):
+    exercise = next(
+        item
+        for item in client.get("/api/exercises").json()
+        if item["name"] == "Barbell Bench Press"
+    )
+    initial_revision = client.get("/api/workouts/revision")
+    initial_snapshot = client.get("/api/workouts/snapshot")
+
+    created = client.post("/api/workouts", json=workout_payload(exercise["id"]))
+    changed_revision = client.get("/api/workouts/revision")
+    changed_snapshot = client.get("/api/workouts/snapshot")
+
+    assert initial_revision.status_code == 200
+    assert initial_revision.json() == {"revision": "0"}
+    assert initial_snapshot.json() == {"revision": "0", "workouts": []}
+    assert created.status_code == 201
+    assert changed_revision.status_code == 200
+    assert changed_revision.json()["revision"] != initial_revision.json()["revision"]
+    assert changed_snapshot.json()["revision"] == changed_revision.json()["revision"]
+    assert [workout["id"] for workout in changed_snapshot.json()["workouts"]] == [
+        created.json()["id"]
+    ]
+
+    assert client.delete(f"/api/workouts/{created.json()['id']}").status_code == 204
+    deleted_revision = client.get("/api/workouts/revision").json()["revision"]
+    assert deleted_revision != changed_revision.json()["revision"]
+    assert client.get("/api/workouts/snapshot").json() == {
+        "revision": deleted_revision,
+        "workouts": [],
+    }
+
+
 def test_workout_requires_a_completed_set(client):
     exercise = client.get("/api/exercises").json()[0]
     payload = workout_payload(exercise["id"])
@@ -555,6 +584,8 @@ def test_csv_import_and_export_use_supplied_column_format(client):
         "workouts_created": 1,
         "exercises_created": 1,
         "sets_imported": 2,
+        "body_measurements_created": 1,
+        "body_measurements_updated": 0,
         "warnings": [],
     }
     imported_exercise = next(
@@ -563,6 +594,15 @@ def test_csv_import_and_export_use_supplied_column_format(client):
         if item["name"] == "Machine Reverse Fly"
     )
     assert imported_exercise["muscle_group"] == "Rear Delts"
+    workout = client.get("/api/workouts").json()[0]
+    assert workout["category"] == "pull"
+    progress = client.get(f"/api/progress/{imported_exercise['id']}").json()
+    assert [point["workout_date"] for point in progress["points"]] == ["2026-07-17"]
+    assert progress["points"][0]["best_weight_kg"] == 51
+    measurement = client.get("/api/body-measurements").json()[0]
+    assert measurement["measurement_date"] == "2026-07-17"
+    assert measurement["weight_kg"] == 83.6
+    assert measurement["notes"] == "Imported from workout CSV."
     assert exported.status_code == 200
     decoded = exported.content.decode("utf-8-sig")
     assert decoded.splitlines()[0] == (
@@ -570,6 +610,96 @@ def test_csv_import_and_export_use_supplied_column_format(client):
         "Bodyweight (lb),Percentile (%),Warmup"
     )
     assert "2026-07-17,Machine Reverse Fly,45,99.2,10,83.6,184.3,38,1" in decoded
+
+
+def test_csv_import_uses_logger_category_pattern_and_strength_history(client):
+    content = (
+        "Date Lifted,Exercise,Weight (kg),Weight (lb),Reps,Bodyweight (kg),"
+        "Bodyweight (lb),Percentile (%),Warmup\n"
+        "2026-06-01,Bench Press,80,,8,84,,,0\n"
+        "2026-06-01,Lat Pulldown,70,,10,84,,,0\n"
+        "2026-06-02,Machine Seated Crunch,45,,12,83.8,,,0\n"
+    )
+
+    imported = client.post(
+        "/api/workouts/import",
+        files={"file": ("workouts.csv", content.encode(), "text/csv")},
+    )
+
+    assert imported.status_code == 201
+    assert imported.json()["body_measurements_created"] == 2
+    workouts = client.get("/api/workouts").json()
+    assert [(item["workout_date"], item["category"]) for item in workouts] == [
+        ("2026-06-02", "full_body"),
+        ("2026-06-01", "upper"),
+    ]
+    crunch = next(
+        item
+        for item in client.get("/api/exercises").json()
+        if item["name"] == "Machine Seated Crunch"
+    )
+    assert crunch["kind"] == "strength"
+    assert crunch["category"] == "full_body"
+    assert (
+        client.get(f"/api/progress/{crunch['id']}").json()["points"][0]["workout_date"]
+        == "2026-06-02"
+    )
+
+
+def test_workout_csv_bodyweight_does_not_replace_a_manual_check_in(client):
+    saved = client.post(
+        "/api/body-measurements",
+        json={
+            "measurement_date": "2026-06-01",
+            "weight_kg": 84.5,
+            "body_fat_pct": 16,
+            "notes": "Morning check-in",
+        },
+    )
+    content = (
+        "Date Lifted,Exercise,Weight (kg),Weight (lb),Reps,Bodyweight (kg),"
+        "Bodyweight (lb),Percentile (%),Warmup\n"
+        "2026-06-01,Bench Press,80,,8,84,,,0\n"
+    )
+
+    imported = client.post(
+        "/api/workouts/import",
+        files={"file": ("workouts.csv", content.encode(), "text/csv")},
+    )
+    measurement = client.get("/api/body-measurements").json()[0]
+
+    assert saved.status_code == 200
+    assert imported.status_code == 201
+    assert imported.json()["body_measurements_created"] == 0
+    assert imported.json()["body_measurements_updated"] == 0
+    assert measurement["weight_kg"] == 84.5
+    assert measurement["body_fat_pct"] == 16
+    assert measurement["notes"] == "Morning check-in"
+
+
+def test_workout_history_returns_every_imported_workout(client):
+    header = (
+        "Date Lifted,Exercise,Weight (kg),Weight (lb),Reps,Bodyweight (kg),"
+        "Bodyweight (lb),Percentile (%),Warmup"
+    )
+    first_date = date(2024, 1, 1)
+    rows = [
+        f"{(first_date + timedelta(days=offset)).isoformat()},Back Squat,100,,5,,,,0"
+        for offset in range(101)
+    ]
+
+    imported = client.post(
+        "/api/workouts/import",
+        files={"file": ("workouts.csv", "\n".join([header, *rows]).encode(), "text/csv")},
+    )
+    workouts = client.get("/api/workouts")
+
+    assert imported.status_code == 201
+    assert imported.json()["workouts_created"] == 101
+    assert workouts.status_code == 200
+    assert len(workouts.json()) == 101
+    assert workouts.json()[0]["workout_date"] == "2024-04-10"
+    assert workouts.json()[-1]["workout_date"] == "2024-01-01"
 
 
 def test_sample_seed_creates_one_week_once(client):
@@ -607,9 +737,7 @@ def test_sample_seed_creates_one_week_once(client):
 
 def test_machine_photos_are_processed_pinned_and_protected_while_referenced(client):
     exercise = next(
-        item
-        for item in client.get("/api/exercises").json()
-        if item["name"] == "Seated Leg Curl"
+        item for item in client.get("/api/exercises").json() if item["name"] == "Seated Leg Curl"
     )
     image_buffer = BytesIO()
     source = Image.new("RGB", (1200, 2400), "#e86f35")
@@ -653,9 +781,9 @@ def test_machine_photos_are_processed_pinned_and_protected_while_referenced(clie
     workout = client.post("/api/workouts", json=payload)
     assert workout.status_code == 201
     assert workout.json()["movements"][0]["machine_photos"][0]["id"] == photo["id"]
-    assert client.get(
-        f"/api/exercises/{exercise['id']}/machine-photos/last-used"
-    ).json() == [renamed.json()]
+    assert client.get(f"/api/exercises/{exercise['id']}/machine-photos/last-used").json() == [
+        renamed.json()
+    ]
 
     updated = client.put(f"/api/workouts/{workout.json()['id']}", json=payload)
     assert updated.status_code == 200
@@ -674,14 +802,14 @@ def test_machine_photos_are_processed_pinned_and_protected_while_referenced(clie
     next_payload["movements"][0]["machine_photo_ids"] = [second_photo["id"]]
     next_workout = client.post("/api/workouts", json=next_payload)
     assert next_workout.status_code == 201
-    assert client.get(
-        f"/api/exercises/{exercise['id']}/machine-photos/last-used"
-    ).json() == [second_photo]
+    assert client.get(f"/api/exercises/{exercise['id']}/machine-photos/last-used").json() == [
+        second_photo
+    ]
 
     assert client.delete(f"/api/workouts/{next_workout.json()['id']}").status_code == 204
-    assert client.get(
-        f"/api/exercises/{exercise['id']}/machine-photos/last-used"
-    ).json() == [renamed.json()]
+    assert client.get(f"/api/exercises/{exercise['id']}/machine-photos/last-used").json() == [
+        renamed.json()
+    ]
     assert client.delete(f"/api/workouts/{workout.json()['id']}").status_code == 204
     assert client.get(f"/api/exercises/{exercise['id']}/machine-photos/last-used").json() == []
     assert client.delete(f"/api/machine-photos/{second_photo['id']}").status_code == 204
@@ -974,12 +1102,14 @@ def test_zone2_week_boundaries_edit_and_delete(client):
     overview = client.get("/api/cardio").json()
     assert overview["current_week"]["completed_minutes"] == 60
     assert overview["previous_weeks"][0]["completed_minutes"] == 90
+    assert client.get("/api/dashboard").json()["total_cardio_sessions"] == 3
 
     current["duration_minutes"] = 120
     assert client.put(f"/api/cardio/{current_id}", json=current).status_code == 200
     assert client.get("/api/cardio").json()["current_week"]["completed_minutes"] == 120
     assert client.delete(f"/api/cardio/{current_id}").status_code == 204
     assert client.delete(f"/api/cardio/{other_id}").status_code == 204
+    assert client.get("/api/dashboard").json()["total_cardio_sessions"] == 1
 
 
 def test_completed_treadmill_walking_workout_counts_toward_zone2(client):
@@ -1014,9 +1144,11 @@ def test_completed_treadmill_walking_workout_counts_toward_zone2(client):
     created = client.post("/api/workouts", json=payload)
 
     assert created.status_code == 201
+    assert client.get("/api/dashboard").json()["total_cardio_sessions"] == 1
     assert client.get("/api/dashboard").json()["zone2"]["completed_minutes"] == 30
     assert client.get("/api/cardio").json()["current_week"]["completed_minutes"] == 30
     assert client.delete(f"/api/workouts/{created.json()['id']}").status_code == 204
+    assert client.get("/api/dashboard").json()["total_cardio_sessions"] == 0
     assert client.get("/api/dashboard").json()["zone2"]["completed_minutes"] == 0
     assert client.get("/api/cardio").json()["current_week"]["completed_minutes"] == 0
 
