@@ -4474,6 +4474,1088 @@ button.metric-card:focus-visible {
   }
 }
 
+/* Reference-match pass: flat StrengthLevel layouts and mobile sheets. */
+.tracker-app {
+  min-height: 100dvh;
+  padding-bottom: 0;
+}
+
+.tracker-app > main {
+  min-height: calc(100dvh - 3.75rem);
+}
+
+.bottom-nav {
+  display: none;
+}
+
+.reference-app-header {
+  position: sticky;
+  z-index: 60;
+  top: 0;
+  width: 100%;
+  height: 3.75rem;
+  display: grid;
+  grid-template-columns: 3.2rem minmax(0, 1fr) 3.2rem;
+  align-items: center;
+  border-bottom: 1px solid #123142;
+  padding: 0 max(0.5rem, env(safe-area-inset-right)) 0 max(0.5rem, env(safe-area-inset-left));
+  background:
+    radial-gradient(circle at 80% -50%, rgb(17 120 170 / 32%), transparent 52%),
+    linear-gradient(180deg, #08283a, #071b27);
+  color: #f1f1ef;
+}
+
+.reference-app-header button {
+  width: 2.65rem;
+  height: 2.65rem;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: #aeb8bd;
+  font-size: 2.2rem;
+  font-weight: 300;
+  line-height: 1;
+}
+
+.reference-app-header strong {
+  overflow: hidden;
+  font-size: 1rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Home/profile reference. */
+.dashboard-screen {
+  width: min(100%, 74rem);
+  padding-top: 0;
+}
+
+.dashboard-screen .profile-hero {
+  margin: 0 -1rem 1.5rem;
+  border: 0;
+  border-radius: 0;
+}
+
+.dashboard-screen .profile-cover {
+  min-height: clamp(9.5rem, 26vw, 13rem);
+  align-items: flex-end;
+  padding: 0;
+  background:
+    linear-gradient(0deg, rgb(5 13 17 / 38%), rgb(5 13 17 / 38%)),
+    radial-gradient(circle at 18% 8%, rgb(16 138 195 / 34%) 0 4.4rem, transparent 4.6rem),
+    radial-gradient(circle at 76% 18%, rgb(7 90 132 / 42%) 0 8rem, transparent 8.2rem),
+    linear-gradient(120deg, #061218, #082c3f 52%, #051821);
+}
+
+.dashboard-screen .profile-stats {
+  width: 100%;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: end;
+  padding: 1rem 0.5rem 1.15rem;
+  background: linear-gradient(180deg, transparent, rgb(3 9 12 / 52%));
+}
+
+.dashboard-screen .profile-stats > div {
+  border: 0;
+}
+
+.dashboard-screen .profile-stats span {
+  color: #f0efed;
+  font-size: clamp(0.64rem, 2.4vw, 1.05rem);
+  font-weight: 400;
+  letter-spacing: 0.1em;
+}
+
+.dashboard-screen .profile-stats strong {
+  margin-top: 0.55rem;
+  font-size: clamp(2rem, 8vw, 3.25rem);
+  font-weight: 750;
+}
+
+.dashboard-screen .training-level-strip {
+  width: min(100%, 55rem);
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  margin: 0 auto 1.45rem;
+  border-radius: 7px;
+  font-size: clamp(0.98rem, 3.3vw, 1.45rem);
+}
+
+.dashboard-screen .training-level-strip > span:first-child {
+  padding: 0.92rem 1rem;
+}
+
+.dashboard-screen .training-level-strip > strong {
+  grid-column: auto;
+  padding: 0.92rem 1rem 0.92rem 0.45rem;
+}
+
+.dashboard-screen .training-stars {
+  padding: 0.72rem 0.35rem 0.72rem 0.75rem;
+}
+
+.dashboard-screen .training-stars i {
+  font-size: clamp(1.15rem, 4.8vw, 2rem);
+}
+
+.dashboard-shortcuts {
+  width: min(100%, 57rem);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin: 0 auto;
+}
+
+.dashboard-shortcuts button {
+  min-height: 5rem;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: 1fr;
+  gap: 0.8rem;
+  padding: 1rem 1.05rem;
+  background: #202526;
+}
+
+.dashboard-shortcuts button > span {
+  grid-row: auto;
+  min-width: 2rem;
+  color: #d8d4d0;
+  font-size: clamp(1.75rem, 6vw, 2.4rem);
+  text-align: center;
+}
+
+.dashboard-shortcuts strong {
+  color: #d8d4d0;
+  font-size: clamp(1.05rem, 4.4vw, 1.65rem);
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.dashboard-shortcuts button:last-child {
+  width: calc(50% - 0.375rem);
+  grid-column: 1 / -1;
+}
+
+.dashboard-secondary-actions,
+.dashboard-screen > .dashboard-section-heading,
+.dashboard-screen > .metric-grid,
+.dashboard-screen > .weekly-goal-card,
+.dashboard-screen > .dashboard-zone2,
+.dashboard-screen > .muscle-volume-panel,
+.dashboard-screen > .heatmap-panel,
+.dashboard-screen > .recent-panel {
+  display: none;
+}
+
+/* Workout logger reference. */
+.logger-screen {
+  padding-top: 0;
+}
+
+.logger-screen .live-workout-bar {
+  margin: 0 -1rem 0;
+  border-bottom-color: #173546;
+  background: #082433;
+}
+
+.logger-screen .workout-recommendation,
+.logger-screen .machine-photo-picker {
+  display: none;
+}
+
+.logger-screen .workout-details {
+  margin: 0 -0.25rem 1rem;
+  border: 0;
+  padding: 1.3rem 0.25rem 0.35rem;
+  background: transparent;
+}
+
+.logger-screen .workout-name-input {
+  height: auto;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: #dedbd7;
+  font-size: clamp(1.5rem, 6vw, 2rem);
+  font-weight: 700;
+}
+
+.logger-screen .details-row {
+  margin-top: 0.25rem;
+}
+
+.logger-screen .details-row > label {
+  font-size: 0;
+}
+
+.logger-screen .details-row input,
+.logger-screen .details-row select {
+  height: 2rem;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: #c6c3c0;
+  font-size: 0.95rem;
+}
+
+.workout-summary-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  margin-top: 1.25rem;
+}
+
+.workout-summary-metrics > span {
+  display: inline-flex;
+  overflow: hidden;
+  border-radius: 4px;
+  background: #191c1e;
+}
+
+.workout-summary-metrics small,
+.workout-summary-metrics strong {
+  display: grid;
+  place-items: center;
+  padding: 0.52rem 0.7rem;
+  font-size: 0.82rem;
+  font-weight: 400;
+}
+
+.workout-summary-metrics strong {
+  background: var(--accent);
+  color: #effaff;
+}
+
+.logger-screen .movement-stack {
+  gap: 0.55rem;
+}
+
+.movement-card {
+  padding: 0 0 0.25rem;
+}
+
+.movement-card > header {
+  padding: 1rem 0 0.55rem;
+  border-bottom: 0;
+}
+
+.movement-card > header > div > p,
+.movement-completed-summary {
+  display: none;
+}
+
+.movement-card h2 {
+  margin: 0;
+  font-size: clamp(1.25rem, 5.4vw, 1.65rem);
+}
+
+.movement-overflow > summary {
+  color: #29a9ec;
+}
+
+.movement-overflow-menu {
+  top: 2.7rem;
+  width: min(18rem, calc(100vw - 2rem));
+}
+
+.movement-overflow-menu button {
+  min-height: 3.15rem;
+  font-size: 0.9rem;
+}
+
+.set-grid {
+  padding-top: 0.25rem;
+}
+
+.set-grid-strength .set-grid-head,
+.set-grid-strength .completed-set-summary {
+  grid-template-columns: minmax(4.8rem, 1.05fr) minmax(2.6rem, 0.55fr) minmax(2.8rem, 0.58fr) minmax(6rem, 1.18fr) 1.55rem;
+  gap: 0.28rem;
+}
+
+.set-grid-strength .set-grid-head {
+  padding: 0.28rem 0.48rem 0.48rem;
+  color: #c5c2bf;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.set-grid-strength .completed-set-summary {
+  min-height: 3.05rem;
+  align-items: center;
+  padding: 0.5rem 0.48rem;
+  color: #d4d0cb;
+  font-size: 0.9rem;
+}
+
+.set-grid-strength .completed-set-summary > strong {
+  min-width: 0;
+  color: inherit;
+  font-weight: 400;
+}
+
+.completed-set-weight {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.strength-level-stars,
+.exercise-rating {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.strength-level-stars i,
+.exercise-rating i {
+  color: #aaa89d;
+  font-style: normal;
+  line-height: 1;
+}
+
+.strength-level-stars i {
+  font-size: clamp(0.86rem, 4vw, 1.22rem);
+}
+
+.strength-level-stars i.filled,
+.exercise-rating i.filled {
+  color: var(--gold);
+}
+
+.completed-set-menu {
+  color: #29a9ec;
+  font-size: 1.45rem;
+  line-height: 1;
+  text-align: center;
+}
+
+.set-details.completed {
+  border-top: 1px solid #41474a;
+  border-bottom: 1px solid #41474a;
+  background: transparent;
+}
+
+.set-details.completed:nth-of-type(2n) {
+  background: var(--gold-row);
+}
+
+.set-details.completed[open] {
+  background: var(--gold-row);
+}
+
+.set-grid-strength .set-row {
+  grid-template-columns: minmax(4.8rem, 1.05fr) minmax(2.6rem, 0.55fr) minmax(2.8rem, 0.58fr) minmax(3.7rem, 1.18fr);
+  gap: 0.35rem;
+}
+
+.set-grid-strength .set-row > .set-index {
+  display: none;
+}
+
+.set-grid-strength .set-row > input,
+.set-grid-strength .set-row > select,
+.set-grid-strength .set-row > .complete-set {
+  min-width: 0;
+}
+
+.completed-set-note {
+  margin: -1px 0 0.35rem;
+  border: 1px solid #444b4e;
+  border-radius: 5px;
+  padding: 0.72rem 0.8rem;
+  background: #171a1b;
+  color: #cbc7c2;
+  font-size: 0.87rem;
+  line-height: 1.45;
+}
+
+.rest-between {
+  display: none;
+}
+
+.movement-note {
+  min-height: 2.8rem;
+  padding: 0.65rem 0.75rem;
+}
+
+.finish-workout-bottom {
+  min-height: 4rem;
+  background: #202526;
+  color: #d5d2ce;
+  font-size: 1.05rem;
+}
+
+/* Add-set and grouping sheets. */
+.add-set-backdrop,
+.superset-picker-backdrop {
+  place-items: end center;
+  padding: 0;
+}
+
+.add-set-dialog,
+.superset-picker {
+  width: min(100%, 590px);
+  max-height: min(88dvh, 56rem);
+  overflow: auto;
+  border-right: 0;
+  border-bottom: 0;
+  border-left: 0;
+  border-radius: 7px 7px 0 0;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.add-set-dialog > header,
+.superset-picker > header {
+  min-height: 6rem;
+  padding: 1.2rem 1.25rem;
+}
+
+.add-set-dialog h2,
+.superset-picker h2 {
+  font-size: clamp(1.65rem, 7vw, 2.05rem);
+}
+
+.add-set-content,
+.superset-picker > p,
+.superset-options {
+  padding-right: 1.25rem;
+  padding-left: 1.25rem;
+}
+
+.add-set-previous span {
+  padding: 0.62rem 0.75rem;
+  font-size: 0.96rem;
+}
+
+.add-set-previous span:first-child,
+.add-set-previous span:last-child {
+  background: var(--accent);
+  color: #f1fbff;
+}
+
+.add-set-fields {
+  grid-template-columns: 1fr;
+}
+
+.add-set-fields label {
+  font-size: 0.95rem;
+}
+
+.add-set-fields input,
+.add-set-fields select {
+  min-height: 3.6rem;
+  font-size: 1rem;
+}
+
+.add-set-notes-field {
+  grid-column: 1 / -1;
+}
+
+.add-set-toggles {
+  align-items: center;
+  gap: 0.8rem;
+}
+
+.add-set-toggles label {
+  font-size: 0.96rem;
+}
+
+.add-set-toggles button {
+  min-height: 2.8rem;
+  border: 0;
+  border-radius: 5px;
+  padding: 0.65rem 0.85rem;
+  background: #232729;
+  color: #d1ceca;
+}
+
+.add-set-toggles button.active {
+  color: #f1fbff;
+  outline: 1px solid var(--accent);
+}
+
+.add-set-dialog > footer,
+.superset-picker > footer {
+  min-height: 5.7rem;
+  align-items: center;
+}
+
+.superset-picker > p {
+  margin: 0;
+  padding-top: 1.55rem;
+  padding-bottom: 1.15rem;
+  color: #ddd9d5;
+  font-size: 1rem;
+}
+
+.superset-options {
+  gap: 0;
+  padding-bottom: 1.4rem;
+}
+
+.superset-option {
+  min-height: 2.55rem;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 0.45rem;
+  border: 0;
+  padding: 0.2rem 0;
+  background: transparent;
+}
+
+.superset-option.selected {
+  border: 0;
+  background: transparent;
+}
+
+.superset-option-copy strong {
+  font-size: 1rem;
+  font-weight: 400;
+}
+
+.superset-picker-actions {
+  flex: 1;
+  justify-content: space-between;
+}
+
+/* Exercise library reference. */
+.exercise-picker-backdrop {
+  top: var(--exercise-picker-viewport-top);
+  height: var(--exercise-picker-viewport-height);
+  place-items: stretch;
+  padding: 0;
+  background: #101314;
+}
+
+.exercise-picker-backdrop .exercise-picker {
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  border: 0;
+  border-radius: 0;
+  background: #191c1e;
+}
+
+.exercise-picker > header {
+  flex: 0 0 auto;
+  min-height: 5.8rem;
+  padding: 1.15rem 1.25rem 0.75rem;
+  border-bottom: 1px solid #454a4d;
+}
+
+.exercise-picker h2 {
+  margin: 0;
+  font-size: clamp(1.65rem, 7vw, 2.1rem);
+}
+
+.exercise-picker .icon-button {
+  border: 0;
+  background: #1b1e20;
+  color: #777c7d;
+}
+
+.exercise-search-wrap {
+  min-height: 3.65rem;
+  display: grid;
+  grid-template-columns: 2.5rem minmax(0, 1fr);
+  align-items: center;
+  margin: 1rem 1rem 0.65rem;
+  border: 1px solid #4a5053;
+  border-radius: 5px;
+  background: #17191a;
+}
+
+.exercise-search-wrap > span {
+  color: #d1ceca;
+  font-size: 1.8rem;
+  text-align: center;
+  transform: rotate(-15deg);
+}
+
+.exercise-search-wrap .exercise-search {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  padding: 0 0.7rem 0 0;
+  background: transparent;
+  font-size: 1rem;
+}
+
+.exercise-filter-selects {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem;
+  padding: 0 1rem 0.8rem;
+  border-bottom: 1px solid #41474a;
+}
+
+.exercise-filter-selects select {
+  min-height: 2.75rem;
+  max-width: calc(50% - 0.35rem);
+  border: 1px solid #4a5053;
+  border-radius: 5px;
+  padding: 0.55rem 2rem 0.55rem 0.7rem;
+  background: #191c1e;
+  color: #d0cdca;
+  font-size: 0.82rem;
+}
+
+.exercise-list {
+  padding: 0;
+  background: #181b1d;
+}
+
+.exercise-list-section > h3 {
+  display: none;
+}
+
+.exercise-option {
+  min-height: 5.25rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  border: 0;
+  border-bottom: 1px solid #3d4346;
+  background: #181b1d;
+}
+
+.exercise-option-select {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 3.4rem minmax(0, 1fr) 1.6rem;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.65rem 0 0.65rem 0.85rem;
+}
+
+.exercise-option-select .exercise-icon {
+  width: 2.55rem;
+  height: 2.55rem;
+  border: 0;
+  background: transparent;
+  color: #080a0b;
+  filter: grayscale(1) contrast(1.3);
+}
+
+.exercise-option-copy {
+  min-width: 0;
+}
+
+.exercise-list .exercise-option-copy > strong {
+  display: block;
+  overflow: hidden;
+  font-size: 1rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.exercise-option-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.38rem;
+}
+
+.exercise-option-tags em {
+  border-radius: 4px;
+  padding: 0.25rem 0.45rem;
+  background: #202326;
+  color: #ccc9c5;
+  font-size: 0.73rem;
+  font-style: normal;
+}
+
+.exercise-option-selected {
+  width: 1.35rem;
+  height: 1.35rem;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--accent);
+  color: white;
+  font-size: 0.78rem;
+}
+
+.exercise-option:not(.selected) .exercise-option-selected {
+  background: transparent;
+}
+
+.exercise-favorite-button {
+  min-width: 5.5rem;
+  border: 0;
+  padding: 0 0.7rem 0 0.2rem;
+  background: transparent;
+}
+
+.exercise-rating i {
+  font-size: 0.93rem;
+}
+
+.exercise-picker-actions {
+  border-top: 1px solid #42484b;
+  background: #1c1f21;
+}
+
+.exercise-picker-actions:has(.add-selected-button:disabled) {
+  display: none;
+}
+
+/* Bodyweight reference. */
+.body-screen {
+  width: min(100%, 720px);
+  padding-top: 0.85rem;
+}
+
+.body-reference-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.25rem;
+  margin: 0 -0.25rem 0.85rem;
+  padding: 0.65rem 0;
+}
+
+.body-reference-stats > div {
+  min-width: 0;
+  text-align: center;
+}
+
+.body-reference-stats span,
+.body-reference-stats strong {
+  display: block;
+}
+
+.body-reference-stats span {
+  overflow: hidden;
+  color: #c5c2be;
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.body-reference-stats strong {
+  margin-top: 0.35rem;
+  color: #dedbd7;
+  font-size: clamp(1.05rem, 5.2vw, 1.55rem);
+}
+
+.body-reference-actions {
+  display: flex;
+  gap: 0.65rem;
+  margin-bottom: 1.7rem;
+}
+
+.body-reference-actions button {
+  min-height: 2.8rem;
+  border: 0;
+  border-radius: 4px;
+  padding: 0.65rem 0.8rem;
+  background: #232729;
+  color: #d5d2ce;
+}
+
+.body-reference-actions button:first-child,
+.body-reference-actions button.active {
+  background: var(--accent);
+  color: #f2fbff;
+}
+
+.body-screen .reference-collapsed {
+  display: none;
+}
+
+.body-phase-panel,
+.body-goal-panel,
+.body-entry-panel {
+  margin-bottom: 1.2rem;
+}
+
+.body-trend-panel {
+  margin: 0;
+  border: 0;
+  padding: 0;
+  background: transparent;
+}
+
+.body-trend-panel > .panel-heading {
+  display: none;
+}
+
+.body-log-tabs {
+  display: flex;
+  gap: 0.35rem;
+  margin-top: 1.35rem;
+  border-bottom: 1px solid #444a4d;
+}
+
+.body-log-tabs button {
+  min-height: 2.65rem;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: 4px 4px 0 0;
+  padding: 0.6rem 0.8rem;
+  background: transparent;
+  color: #d2cfcb;
+}
+
+.body-log-tabs button.active {
+  border-color: #444a4d;
+  color: #4db9f3;
+}
+
+.body-history-panel {
+  margin: 0;
+  border: 0;
+  padding: 0;
+  background: transparent;
+}
+
+.body-history-panel > .panel-heading,
+.body-history-panel > .body-csv-format,
+.body-history-panel > .body-csv-status {
+  display: none;
+}
+
+.body-history-table-head,
+.body-history-panel > article {
+  display: grid;
+  grid-template-columns: 1.05fr 1.15fr 0.8fr 2rem;
+  gap: 0.45rem;
+  align-items: start;
+}
+
+.body-history-table-head {
+  border-bottom: 1px solid #51575a;
+  padding: 0.6rem 0.45rem 0.45rem;
+  color: #d1ceca;
+  font-size: 0.73rem;
+  font-weight: 700;
+}
+
+.body-history-panel > article {
+  margin: 0;
+  border: 0;
+  border-bottom: 1px solid #454b4e;
+  border-radius: 0;
+  padding: 0.55rem 0.45rem;
+  background: transparent;
+}
+
+.body-history-panel article strong,
+.body-history-panel article small {
+  display: block;
+}
+
+.body-history-panel article strong {
+  color: #d6d3cf;
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+
+.body-history-panel article small {
+  margin-top: 0.1rem;
+  color: #a6a5a2;
+  font-size: 0.65rem;
+}
+
+.body-history-weight p {
+  grid-column: 1 / -1;
+  margin: 0.18rem 0 0;
+  color: #8f9292;
+  font-size: 0.6rem;
+}
+
+.body-row-menu {
+  position: relative;
+}
+
+.body-row-menu > summary {
+  color: #29a9ec;
+  font-size: 1.25rem;
+  list-style: none;
+  text-align: center;
+}
+
+.body-row-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.body-row-menu .body-history-actions {
+  position: absolute;
+  z-index: 12;
+  top: 100%;
+  right: 0;
+  width: 9rem;
+  display: grid;
+  border: 1px solid #454b4e;
+  background: #202325;
+}
+
+.body-row-menu .body-history-actions button {
+  border: 0;
+  border-bottom: 1px solid #454b4e;
+  border-radius: 0;
+  background: transparent;
+}
+
+/* Workout history reference. */
+.history-screen {
+  width: min(100%, 760px);
+  padding-top: 0.75rem;
+}
+
+.history-section-tabs {
+  gap: 0;
+  margin-bottom: 0.85rem;
+  border: 0;
+  border-bottom: 1px solid #42484b;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
+}
+
+.history-section-tabs button {
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  font-size: 0.72rem;
+}
+
+.history-section-tabs button.active {
+  border-bottom-color: var(--accent);
+  background: transparent;
+  color: var(--accent-dark);
+}
+
+.history-intro {
+  align-items: center;
+  margin-bottom: 0.8rem;
+}
+
+.history-intro > div:first-child {
+  display: none;
+}
+
+.history-intro .data-actions {
+  width: 100%;
+  gap: 0.45rem;
+}
+
+.history-intro .data-actions button {
+  min-height: 2.55rem;
+  border-radius: 4px;
+  padding: 0.55rem 0.65rem;
+}
+
+.history-intro .data-actions .history-add-workout {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: white;
+}
+
+.history-card {
+  margin: 0;
+  border: 0;
+  border-bottom: 1px solid #404649;
+  border-radius: 0;
+}
+
+.history-card-summary {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+@media (min-width: 760px) {
+  .dashboard-shortcuts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 620px) {
+  .content-page {
+    padding-right: 0.75rem;
+    padding-left: 0.75rem;
+  }
+
+  .dashboard-screen .profile-hero {
+    margin-right: -0.75rem;
+    margin-left: -0.75rem;
+  }
+
+  .dashboard-screen .training-level-strip {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+  }
+
+  .dashboard-screen .training-level-strip > strong {
+    grid-column: auto;
+    padding-top: 0.92rem;
+  }
+
+  .dashboard-shortcuts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .movement-overflow-menu {
+    position: absolute;
+    top: 2.7rem;
+    right: 0;
+    bottom: auto;
+    left: auto;
+    width: min(17rem, calc(100vw - 1.5rem));
+  }
+
+  .add-set-dialog,
+  .superset-picker {
+    max-height: 92dvh;
+  }
+}
+
+@media (max-width: 390px) {
+  .dashboard-shortcuts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dashboard-shortcuts button {
+    min-height: 4.55rem;
+    gap: 0.5rem;
+    padding: 0.75rem;
+  }
+
+  .dashboard-shortcuts strong {
+    font-size: 0.98rem;
+  }
+
+  .dashboard-screen .training-level-strip > span:first-child {
+    padding-right: 0.55rem;
+    padding-left: 0.7rem;
+  }
+
+  .dashboard-screen .training-level-strip > strong {
+    padding-right: 0.65rem;
+    padding-left: 0.25rem;
+  }
+
+  .set-grid-strength .set-grid-head,
+  .set-grid-strength .completed-set-summary {
+    grid-template-columns: minmax(4.35rem, 1fr) 2.35rem 2.65rem minmax(5.3rem, 1.1fr) 1.3rem;
+    font-size: 0.75rem;
+  }
+
+  .strength-level-stars i {
+    font-size: 0.78rem;
+  }
+
+  .exercise-favorite-button {
+    min-width: 4.7rem;
+    padding-right: 0.35rem;
+  }
+
+  .exercise-rating i {
+    font-size: 0.78rem;
+  }
+}
+
 /* Default dark theme */
 :root {
   color-scheme: dark;
@@ -7418,4 +8500,156 @@ body,
   .dashboard-shortcuts {
     grid-template-columns: 1fr;
   }
+}
+
+/* Keep the final reference-match rules last in the cascade. */
+.dashboard-shortcuts {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.dashboard-shortcuts button {
+  min-height: 5rem;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: 1fr;
+  gap: 0.7rem;
+  padding: 0.9rem;
+}
+
+.dashboard-shortcuts button > span {
+  grid-row: auto;
+}
+
+.dashboard-shortcuts button:last-child {
+  width: calc(50% - 0.375rem);
+  grid-column: 1 / -1;
+}
+
+.set-details.completed,
+.set-details.completed[open] > .set-row,
+.set-row.completed {
+  background: transparent;
+}
+
+.set-details.completed:last-of-type,
+.set-details.completed:last-of-type[open] > .set-row {
+  background: var(--gold-row);
+}
+
+.exercise-picker-backdrop .exercise-picker {
+  height: 100%;
+  max-height: none;
+  border: 0;
+  border-radius: 0;
+}
+
+.exercise-picker h2,
+.superset-picker h2 {
+  font-size: clamp(1.65rem, 7vw, 2.1rem);
+}
+
+.superset-option,
+.superset-option.selected {
+  border: 0;
+  background: transparent;
+}
+
+.history-section-tabs {
+  border: 0;
+  border-bottom: 1px solid #42484b;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
+}
+
+.history-section-tabs button,
+.history-section-tabs button.active {
+  border-radius: 0;
+  background: transparent;
+}
+
+.history-section-tabs button.active {
+  border-bottom: 2px solid var(--accent);
+  color: var(--accent-dark);
+}
+
+@media (max-width: 620px) {
+  .content-page {
+    padding-right: 0.75rem;
+    padding-left: 0.75rem;
+  }
+
+  .dashboard-shortcuts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dashboard-shortcuts button:last-child {
+    width: calc(50% - 0.375rem);
+  }
+
+  .movement-overflow-menu {
+    position: absolute;
+    top: 2.7rem;
+    right: 0;
+    bottom: auto;
+    left: auto;
+    width: min(17rem, calc(100vw - 1.5rem));
+  }
+
+  .add-set-dialog,
+  .superset-picker {
+    width: min(100%, 590px);
+    max-height: 92dvh;
+  }
+
+  .add-set-fields {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 390px) {
+  .dashboard-shortcuts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dashboard-shortcuts button {
+    min-height: 4.55rem;
+    gap: 0.45rem;
+    padding: 0.72rem;
+  }
+
+  .dashboard-shortcuts strong {
+    font-size: 0.96rem;
+  }
+}
+
+html,
+body,
+#root,
+.tracker-app {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+.exercise-search-wrap:focus-within {
+  border-color: #8e9497;
+}
+
+.exercise-search-wrap .exercise-search:focus {
+  border: 0;
+  outline: 0;
+  box-shadow: none;
+}
+
+.superset-picker-backdrop {
+  place-items: end center;
+  padding: 0;
+}
+
+.superset-picker-backdrop .superset-picker {
+  width: min(100%, 590px);
+  max-height: 92dvh;
+  border-right: 0;
+  border-bottom: 0;
+  border-left: 0;
+  border-radius: 7px 7px 0 0;
 }

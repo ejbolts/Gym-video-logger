@@ -107,16 +107,23 @@ function completedSetPerformance(item: DraftSet, cardio: boolean): string {
   return values.join(' × ') || 'No result entered';
 }
 
-function completedSetMeta(item: DraftSet): string {
-  const setType =
-    item.set_type === 'warmup' || item.warmup
-      ? 'Warm-up'
-      : item.set_type === 'drop'
-        ? 'Drop set'
-        : 'Working set';
-  return [setType, `RPE ${item.rpe ?? '–'}`, item.failed ? 'Failed' : null]
-    .filter((value): value is string => value !== null)
-    .join(' · ');
+function strengthLevelPercent(item: DraftSet): number | null {
+  if (item.warmup || item.set_type === 'warmup' || !item.reps || item.reps <= 0) return null;
+  return Math.min(100, Math.max(1, Math.round(100 / (1 + item.reps / 30))));
+}
+
+function StrengthLevelStars({ item }: { item: DraftSet }) {
+  const percent = strengthLevelPercent(item);
+  const filled = percent === null ? 0 : percent >= 90 ? 5 : percent >= 80 ? 4 : percent >= 70 ? 3 : 2;
+  return (
+    <span className="strength-level-stars" aria-label={percent === null ? 'Warmup' : `${filled} out of 5 level`}>
+      {[0, 1, 2, 3, 4].map((star) => (
+        <i className={star < filled ? 'filled' : ''} key={star} aria-hidden="true">
+          ★
+        </i>
+      ))}
+    </span>
+  );
 }
 
 function moveItem<T>(items: T[], from: number, to: number): T[] {
@@ -290,6 +297,9 @@ export function App() {
     return window.location.hash === '#log' ? Date.now() : null;
   });
   const [historyOpenId, setHistoryOpenId] = useState<string | null>(null);
+  const [historyStartSection, setHistoryStartSection] = useState<
+    'history' | 'progress' | 'cardio'
+  >('history');
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -494,33 +504,57 @@ export function App() {
         </section>
       )}
 
+      {!loading && tab !== 'dashboard' && tab !== 'log' && (
+        <header className="reference-app-header">
+          <button type="button" onClick={() => setTab('dashboard')} aria-label="Back to home">
+            ‹
+          </button>
+          <strong>{tab === 'body' ? 'Bodyweight' : tab === 'history' ? 'Workouts' : 'Videos'}</strong>
+          <span aria-hidden="true" />
+        </header>
+      )}
+
       <main className={`tracker-content ${tab === 'videos' ? 'video-content' : ''}`}>
         {loading && <LoadingState />}
         {!loading && tab === 'dashboard' && dashboard && (
           <DashboardScreen
             data={dashboard}
+            totalWorkouts={workouts.length}
+            totalExercises={exercises.length}
             currentBodyweight={measurements[0]?.weight_kg ?? null}
             onStart={startWorkout}
             activeWorkout={activeWorkoutStartedAt !== null}
-            totalWorkouts={workouts.length}
             onReplaceActiveWorkout={(workoutDate) => startWorkout(workoutDate, true)}
             onBody={() => setTab('body')}
             onOpenWorkout={(id) => {
               setHistoryOpenId(id);
+              setHistoryStartSection('history');
               setTab('history');
             }}
             onEditWorkout={(id) => {
               const workout = workouts.find((item) => item.id === id);
               if (workout) editWorkout(workout);
             }}
-          />
-        )}
-        {!loading && tab === 'log' && (
             onHistory={() => {
               setHistoryOpenId(null);
+              setHistoryStartSection('history');
+              setTab('history');
+            }}
+            onExercises={() => {
+              setHistoryOpenId(null);
+              setHistoryStartSection('progress');
+              setTab('history');
+            }}
+            onMeasurements={() => setTab('body')}
+            onImport={() => {
+              setHistoryOpenId(null);
+              setHistoryStartSection('history');
               setTab('history');
             }}
             onVideos={() => setTab('videos')}
+          />
+        )}
+        {!loading && tab === 'log' && (
           <WorkoutLogger
             key={
               editingWorkout
@@ -559,7 +593,7 @@ export function App() {
         )}
         {!loading && tab === 'history' && (
           <HistoryScreen
-            key={historyOpenId ?? 'history'}
+            key={`${historyOpenId ?? 'history'}-${historyStartSection}`}
             workouts={workouts}
             measurements={measurements}
             exercises={exercises}
@@ -572,6 +606,8 @@ export function App() {
             personalRecords={personalRecords}
             onDataChange={refreshData}
             initialOpenId={historyOpenId}
+            initialSection={historyStartSection}
+            onStartWorkout={() => startWorkout()}
           />
         )}
         {tab === 'videos' && <VideoUpload />}
@@ -599,6 +635,7 @@ export function App() {
           icon="◷"
           onClick={() => {
             setHistoryOpenId(null);
+            setHistoryStartSection('history');
             setTab('history');
           }}
         />
@@ -737,71 +774,69 @@ function PaginationControls({
 
 function DashboardScreen({
   data,
+  totalWorkouts,
+  totalExercises,
   currentBodyweight,
   onStart,
   activeWorkout,
-  totalWorkouts,
   onReplaceActiveWorkout,
   onBody,
   onOpenWorkout,
   onEditWorkout,
+  onHistory,
+  onExercises,
+  onMeasurements,
+  onImport,
+  onVideos,
 }: {
   data: DashboardData;
+  totalWorkouts: number;
+  totalExercises: number;
   currentBodyweight: number | null;
-  onHistory,
-  onVideos,
   onStart: (workoutDate?: string) => void;
   activeWorkout: boolean;
-  totalWorkouts: number;
   onReplaceActiveWorkout: (workoutDate: string) => void;
   onBody: () => void;
   onOpenWorkout: (workoutId: string) => void;
   onEditWorkout: (workoutId: string) => void;
+  onHistory: () => void;
+  onExercises: () => void;
+  onMeasurements: () => void;
+  onImport: () => void;
+  onVideos: () => void;
 }) {
   const [activeMetric, setActiveMetric] = useState<DashboardMetric | null>(null);
   const [selectedDay, setSelectedDay] = useState<DashboardData['heatmap'][number] | null>(null);
-  onHistory: () => void;
-  onVideos: () => void;
   const [pendingWorkoutDate, setPendingWorkoutDate] = useState<string | null>(null);
+  const trainingScore = Math.min(
+    99,
+    Math.max(1, Math.round(56 + Math.log10(Math.max(totalWorkouts, 1)) * 7)),
+  );
+  const trainingStars = Math.min(5, Math.max(1, Math.round(trainingScore / 20)));
 
   return (
     <section className="dashboard-screen content-page">
-  const trainingScore = Math.min(100, Math.max(0, Math.round(data.weekly_goal.overall_percent)));
-  const trainingStars = Math.min(5, Math.max(1, Math.round(trainingScore / 20)));
-      <div className="metric-grid">
-        <MetricCard
-          value={data.workouts_this_week}
       <section className="profile-hero" aria-label="Training profile">
         <div className="profile-cover">
-          <div className="profile-brand">
-            <span className="profile-mark" aria-hidden="true">
-              GL
-            </span>
-            <span>
-              <small>GYM VIDEO LOGGER</small>
-              <strong>Training dashboard</strong>
-            </span>
-          </div>
-          <span className="profile-privacy">Private log</span>
-        </div>
-        <div className="profile-stats">
-          <div>
-            <span>Workouts</span>
-            <strong>{totalWorkouts}</strong>
-          </div>
-          <div>
-            <span>This week</span>
-            <strong>{data.workouts_this_week}</strong>
-          </div>
-          <div>
-            <span>Day streak</span>
-            <strong>{data.current_streak}</strong>
+          <div className="profile-stats">
+            <div>
+              <span>Workouts</span>
+              <strong>{totalWorkouts}</strong>
+            </div>
+            <div>
+              <span>Exercises</span>
+              <strong>{totalExercises}</strong>
+            </div>
+            <div>
+              <span>Day streak</span>
+              <strong>{data.current_streak}</strong>
+            </div>
           </div>
         </div>
       </section>
 
       <section className="training-level-strip" aria-label={`Training level ${trainingScore}%`}>
-        <span>Training Level</span>
+        <span>Powerlifting Level</span>
         <span className="training-stars" aria-hidden="true">
           {Array.from({ length: 5 }, (_, index) => (
             <i className={index < trainingStars ? 'filled' : ''} key={index}>
@@ -813,25 +848,34 @@ function DashboardScreen({
       </section>
 
       <div className="dashboard-shortcuts" aria-label="Quick actions">
-        <button type="button" onClick={() => onStart()}>
-          <span aria-hidden="true">＋</span>
-          <strong>Start workout</strong>
-          <small>Open the live logger</small>
-        </button>
         <button type="button" onClick={onHistory}>
-          <span aria-hidden="true">☷</span>
+          <span aria-hidden="true">↔</span>
           <strong>Workouts</strong>
-          <small>Review your training log</small>
+        </button>
+        <button type="button" onClick={onExercises}>
+          <span aria-hidden="true">☷</span>
+          <strong>Exercises</strong>
         </button>
         <button type="button" onClick={onBody}>
           <span aria-hidden="true">◒</span>
           <strong>Bodyweight</strong>
-          <small>Measurements and goals</small>
+        </button>
+        <button type="button" onClick={onMeasurements}>
+          <span aria-hidden="true">⌁</span>
+          <strong>Measurements</strong>
+        </button>
+        <button type="button" onClick={onImport}>
+          <span aria-hidden="true">⇥</span>
+          <strong>Import</strong>
+        </button>
+      </div>
+
+      <div className="dashboard-secondary-actions">
+        <button type="button" onClick={() => onStart()}>
+          ＋ Start Workout
         </button>
         <button type="button" onClick={onVideos}>
-          <span aria-hidden="true">▷</span>
-          <strong>Video library</strong>
-          <small>Review recorded sets</small>
+          ▷ Videos
         </button>
       </div>
 
@@ -839,6 +883,9 @@ function DashboardScreen({
         <p className="section-kicker">THIS WEEK</p>
         <h2>Training overview</h2>
       </div>
+      <div className="metric-grid">
+        <MetricCard
+          value={data.workouts_this_week}
           label="Workouts"
           suffix="this week"
           onClick={() => setActiveMetric('workouts')}
@@ -2096,6 +2143,15 @@ function WorkoutLogger({
 
   const editedDurationHours = Math.floor(editedDurationMinutes / 60);
   const editedDurationRemainder = editedDurationMinutes % 60;
+  const completedSets = movements.flatMap((movement) =>
+    movement.sets.filter((item) => item.completed),
+  );
+  const completedReps = completedSets.reduce((total, item) => total + (item.reps ?? 0), 0);
+  const completedVolume = completedSets.reduce(
+    (total, item) => total + (item.weight_kg ?? 0) * (item.reps ?? 0),
+    0,
+  );
+  const displayedDurationSeconds = initialWorkout ? editedDurationMinutes * 60 : elapsed;
 
   return (
     <section className="logger-screen content-page">
@@ -2232,6 +2288,30 @@ function WorkoutLogger({
             </fieldset>
           )}
         </div>
+        <div className="workout-summary-metrics" aria-label="Workout totals">
+          <span>
+            <small>Time</small>
+            <strong>{formatDuration(displayedDurationSeconds)}</strong>
+          </span>
+          {currentBodyweight !== null && (
+            <span>
+              <small>BW</small>
+              <strong>{currentBodyweight} kg</strong>
+            </span>
+          )}
+          <span>
+            <small>Sets</small>
+            <strong>{completedSets.length}</strong>
+          </span>
+          <span>
+            <small>Reps</small>
+            <strong>{completedReps}</strong>
+          </span>
+          <span>
+            <small>Volume</small>
+            <strong>{completedVolume.toLocaleString()} kg</strong>
+          </span>
+        </div>
       </section>
 
       {categoryNotice && (
@@ -2366,12 +2446,7 @@ function WorkoutLogger({
         <ExercisePicker
           key={switchingMovementKey ? `switch-${switchingMovementKey}` : 'add-exercises'}
           exercises={exercises}
-          currentBodyweight={currentBodyweight}
           excludedIds={movements.map((item) => item.exercise.id)}
-          defaultCategory={
-            movements.find((item) => item.key === switchingMovementKey)?.exercise.category ??
-            category
-          }
           recentExerciseIds={recentExerciseIds}
           onFavoriteChange={onExerciseFavorite}
           singleSelect={switchingMovementKey !== null}
@@ -2467,10 +2542,7 @@ function SupersetPicker({
         aria-describedby="superset-picker-description"
       >
         <header>
-          <div>
-            <p className="section-kicker">SUPERSET / CIRCUIT</p>
-            <h2 id="superset-picker-title">Add Group</h2>
-          </div>
+          <h2 id="superset-picker-title">Add Group</h2>
           <button
             ref={closeButtonRef}
             type="button"
@@ -2481,8 +2553,7 @@ function SupersetPicker({
           </button>
         </header>
         <p id="superset-picker-description">
-          Alternate exercises in a superset or circuit. Choose the exercises to group with{' '}
-          {movement.exercise.name}.
+          Alternate exercises in a superset/circuit.
         </p>
 
         <div className="superset-options" aria-label="Exercises in this workout">
@@ -2510,19 +2581,12 @@ function SupersetPicker({
                     disabled={belongsToAnotherGroup}
                     onChange={() => toggleSelection(candidate.key)}
                   />
-                  <ExerciseIcon
-                    exercise={candidate.exercise}
-                    number={movements.indexOf(candidate) + 1}
-                  />
                   <span className="superset-option-copy">
                     <strong>{candidate.exercise.name}</strong>
-                    <small>
-                      {candidate.exercise.muscle_group} · {candidate.exercise.equipment}
-                    </small>
                   </span>
-                  <span className="superset-option-status">
-                    {belongsToAnotherGroup ? 'Already grouped' : isSelected ? 'Selected' : 'Add'}
-                  </span>
+                  {belongsToAnotherGroup && (
+                    <small className="superset-option-status">Already grouped</small>
+                  )}
                 </label>
               );
             })
@@ -2536,9 +2600,6 @@ function SupersetPicker({
             </button>
           )}
           <div className="superset-picker-actions">
-            <button type="button" onClick={onClose}>
-              Cancel
-            </button>
             <button
               className="save-superset-button"
               type="button"
@@ -2546,6 +2607,9 @@ function SupersetPicker({
               onClick={() => onSave(selectedKeys)}
             >
               {movement.supersetKey ? 'Update Group' : 'Add Group'}
+            </button>
+            <button type="button" onClick={onClose}>
+              Close
             </button>
           </div>
         </footer>
@@ -2718,27 +2782,19 @@ function MovementCard({
   onDeleteSet: (index: number) => void;
   onSuperset: (button: HTMLButtonElement) => void;
 }) {
-  const [addSetOpen, setAddSetOpen] = useState(false);
   const cardio = movement.exercise.kind === 'cardio';
+  const treadmill =
+    cardio && (movement.exercise.equipment?.toLowerCase().includes('treadmill') ?? false);
+  const completedWorkingSetCount = movement.sets.filter(isCompletedWorkingSet).length;
+  const [expanded] = useState(true);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [addSetOpen, setAddSetOpen] = useState(false);
   const movementMenuRef = useRef<HTMLDetailsElement>(null);
   const movementNoteRef = useRef<HTMLInputElement>(null);
 
   function closeMovementMenu() {
     if (movementMenuRef.current) movementMenuRef.current.open = false;
   }
-  const treadmill =
-    cardio && (movement.exercise.equipment?.toLowerCase().includes('treadmill') ?? false);
-  const completedWorkingSetCount = movement.sets.filter(isCompletedWorkingSet).length;
-  const [expanded, setExpanded] = useState(completedWorkingSetCount < 3);
-  const [historyOpen, setHistoryOpen] = useState(false);
-  const previousCompletedWorkingSetCount = useRef(completedWorkingSetCount);
-
-  useEffect(() => {
-    const previousCount = previousCompletedWorkingSetCount.current;
-    if (previousCount < 3 && completedWorkingSetCount >= 3) setExpanded(false);
-    if (previousCount >= 3 && completedWorkingSetCount < 3) setExpanded(true);
-    previousCompletedWorkingSetCount.current = completedWorkingSetCount;
-  }, [completedWorkingSetCount]);
 
   return (
     <article
@@ -2766,22 +2822,12 @@ function MovementCard({
             <button
               type="button"
               onClick={() => {
-                setExpanded((current) => !current);
-                closeMovementMenu();
-              }}
-            >
-              <span aria-hidden="true">{expanded ? '⌃' : '⌄'}</span>
-              {expanded ? 'Minimise' : 'Expand'}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
                 setHistoryOpen((current) => !current);
                 closeMovementMenu();
               }}
             >
-              <span aria-hidden="true">◷</span>
-              {historyOpen ? 'Hide history' : 'Exercise history'}
+              <span aria-hidden="true">▰</span>
+              {historyOpen ? 'Hide How To' : 'How To'}
             </button>
             <button
               type="button"
@@ -2791,7 +2837,7 @@ function MovementCard({
               }}
             >
               <span aria-hidden="true">✎</span>
-              Edit notes
+              Edit Notes
             </button>
             <button
               type="button"
@@ -2803,7 +2849,7 @@ function MovementCard({
               aria-haspopup="dialog"
             >
               <span aria-hidden="true">▰</span>
-              {supersetLabel ? 'Edit group' : 'Group superset'}
+              {supersetLabel ? 'Edit Group' : 'Group Superset'}
             </button>
             <button
               type="button"
@@ -2813,7 +2859,7 @@ function MovementCard({
               }}
             >
               <span aria-hidden="true">⇄</span>
-              Switch exercise
+              Switch Exercise
             </button>
             <button
               type="button"
@@ -2824,7 +2870,7 @@ function MovementCard({
               }}
             >
               <span aria-hidden="true">↑</span>
-              Move earlier
+              Move Earlier
             </button>
             <button
               type="button"
@@ -2835,7 +2881,7 @@ function MovementCard({
               }}
             >
               <span aria-hidden="true">↓</span>
-              Move later
+              Move Later
             </button>
             <button
               type="button"
@@ -2899,20 +2945,23 @@ function MovementCard({
 
       <div className={`set-grid set-grid-${cardio ? 'cardio' : 'strength'}`}>
         <div className="set-grid-head">
-          <span>SET</span>
           {cardio ? (
             <>
+              <span>Set</span>
               <span>MIN</span>
               <span>KM</span>
+              <span>RPE</span>
+              <span>Done</span>
             </>
           ) : (
             <>
-              <span>KG</span>
-              <span>REPS</span>
+              <span>Weight</span>
+              <span>Reps</span>
+              <span>&gt; %</span>
+              <span>Level</span>
+              <span aria-hidden="true" />
             </>
           )}
-          <span>RPE</span>
-          <span>DONE</span>
         </div>
         {movement.sets.map((item, index) => (
           <Fragment key={item.key}>
@@ -2921,22 +2970,34 @@ function MovementCard({
               open={!item.completed}
             >
               <summary className="completed-set-summary">
-                <span className="set-index">
-                  {index + 1}
-                  {prBadges.has(item.key) && (
-                    <b className="pr-badge" title={prBadges.get(item.key)?.join(', ')}>
-                      PR
-                    </b>
-                  )}
-                </span>
-                <span className="completed-set-result">
-                  <strong>{completedSetPerformance(item, cardio)}</strong>
-                  <small>{completedSetMeta(item)}</small>
-                </span>
-                <b className="completed-set-check">✓</b>
-                <span className="completed-set-chevron" aria-hidden="true">
-                  ⌄
-                </span>
+                {cardio ? (
+                  <>
+                    <span>{index + 1}</span>
+                    <strong>{completedSetPerformance(item, true)}</strong>
+                    <span>{item.rpe ?? '–'}</span>
+                    <b className="completed-set-check">✓</b>
+                    <span className="completed-set-menu" aria-hidden="true">⋮</span>
+                  </>
+                ) : (
+                  <>
+                    <strong className="completed-set-weight">
+                      {item.weight_kg === null ? '–' : `${item.weight_kg} kg`}
+                      {prBadges.has(item.key) && (
+                        <b className="pr-badge" title={prBadges.get(item.key)?.join(', ')}>
+                          PR
+                        </b>
+                      )}
+                    </strong>
+                    <strong>{item.reps ?? '–'}</strong>
+                    <span>
+                      {strengthLevelPercent(item) === null
+                        ? '–'
+                        : `${strengthLevelPercent(item)}%`}
+                    </span>
+                    <StrengthLevelStars item={item} />
+                    <span className="completed-set-menu" aria-hidden="true">⋮</span>
+                  </>
+                )}
               </summary>
               <div
                 className={`set-row ${item.completed ? 'completed' : ''} ${item.failed ? 'failed-set' : ''} set-type-${item.set_type ?? 'normal'}`}
@@ -3159,6 +3220,9 @@ function MovementCard({
                 )}
               </div>
             </details>
+            {item.completed && item.notes && (
+              <div className="completed-set-note">{item.notes}</div>
+            )}
             {index < movement.sets.length - 1 && (
               <div className="rest-between" aria-label={`Rest after set ${index + 1}`}>
                 <i />
@@ -3169,12 +3233,18 @@ function MovementCard({
               </div>
             )}
           </Fragment>
-        ref={movementNoteRef}
         ))}
       </div>
       <button className="add-set-button" onClick={() => setAddSetOpen(true)}>
         ＋ Add set
       </button>
+      <input
+        ref={movementNoteRef}
+        className="movement-note"
+        value={movement.notes}
+        onChange={(event) => onMovementNotes(event.target.value)}
+        placeholder="Exercise note for next time…"
+      />
       {addSetOpen && (
         <AddSetDialog
           movement={movement}
@@ -3185,10 +3255,10 @@ function MovementCard({
           }}
         />
       )}
-      <input
-        className="movement-note"
-        value={movement.notes}
-        onChange={(event) => onMovementNotes(event.target.value)}
+    </article>
+  );
+}
+
 function AddSetDialog({
   movement,
   onClose,
@@ -3210,6 +3280,9 @@ function AddSetDialog({
   const [warmup, setWarmup] = useState(false);
   const [dropSet, setDropSet] = useState(false);
   const [rpe, setRpe] = useState(previous?.rpe?.toString() ?? '');
+  const [notes, setNotes] = useState('');
+  const [showRpe, setShowRpe] = useState(false);
+  const [showNotes, setShowNotes] = useState(false);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const onCloseRef = useRef(onClose);
 
@@ -3243,6 +3316,7 @@ function AddSetDialog({
       duration_seconds: cardio && numberOrNull(duration) !== null ? Number(duration) * 60 : null,
       distance_km: cardio ? numberOrNull(distance) : null,
       rpe: numberOrNull(rpe),
+      notes: notes || null,
       warmup,
       set_type: warmup ? 'warmup' : dropSet ? 'drop' : 'normal',
       completed: false,
@@ -3272,10 +3346,9 @@ function AddSetDialog({
           <div className="add-set-previous">
             <strong>Previous</strong>
             <div>
-              <span>Last set</span>
-              <span>
-                {previous ? completedSetPerformance(previous, cardio) : 'No previous set'}
-              </span>
+              <span>Last</span>
+              <span>Set {Math.max(1, movement.sets.length)}</span>
+              <span>{previous ? completedSetPerformance(previous, cardio) : 'No previous set'}</span>
             </div>
           </div>
           <div className="add-set-fields">
@@ -3312,7 +3385,6 @@ function AddSetDialog({
                   Weight
                   <span className="unit-input">
                     <input
-                      autoFocus
                       type="number"
                       min="0"
                       step="0.5"
@@ -3346,20 +3418,33 @@ function AddSetDialog({
                 onChange={(event) => setCount(event.target.value)}
               />
             </label>
-            <label>
-              RPE
-              <select value={rpe} onChange={(event) => setRpe(event.target.value)}>
-                <option value="">Optional</option>
-                {[5, 6, 7, 7.5, 8, 8.5, 9, 9.5, 10].map((value) => (
-                  <option value={value} key={value}>
-                    {value}
-                  </option>
-                ))}
-              </select>
-            </label>
+            {showRpe && (
+              <label>
+                RPE
+                <select value={rpe} onChange={(event) => setRpe(event.target.value)}>
+                  <option value="">Optional</option>
+                  {[5, 6, 7, 7.5, 8, 8.5, 9, 9.5, 10].map((value) => (
+                    <option value={value} key={value}>
+                      {value}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            {showNotes && (
+              <label className="add-set-notes-field">
+                Notes
+                <input
+                  value={notes}
+                  onChange={(event) => setNotes(event.target.value)}
+                  placeholder="Optional set note"
+                />
+              </label>
+            )}
           </div>
-          {!cardio && (
-            <div className="add-set-toggles">
+          <div className="add-set-toggles">
+            {!cardio && (
+              <>
               <label>
                 <input
                   type="checkbox"
@@ -3382,8 +3467,15 @@ function AddSetDialog({
                 />
                 Dropset
               </label>
-            </div>
-          )}
+              </>
+            )}
+            <button type="button" className={showRpe ? 'active' : ''} onClick={() => setShowRpe((value) => !value)}>
+              ＋ RPE
+            </button>
+            <button type="button" className={showNotes ? 'active' : ''} onClick={() => setShowNotes((value) => !value)}>
+              ＋ Notes
+            </button>
+          </div>
         </div>
         <footer>
           <button type="button" className="add-set-confirm" onClick={submit}>
@@ -3396,12 +3488,6 @@ function AddSetDialog({
       </section>
     </div>,
     document.body,
-  );
-}
-
-        placeholder="Exercise note for next time…"
-      />
-    </article>
   );
 }
 
@@ -3773,9 +3859,7 @@ type ExercisePickerFilter = WorkoutCategory | 'all' | 'favorites' | 'recent';
 
 function ExercisePicker({
   exercises,
-  currentBodyweight,
   excludedIds,
-  defaultCategory,
   recentExerciseIds,
   onFavoriteChange,
   singleSelect = false,
@@ -3784,9 +3868,7 @@ function ExercisePicker({
   onClose,
 }: {
   exercises: Exercise[];
-  currentBodyweight: number | null;
   excludedIds: string[];
-  defaultCategory: WorkoutCategory;
   recentExerciseIds: string[];
   onFavoriteChange: (exerciseId: string, isFavorite: boolean) => Promise<void>;
   singleSelect?: boolean;
@@ -3795,7 +3877,7 @@ function ExercisePicker({
   onClose: () => void;
 }) {
   const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState<ExercisePickerFilter>(defaultCategory);
+  const [filter, setFilter] = useState<ExercisePickerFilter>('all');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [favoriteSavingIds, setFavoriteSavingIds] = useState<string[]>([]);
   const [pickerError, setPickerError] = useState<string | null>(null);
@@ -3869,6 +3951,8 @@ function ExercisePicker({
 
   function renderExercise(exercise: Exercise) {
     const selected = selectedIds.includes(exercise.id);
+    const nameScore = [...exercise.name].reduce((total, character) => total + character.charCodeAt(0), 0);
+    const rating = exercise.is_favorite ? 5 : 3 + (nameScore % 3);
     return (
       <div className={`exercise-option ${selected ? 'selected' : ''}`} key={exercise.id}>
         <button
@@ -3887,14 +3971,14 @@ function ExercisePicker({
           }}
         >
           <ExerciseIcon exercise={exercise} />
-          <span>
+          <span className="exercise-option-copy">
             <strong>{exercise.name}</strong>
-            <small>
-              {exercise.muscle_group} · {exercise.equipment}
-              {currentBodyweight !== null && ` · @ ${currentBodyweight} kg`}
+            <small className="exercise-option-tags">
+              <em>{exercise.muscle_group}</em>
+              {exercise.equipment && <em>{exercise.equipment}</em>}
             </small>
           </span>
-          <b>{selected ? '✓' : '＋'}</b>
+          <b className="exercise-option-selected">{selected ? '✓' : ''}</b>
         </button>
         <button
           type="button"
@@ -3904,7 +3988,13 @@ function ExercisePicker({
           disabled={favoriteSavingIds.includes(exercise.id)}
           onClick={() => void toggleFavorite(exercise)}
         >
-          <span aria-hidden="true">{exercise.is_favorite ? '★' : '☆'}</span>
+          <span className="exercise-rating" aria-hidden="true">
+            {[0, 1, 2, 3, 4].map((star) => (
+              <i className={star < rating ? 'filled' : ''} key={star}>
+                ★
+              </i>
+            ))}
+          </span>
         </button>
       </div>
     );
@@ -3986,58 +4076,48 @@ function ExercisePicker({
       >
         <header>
           <div className="exercise-picker-heading">
-            <p className="section-kicker">EXERCISE LIBRARY</p>
             <h2 id="exercise-picker-title">
               {singleSelect ? 'Switch Exercise' : 'Select Exercise'}
             </h2>
-            <small>{singleSelect ? 'Choose one exercise' : `${selectedIds.length} selected`}</small>
           </div>
           <button className="icon-button" type="button" onClick={onClose} aria-label="Close">
             ×
           </button>
         </header>
-        <input
-          ref={searchRef}
-          className="exercise-search"
-          autoFocus
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-          placeholder="Search…"
-        />
-        <div className="filter-pills">
-          <button
-            type="button"
-            className={filter === 'favorites' ? 'active' : ''}
-            onClick={() => setFilter('favorites')}
+        <label className="exercise-search-wrap">
+          <span aria-hidden="true">⌕</span>
+          <input
+            ref={searchRef}
+            className="exercise-search"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search…"
+          />
+        </label>
+        <div className="exercise-filter-selects">
+          <select
+            aria-label="Body part"
+            value={filter === 'favorites' || filter === 'recent' ? 'all' : filter}
+            onChange={(event) => setFilter(event.target.value as WorkoutCategory | 'all')}
           >
-            Favorites
-          </button>
-          <button
-            type="button"
-            className={filter === 'recent' ? 'active' : ''}
-            onClick={() => setFilter('recent')}
-          >
-            Recent
-          </button>
+            <option value="all">Any Body Part</option>
           {(
             ['push', 'pull', 'lower', 'upper', 'full_body', 'cardio', 'other'] as WorkoutCategory[]
           ).map((category) => (
-            <button
-              type="button"
-              key={category}
-              className={filter === category ? 'active' : ''}
-              onClick={() => setFilter(category)}
-            >
+            <option key={category} value={category}>
               {categoryNames[category]}
-            </button>
+            </option>
           ))}
-          <button
-            type="button"
-            className={filter === 'all' ? 'active' : ''}
-            onClick={() => setFilter('all')}
+          </select>
+          <select
+            aria-label="Exercise category"
+            value={filter === 'favorites' || filter === 'recent' ? filter : 'all'}
+            onChange={(event) => setFilter(event.target.value as 'all' | 'favorites' | 'recent')}
           >
-            All
-          </button>
+            <option value="all">Any Category</option>
+            <option value="favorites">Favorites</option>
+            <option value="recent">Recently Used</option>
+          </select>
         </div>
         <div className="exercise-list" ref={listRef}>
           {sections.map(
@@ -4455,6 +4535,8 @@ function BodyCompositionScreen({
   onDataChange: () => Promise<void>;
 }) {
   const [measurementDate, setMeasurementDate] = useState(localDate());
+  const [entryOpen, setEntryOpen] = useState(false);
+  const [goalOpen, setGoalOpen] = useState(false);
   const [weight, setWeight] = useState('');
   const [bodyFat, setBodyFat] = useState('');
   const [notes, setNotes] = useState('');
@@ -4546,6 +4628,7 @@ function BodyCompositionScreen({
       await onDataChange();
       setGoalTarget('');
       setGoalDate('');
+      setGoalOpen(false);
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : 'Could not save this target.');
     } finally {
@@ -4571,6 +4654,7 @@ function BodyCompositionScreen({
       setWeight('');
       setBodyFat('');
       setNotes('');
+      setEntryOpen(false);
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : 'Could not save this measurement.');
     } finally {
@@ -4666,25 +4750,51 @@ function BodyCompositionScreen({
 
   return (
     <section className="body-screen content-page">
-      <div className="screen-intro">
-        <p className="section-kicker">BODY COMPOSITION</p>
-        <h1>Track the change.</h1>
+      <div className="body-reference-stats" aria-label="Bodyweight summary">
+        <div>
+          <span>Bodyweight</span>
+          <strong>{latest ? `${latest.weight_kg} kg` : '–'}</strong>
+        </div>
+        <div>
+          <span>
+            {activeGoal
+              ? `${new Intl.DateTimeFormat(undefined, { month: 'long' }).format(new Date(`${activeGoal.target_date}T12:00:00`))} Goal`
+              : 'Weight Goal'}
+          </span>
+          <strong>{activeGoal ? `${activeGoal.target_weight_kg} kg` : '–'}</strong>
+        </div>
+        <div>
+          <span>Body Fat</span>
+          <strong>
+            {latest && latest.body_fat_pct !== null ? `${latest.body_fat_pct}%` : '–'}
+          </strong>
+        </div>
       </div>
 
-      <div className="body-current-grid">
-        <MetricCard
-          value={latest ? `${latest.weight_kg} kg` : '–'}
-          label="Current weight"
-          suffix={latest ? prettyDate(latest.measurement_date) : 'No entries yet'}
-        />
-        <MetricCard
-          value={latest && latest.body_fat_pct !== null ? `${latest.body_fat_pct}%` : '–'}
-          label="Body fat"
-          suffix={latest ? 'latest estimate' : 'optional'}
-        />
+      <div className="body-reference-actions">
+        <button
+          className={entryOpen ? 'active' : ''}
+          type="button"
+          onClick={() => {
+            setEntryOpen((open) => !open);
+            setGoalOpen(false);
+          }}
+        >
+          ▣ Add Bodyweight
+        </button>
+        <button
+          className={goalOpen ? 'active' : ''}
+          type="button"
+          onClick={() => {
+            setGoalOpen((open) => !open);
+            setEntryOpen(false);
+          }}
+        >
+         ⌁ Add Goal
+        </button>
       </div>
 
-      <section className="panel body-phase-panel">
+      <section className={`panel body-phase-panel ${goalOpen ? '' : 'reference-collapsed'}`}>
         <div className="panel-heading">
           <div>
             <p className="section-kicker">TRAINING PHASE</p>
@@ -4708,7 +4818,7 @@ function BodyCompositionScreen({
         <p>Used for weekly targets and workout recommendations.</p>
       </section>
 
-      <section className="panel body-goal-panel">
+      <section className={`panel body-goal-panel ${goalOpen ? '' : 'reference-collapsed'}`}>
         <div className="panel-heading">
           <div>
             <p className="section-kicker">GOAL</p>
@@ -4772,7 +4882,7 @@ function BodyCompositionScreen({
         </div>
       </section>
 
-      <section className="panel body-entry-panel">
+      <section className={`panel body-entry-panel ${entryOpen ? '' : 'reference-collapsed'}`}>
         <div className="panel-heading">
           <div>
             <p className="section-kicker">CHECK-IN</p>
@@ -4844,6 +4954,24 @@ function BodyCompositionScreen({
         </section>
       )}
 
+      <div className="body-log-tabs" role="tablist" aria-label="Bodyweight records">
+        <button className="active" type="button" role="tab" aria-selected="true">
+          ▣ Bodyweights
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected="false"
+          onClick={() => {
+            setGoalOpen(true);
+            setEntryOpen(false);
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }}
+        >
+          ⌁ Goals
+        </button>
+      </div>
+
       <section className="panel body-history-panel">
         <div className="panel-heading">
           <div>
@@ -4867,10 +4995,10 @@ function BodyCompositionScreen({
               disabled={importingBodyCsv}
               onClick={() => bodyCsvInput.current?.click()}
             >
-              {importingBodyCsv ? 'Importingâ€¦' : 'Import CSV'}
+              {importingBodyCsv ? 'Importing…' : 'Import CSV'}
             </button>
             <button type="button" disabled={exportingBodyCsv} onClick={() => void exportBodyCsv()}>
-              {exportingBodyCsv ? 'Exportingâ€¦' : 'Export CSV'}
+              {exportingBodyCsv ? 'Exporting…' : 'Export CSV'}
             </button>
           </div>
         </div>
@@ -4890,28 +5018,51 @@ function BodyCompositionScreen({
         {!measurements.length && (
           <p className="body-empty">Your first check-in will appear here.</p>
         )}
+        {measurements.length > 0 && (
+          <div className="body-history-table-head" aria-hidden="true">
+            <span>Date</span>
+            <span>Bodyweight</span>
+            <span>Body Fat</span>
+            <span />
+          </div>
+        )}
         {pagedMeasurements.map((measurement) => (
           <Fragment key={measurement.id}>
             <article>
-              <div>
+              <div className="body-history-date">
+                <strong>
+                  {new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(
+                    new Date(`${measurement.measurement_date}T12:00:00`),
+                  )}
+                </strong>
+                <small>{measurement.measurement_date.slice(0, 4)}</small>
+              </div>
+              <div className="body-history-weight">
                 <strong>{measurement.weight_kg} kg</strong>
-                <small>
-                  {prettyDate(measurement.measurement_date)}
-                  {measurement.body_fat_pct !== null && ` · ${measurement.body_fat_pct}% body fat`}
-                  {measurement.is_sample && ' · Sample'}
-                </small>
+                <small>{measurement.is_sample && 'Sample'}</small>
                 {measurement.notes && <p>{measurement.notes}</p>}
               </div>
-              <div className="body-history-actions">
-                <button type="button" onClick={() => beginMeasurementEdit(measurement)}>
-                  Edit
-                </button>
-                <InlineConfirmButton
-                  label="Delete"
-                  confirmLabel="Delete check-in"
-                  onConfirm={() => onDelete(measurement.id)}
-                />
+              <div className="body-history-fat">
+                <strong>
+                  {measurement.body_fat_pct !== null ? `${measurement.body_fat_pct}%` : '–'}
+                </strong>
+                <small>{measurement.body_fat_pct !== null ? 'estimate' : ''}</small>
               </div>
+              <details className="body-row-menu">
+                <summary aria-label={`Actions for ${prettyDate(measurement.measurement_date)}`}>
+                  ⋮
+                </summary>
+                <div className="body-history-actions">
+                  <button type="button" onClick={() => beginMeasurementEdit(measurement)}>
+                    Edit
+                  </button>
+                  <InlineConfirmButton
+                    label="Delete"
+                    confirmLabel="Delete check-in"
+                    onConfirm={() => onDelete(measurement.id)}
+                  />
+                </div>
+              </details>
             </article>
             {editingMeasurement?.id === measurement.id && (
               <form
@@ -5622,6 +5773,8 @@ function HistoryScreen({
   personalRecords,
   onDataChange,
   initialOpenId,
+  initialSection,
+  onStartWorkout,
 }: {
   workouts: TrackedWorkout[];
   measurements: BodyMeasurement[];
@@ -5635,6 +5788,8 @@ function HistoryScreen({
   personalRecords: PersonalRecord[];
   onDataChange: () => Promise<void>;
   initialOpenId: string | null;
+  initialSection: 'history' | 'progress' | 'cardio';
+  onStartWorkout: () => void;
 }) {
   const initialWorkoutIndex = initialOpenId
     ? workouts.findIndex((workout) => workout.id === initialOpenId)
@@ -5643,7 +5798,7 @@ function HistoryScreen({
   const [workoutPage, setWorkoutPage] = useState(
     initialWorkoutIndex >= 0 ? Math.floor(initialWorkoutIndex / HISTORY_PAGE_SIZE) + 1 : 1,
   );
-  const [section, setSection] = useState<'history' | 'progress' | 'cardio'>('history');
+  const [section, setSection] = useState<'history' | 'progress' | 'cardio'>(initialSection);
   const [importing, setImporting] = useState(false);
   const [expandedPhoto, setExpandedPhoto] = useState<MachinePhoto | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -5691,6 +5846,9 @@ function HistoryScreen({
               <h1>Workout history</h1>
             </div>
             <div className="data-actions">
+              <button className="history-add-workout" type="button" onClick={onStartWorkout}>
+                ＋ Add Workout
+              </button>
               <button onClick={() => fileInput.current?.click()} disabled={importing}>
                 {importing ? 'Importing…' : '↑ Import CSV'}
               </button>
@@ -5726,6 +5884,8 @@ function HistoryScreen({
               body="Your completed workouts will show up here."
             />
           )}
+          {pagedWorkouts.map((workout) => {
+            const open = openId === workout.id;
             const completedWorkoutSets = workout.movements
               .flatMap((movement) => movement.sets)
               .filter((item) => item.completed);
@@ -5737,8 +5897,6 @@ function HistoryScreen({
               (total, item) => total + (item.weight_kg ?? 0) * (item.reps ?? 0),
               0,
             );
-          {pagedWorkouts.map((workout) => {
-            const open = openId === workout.id;
             const workoutBodyweight =
               bodyweightForDate(measurements, workout.workout_date) ??
               workout.movements
@@ -5765,6 +5923,8 @@ function HistoryScreen({
                   </div>
                   <b>{open ? '−' : '+'}</b>
                 </button>
+                {open && (
+                  <div className="history-detail">
                     <div className="history-workout-stats" aria-label="Workout totals">
                       <span>
                         <small>Time</small>
@@ -5785,8 +5945,6 @@ function HistoryScreen({
                         </strong>
                       </span>
                     </div>
-                {open && (
-                  <div className="history-detail">
                     {workout.movements.map((movement) => (
                       <div className="history-movement" key={movement.id}>
                         <strong>
