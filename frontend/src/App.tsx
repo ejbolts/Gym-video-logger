@@ -2827,7 +2827,7 @@ function MovementCard({
               }}
             >
               <span aria-hidden="true">▰</span>
-              {historyOpen ? 'Hide How To' : 'How To'}
+              {historyOpen ? 'Hide Recent History' : 'Recent History'}
             </button>
             <button
               type="button"
@@ -2899,17 +2899,18 @@ function MovementCard({
       </header>
 
       {historyOpen && (
-        <section className="movement-history" aria-label={`${movement.exercise.name} history`}>
+        <section
+          className="movement-history"
+          aria-label={`${movement.exercise.name} recent history`}
+        >
           <header>
             <div>
               <p className="section-kicker">RECENT HISTORY</p>
-              <h3>
-                Last {history.length} {history.length === 1 ? 'session' : 'sessions'}
-              </h3>
+              <h3>Last performed</h3>
             </div>
           </header>
           {history.length ? (
-            history.map((entry) => (
+            history.slice(0, 1).map((entry) => (
               <article className="movement-history-entry" key={entry.workoutId}>
                 <header>
                   <strong>{prettyDate(entry.workoutDate)}</strong>
