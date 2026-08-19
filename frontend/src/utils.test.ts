@@ -10,6 +10,8 @@ import {
 describe('display formatting', () => {
   it('formats a video size and a timestamp', () => {
     expect(formatBytes(1.5 * 1024 * 1024)).toBe('1.5 MB');
+    expect(formatSeconds(3599)).toBe('59:59');
+    expect(formatSeconds(3600)).toBe('1:00:00');
     expect(formatSeconds(3661)).toBe('1:01:01');
   });
 

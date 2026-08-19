@@ -31,7 +31,7 @@ import {
 import type { BodyTrendRange } from './bodyTrend';
 import { InlineConfirmButton } from './InlineConfirmButton';
 import { recentExerciseHistory, type ExerciseHistoryEntry } from './exerciseHistory';
-import { formatMinutesDuration, localDate, mergeUniqueById, reorder } from './utils';
+import { formatMinutesDuration, formatSeconds, localDate, mergeUniqueById, reorder } from './utils';
 import { VideoUpload } from './VideoUpload';
 import {
   clearActiveWorkoutDraft,
@@ -246,9 +246,7 @@ function calculateDraftPrs(
 }
 
 function formatDuration(totalSeconds: number): string {
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+  return formatSeconds(totalSeconds);
 }
 
 function prettyDate(value: string): string {
@@ -297,6 +295,7 @@ export function App() {
     return window.location.hash === '#log' ? Date.now() : null;
   });
   const [historyOpenId, setHistoryOpenId] = useState<string | null>(null);
+  const [historyExerciseId, setHistoryExerciseId] = useState<string | null>(null);
   const [historyStartSection, setHistoryStartSection] = useState<
     'history' | 'progress' | 'cardio'
   >('history');
@@ -528,6 +527,7 @@ export function App() {
             onBody={() => setTab('body')}
             onOpenWorkout={(id) => {
               setHistoryOpenId(id);
+              setHistoryExerciseId(null);
               setHistoryStartSection('history');
               setTab('history');
             }}
@@ -537,17 +537,20 @@ export function App() {
             }}
             onHistory={() => {
               setHistoryOpenId(null);
+              setHistoryExerciseId(null);
               setHistoryStartSection('history');
               setTab('history');
             }}
             onExercises={() => {
               setHistoryOpenId(null);
+              setHistoryExerciseId(null);
               setHistoryStartSection('progress');
               setTab('history');
             }}
             onMeasurements={() => setTab('body')}
             onImport={() => {
               setHistoryOpenId(null);
+              setHistoryExerciseId(null);
               setHistoryStartSection('history');
               setTab('history');
             }}
@@ -568,6 +571,12 @@ export function App() {
             currentBodyweight={measurements[0]?.weight_kg ?? null}
             personalRecords={personalRecords}
             historicalWorkouts={workouts}
+            onExerciseHistory={(exerciseId) => {
+              setHistoryOpenId(null);
+              setHistoryExerciseId(exerciseId);
+              setHistoryStartSection('progress');
+              setTab('history');
+            }}
             onExerciseFavorite={updateExerciseFavorite}
             onSave={saveWorkout}
             activeStartedAt={activeWorkoutStartedAt}
@@ -593,7 +602,7 @@ export function App() {
         )}
         {!loading && tab === 'history' && (
           <HistoryScreen
-            key={`${historyOpenId ?? 'history'}-${historyStartSection}`}
+            key={`${historyOpenId ?? 'history'}-${historyStartSection}-${historyExerciseId ?? 'all'}`}
             workouts={workouts}
             measurements={measurements}
             exercises={exercises}
@@ -607,6 +616,7 @@ export function App() {
             onDataChange={refreshData}
             initialOpenId={historyOpenId}
             initialSection={historyStartSection}
+            initialExerciseId={historyExerciseId}
             onStartWorkout={() => startWorkout()}
           />
         )}
@@ -635,6 +645,7 @@ export function App() {
           icon="◷"
           onClick={() => {
             setHistoryOpenId(null);
+            setHistoryExerciseId(null);
             setHistoryStartSection('history');
             setTab('history');
           }}
@@ -956,6 +967,7 @@ function DashboardScreen({
             <p className="muted-empty">Complete a working set to see muscle volume.</p>
           )}
         </div>
+          monthCount={2}
       </section>
 
       <section className="panel heatmap-panel">
@@ -967,7 +979,6 @@ function DashboardScreen({
         </div>
         <WorkoutHeatmap
           entries={data.heatmap}
-          monthCount={2}
           onDayClick={(workoutDate, entry) => {
             if (entry) setSelectedDay(entry);
             else setPendingWorkoutDate(workoutDate);
@@ -1468,9 +1479,11 @@ function StreakBreakdown({ data }: { data: DashboardData }) {
           );
         })}
       </div>
+  monthCount,
       <p>A training day counts whether you lift, do cardio, or combine both.</p>
     </div>
   );
+  monthCount: number | 'all';
 }
 
 function weekday(value: string): string {
@@ -1479,11 +1492,9 @@ function weekday(value: string): string {
 
 function WorkoutHeatmap({
   entries,
-  monthCount,
   onDayClick,
 }: {
   entries: DashboardData['heatmap'];
-  monthCount: number | 'all';
   onDayClick: (workoutDate: string, entry: DashboardData['heatmap'][number] | undefined) => void;
 }) {
   const calendarScrollRef = useRef<HTMLDivElement>(null);
@@ -1737,6 +1748,7 @@ function WorkoutLogger({
   currentBodyweight,
   personalRecords,
   historicalWorkouts,
+  onExerciseHistory,
   onExerciseFavorite,
   onSave,
   activeStartedAt,
@@ -1749,6 +1761,7 @@ function WorkoutLogger({
   currentBodyweight: number | null;
   personalRecords: PersonalRecord[];
   historicalWorkouts: TrackedWorkout[];
+  onExerciseHistory: (exerciseId: string) => void;
   onExerciseFavorite: (exerciseId: string, isFavorite: boolean) => Promise<void>;
   onSave: (payload: WorkoutInput) => Promise<PersonalRecord[]>;
   activeStartedAt: number | null;
@@ -2354,6 +2367,7 @@ function WorkoutLogger({
               movement.exercise.id,
               initialWorkout?.id,
             )}
+            onExerciseHistory={() => onExerciseHistory(movement.exercise.id)}
             onUpdateSet={(setKey, update) => updateSet(movement.key, setKey, update)}
             onToggleSet={(item) => toggleSet(movement, item)}
             onAddSet={(count, update) => addSet(movement, count, update)}
@@ -2744,6 +2758,7 @@ function MovementCard({
   number,
   currentBodyweight,
   history,
+  onExerciseHistory,
   onUpdateSet,
   onToggleSet,
   onAddSet,
@@ -2765,6 +2780,7 @@ function MovementCard({
   number: number;
   currentBodyweight: number | null;
   history: ExerciseHistoryEntry[];
+  onExerciseHistory: () => void;
   onUpdateSet: (setKey: string, update: Partial<DraftSet>) => void;
   onToggleSet: (item: DraftSet) => void;
   onAddSet: (count: number, update: Partial<DraftSet>) => void;
@@ -2789,11 +2805,18 @@ function MovementCard({
   const [expanded] = useState(true);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [addSetOpen, setAddSetOpen] = useState(false);
+  const [openSetActionsKey, setOpenSetActionsKey] = useState<string | null>(null);
   const movementMenuRef = useRef<HTMLDetailsElement>(null);
   const movementNoteRef = useRef<HTMLInputElement>(null);
 
   function closeMovementMenu() {
     if (movementMenuRef.current) movementMenuRef.current.open = false;
+  }
+
+  function toggleSetActionsFromSummary(trigger: HTMLElement, setKey: string) {
+    const setDetails = trigger.closest('.set-details');
+    if (setDetails instanceof HTMLDetailsElement) setDetails.open = true;
+    setOpenSetActionsKey((current) => (current === setKey ? null : setKey));
   }
 
   return (
@@ -2804,7 +2827,16 @@ function MovementCard({
       <header>
         <ExerciseIcon exercise={movement.exercise} number={number} />
         <div>
-          <h2>{movement.exercise.name}</h2>
+          <h2>
+            <button
+              type="button"
+              className="movement-history-link"
+              onClick={onExerciseHistory}
+              aria-label={`View full history for ${movement.exercise.name}`}
+            >
+              {movement.exercise.name}
+            </button>
+          </h2>
           <p>
             {movement.exercise.muscle_group} · {movement.exercise.equipment}
             {currentBodyweight !== null && ` · @ ${currentBodyweight} kg`}
@@ -2977,7 +3009,25 @@ function MovementCard({
                     <strong>{completedSetPerformance(item, true)}</strong>
                     <span>{item.rpe ?? '–'}</span>
                     <b className="completed-set-check">✓</b>
-                    <span className="completed-set-menu" aria-hidden="true">⋮</span>
+                    <span
+                      className="completed-set-menu"
+                      role="button"
+                      tabIndex={0}
+                      aria-label={`Options for set ${index + 1}`}
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        toggleSetActionsFromSummary(event.currentTarget, item.key);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key !== 'Enter' && event.key !== ' ') return;
+                        event.preventDefault();
+                        event.stopPropagation();
+                        toggleSetActionsFromSummary(event.currentTarget, item.key);
+                      }}
+                    >
+                      ⋮
+                    </span>
                   </>
                 ) : (
                   <>
@@ -2996,7 +3046,25 @@ function MovementCard({
                         : `${strengthLevelPercent(item)}%`}
                     </span>
                     <StrengthLevelStars item={item} />
-                    <span className="completed-set-menu" aria-hidden="true">⋮</span>
+                    <span
+                      className="completed-set-menu"
+                      role="button"
+                      tabIndex={0}
+                      aria-label={`Options for set ${index + 1}`}
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        toggleSetActionsFromSummary(event.currentTarget, item.key);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key !== 'Enter' && event.key !== ' ') return;
+                        event.preventDefault();
+                        event.stopPropagation();
+                        toggleSetActionsFromSummary(event.currentTarget, item.key);
+                      }}
+                    >
+                      ⋮
+                    </span>
                   </>
                 )}
               </summary>
@@ -3190,28 +3258,59 @@ function MovementCard({
                     }
                     placeholder="Set note (optional)"
                   />
-                  <div className="set-order-actions">
+                  <div
+                    className={`set-actions-menu ${item.completed ? 'completed-set-actions' : ''}`}
+                  >
                     <button
-                      disabled={index === 0}
-                      onClick={() => onMoveSet(index, -1)}
-                      aria-label="Move set up"
+                      type="button"
+                      className="set-actions-trigger"
+                      aria-label={`Options for set ${index + 1}`}
+                      aria-expanded={openSetActionsKey === item.key}
+                      onClick={() =>
+                        setOpenSetActionsKey((current) =>
+                          current === item.key ? null : item.key,
+                        )
+                      }
                     >
-                      ↑
+                      ⋮
                     </button>
-                    <button
-                      disabled={index === movement.sets.length - 1}
-                      onClick={() => onMoveSet(index, 1)}
-                      aria-label="Move set down"
-                    >
-                      ↓
-                    </button>
-                    <button
-                      className="danger"
-                      onClick={() => onDeleteSet(index)}
-                      aria-label="Delete set"
-                    >
-                      Delete
-                    </button>
+                    {openSetActionsKey === item.key && (
+                      <div className="set-actions-menu-popover">
+                        <button
+                          type="button"
+                          disabled={index === 0}
+                          onClick={() => {
+                            onMoveSet(index, -1);
+                            setOpenSetActionsKey(null);
+                          }}
+                        >
+                          <span aria-hidden="true">↑</span>
+                          Move earlier
+                        </button>
+                        <button
+                          type="button"
+                          disabled={index === movement.sets.length - 1}
+                          onClick={() => {
+                            onMoveSet(index, 1);
+                            setOpenSetActionsKey(null);
+                          }}
+                        >
+                          <span aria-hidden="true">↓</span>
+                          Move later
+                        </button>
+                        <button
+                          type="button"
+                          className="danger"
+                          onClick={() => {
+                            onDeleteSet(index);
+                            setOpenSetActionsKey(null);
+                          }}
+                        >
+                          <span aria-hidden="true">■</span>
+                          Delete set
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
                 {prBadges.has(item.key) && (
@@ -4200,13 +4299,19 @@ function ProgressScreen({
   exercises,
   currentBodyweight,
   embedded = false,
+  initialExerciseId = null,
 }: {
   exercises: Exercise[];
   currentBodyweight: number | null;
   embedded?: boolean;
+  initialExerciseId?: string | null;
 }) {
   const strengthExercises = exercises.filter((exercise) => exercise.kind === 'strength');
-  const [exerciseId, setExerciseId] = useState(strengthExercises[0]?.id ?? '');
+  const [exerciseId, setExerciseId] = useState(() =>
+    initialExerciseId && strengthExercises.some((exercise) => exercise.id === initialExerciseId)
+      ? initialExerciseId
+      : (strengthExercises[0]?.id ?? ''),
+  );
   const [metric, setMetric] = useState<ProgressMetric>('estimated_1rm');
   const [progress, setProgress] = useState<ExerciseProgress | null>(null);
   const [loading, setLoading] = useState(false);
@@ -5775,6 +5880,7 @@ function HistoryScreen({
   onDataChange,
   initialOpenId,
   initialSection,
+  initialExerciseId,
   onStartWorkout,
 }: {
   workouts: TrackedWorkout[];
@@ -5790,6 +5896,7 @@ function HistoryScreen({
   onDataChange: () => Promise<void>;
   initialOpenId: string | null;
   initialSection: 'history' | 'progress' | 'cardio';
+  initialExerciseId: string | null;
   onStartWorkout: () => void;
 }) {
   const initialWorkoutIndex = initialOpenId
@@ -5836,7 +5943,12 @@ function HistoryScreen({
         </button>
       </div>
       {section === 'progress' ? (
-        <ProgressScreen exercises={exercises} currentBodyweight={currentBodyweight} embedded />
+        <ProgressScreen
+          exercises={exercises}
+          currentBodyweight={currentBodyweight}
+          embedded
+          initialExerciseId={initialExerciseId}
+        />
       ) : section === 'cardio' ? (
         <CardioScreen onDataChange={onDataChange} />
       ) : (
