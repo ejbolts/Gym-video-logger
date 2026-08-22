@@ -37,6 +37,34 @@ export function formatMinutesDuration(minutes: number | null): string {
   return `${remainingMinutes}min`;
 }
 
+export function workoutTimeInputValue(value: string | null): string {
+  return value?.slice(0, 5) ?? '';
+}
+
+export function workoutDurationMinutes(startTime: string, endTime: string): number | null {
+  const parse = (value: string) => {
+    const match = /^(\d{2}):(\d{2})/.exec(value);
+    if (!match) return null;
+    const hours = Number(match[1]);
+    const minutes = Number(match[2]);
+    if (hours > 23 || minutes > 59) return null;
+    return hours * 60 + minutes;
+  };
+  const start = parse(startTime);
+  const end = parse(endTime);
+  if (start === null || end === null) return null;
+  return end >= start ? end - start : 24 * 60 - start + end;
+}
+
+export function formatWorkoutTimeRange(startTime: string | null, endTime: string | null): string {
+  if (!startTime || !endTime) return '';
+  const start = workoutTimeInputValue(startTime);
+  const end = workoutTimeInputValue(endTime);
+  const duration = workoutDurationMinutes(start, end);
+  const overnight = duration !== null && end < start;
+  return `${start}–${end}${overnight ? ' next day' : ''}`;
+}
+
 export function mergeUniqueById<T extends { id: string }>(existing: T[], selected: T[]): T[] {
   const seen = new Set(existing.map((item) => item.id));
   return [...existing, ...selected.filter((item) => !seen.has(item.id))];

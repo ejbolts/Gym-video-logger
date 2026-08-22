@@ -499,6 +499,8 @@ def replace_workout_contents(
     workout.category = payload.category
     workout.notes = payload.notes
     workout.duration_minutes = payload.duration_minutes
+    workout.start_time = payload.start_time
+    workout.end_time = payload.end_time
     workout.movements.clear()
     workout.superset_groups.clear()
     db.flush()
@@ -1120,6 +1122,8 @@ def create_workout(payload: TrainingWorkoutCreate, db: DbSession) -> TrainingWor
         category=payload.category,
         notes=payload.notes,
         duration_minutes=payload.duration_minutes,
+        start_time=payload.start_time,
+        end_time=payload.end_time,
     )
     db.add(workout)
     replace_workout_contents(db, workout, payload)

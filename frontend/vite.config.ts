@@ -29,5 +29,8 @@ export default defineConfig({
       },
     }),
   ],
-  server: { proxy: { '/api': 'http://127.0.0.1:8000' } },
+  server: {
+    allowedHosts: ['mainpc.tail494810.ts.net'],
+    proxy: { '/api': 'http://127.0.0.1:8000' },
+  },
 });

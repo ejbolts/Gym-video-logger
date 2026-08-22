@@ -4,8 +4,11 @@ import {
   formatBytes,
   formatMinutesDuration,
   formatSeconds,
+  formatWorkoutTimeRange,
   mergeUniqueById,
   reorder,
+  workoutDurationMinutes,
+  workoutTimeInputValue,
 } from './utils';
 
 describe('display formatting', () => {
@@ -27,6 +30,14 @@ describe('display formatting', () => {
     expect(formatMinutesDuration(75)).toBe('1h 15min');
     expect(formatMinutesDuration(120)).toBe('2h');
     expect(formatMinutesDuration(null)).toBe('–');
+  });
+
+  it('calculates same-day and overnight workouts from start and end times', () => {
+    expect(workoutDurationMinutes('09:15', '10:45')).toBe(90);
+    expect(workoutDurationMinutes('23:30', '00:15')).toBe(45);
+    expect(workoutDurationMinutes('', '10:45')).toBeNull();
+    expect(workoutTimeInputValue('09:15:00')).toBe('09:15');
+    expect(formatWorkoutTimeRange('23:30:00', '00:15:00')).toBe('23:30–00:15 next day');
   });
 });
 

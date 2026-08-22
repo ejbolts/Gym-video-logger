@@ -149,6 +149,8 @@ export interface TrackedWorkout {
   category: WorkoutCategory;
   notes: string | null;
   duration_minutes: number | null;
+  start_time: string | null;
+  end_time: string | null;
   is_sample: boolean;
   created_at: string;
   updated_at: string;
@@ -188,6 +190,8 @@ export interface WorkoutInput {
   category: WorkoutCategory;
   notes: string | null;
   duration_minutes: number | null;
+  start_time: string | null;
+  end_time: string | null;
   movements: Array<{
     exercise_id: string;
     notes: string | null;

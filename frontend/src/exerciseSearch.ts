@@ -87,6 +87,49 @@ export function fuzzyMatchesFields(values: string[], query: string): boolean {
   return fuzzyScoreFields(values, query) !== null;
 }
 
+interface SearchableExercise {
+  id: string;
+  name: string;
+  muscle_group: string;
+  equipment: string | null;
+}
+
+export function rankExerciseSearchMatches<T extends SearchableExercise>(
+  exercises: T[],
+  query: string,
+  recentExerciseIds: readonly string[],
+): T[] {
+  const recencyById = new Map(recentExerciseIds.map((id, index) => [id, index]));
+
+  return exercises
+    .map((exercise, originalIndex) => ({
+      exercise,
+      originalIndex,
+      recency: recencyById.get(exercise.id),
+      score: fuzzyScoreFields(
+        [exercise.name, exercise.muscle_group, exercise.equipment ?? ''],
+        query,
+      ),
+    }))
+    .filter(
+      (
+        match,
+      ): match is typeof match & {
+        score: number;
+      } => match.score !== null,
+    )
+    .sort((first, second) => {
+      const firstWasUsed = first.recency !== undefined;
+      const secondWasUsed = second.recency !== undefined;
+      if (firstWasUsed !== secondWasUsed) return firstWasUsed ? -1 : 1;
+      if (first.recency !== second.recency) {
+        return (first.recency ?? 0) - (second.recency ?? 0);
+      }
+      return first.score - second.score || first.originalIndex - second.originalIndex;
+    })
+    .map((match) => match.exercise);
+}
+
 export function fuzzyHighlightIndices(value: string, query: string): number[] {
   const matches = new Set<number>();
   searchTokens(query).forEach((token) => {

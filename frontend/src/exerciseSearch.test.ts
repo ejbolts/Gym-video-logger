@@ -4,6 +4,7 @@ import {
   fuzzyMatchIndices,
   fuzzyMatchesFields,
   fuzzyScoreFields,
+  rankExerciseSearchMatches,
 } from './exerciseSearch';
 
 describe('exercise fuzzy search', () => {
@@ -41,5 +42,41 @@ describe('exercise fuzzy search', () => {
 
   it('returns every matching character to render in bold', () => {
     expect(fuzzyHighlightIndices('Chest Supported Row', 'ch row')).toEqual([0, 1, 16, 17, 18]);
+  });
+
+  it('ranks a recently performed matching exercise above unused matches', () => {
+    const exercises = [
+      { id: 'floor', name: 'Crunch', muscle_group: 'Abs', equipment: null },
+      { id: 'machine', name: 'Machine Ab Crunch', muscle_group: 'Abs', equipment: 'Machine' },
+      { id: 'cable', name: 'Cable Crunch', muscle_group: 'Abs', equipment: 'Cable' },
+    ];
+
+    expect(rankExerciseSearchMatches(exercises, 'crunch', ['machine'])[0].id).toBe('machine');
+  });
+
+  it('orders performed search matches from most recently used to least recently used', () => {
+    const exercises = [
+      { id: 'older', name: 'Cable Crunch', muscle_group: 'Abs', equipment: 'Cable' },
+      { id: 'latest', name: 'Machine Ab Crunch', muscle_group: 'Abs', equipment: 'Machine' },
+    ];
+
+    expect(rankExerciseSearchMatches(exercises, 'crunch', ['latest', 'older'])).toEqual([
+      exercises[1],
+      exercises[0],
+    ]);
+  });
+
+  it('keeps fuzzy relevance ordering when neither exercise has been performed', () => {
+    const exercises = [
+      {
+        id: 'scattered',
+        name: 'Bulgarian Split Squat',
+        muscle_group: 'Quads',
+        equipment: 'Dumbbell',
+      },
+      { id: 'direct', name: 'Dumbbell Pullover', muscle_group: 'Lats', equipment: 'Dumbbell' },
+    ];
+
+    expect(rankExerciseSearchMatches(exercises, 'lat pu', [])[0].id).toBe('direct');
   });
 });

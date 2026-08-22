@@ -32,14 +32,17 @@ import type { BodyTrendRange } from './bodyTrend';
 import { monthCountFromOldestWorkout } from './calendarRange';
 import { InlineConfirmButton } from './InlineConfirmButton';
 import { recentExerciseHistory, type ExerciseHistoryEntry } from './exerciseHistory';
-import { fuzzyHighlightIndices, fuzzyScoreFields } from './exerciseSearch';
+import { fuzzyHighlightIndices, rankExerciseSearchMatches } from './exerciseSearch';
 import {
   decimalNumberOrNull,
   formatMinutesDuration,
   formatSeconds,
+  formatWorkoutTimeRange,
   localDate,
   mergeUniqueById,
   reorder,
+  workoutDurationMinutes,
+  workoutTimeInputValue,
 } from './utils';
 import { VideoUpload } from './VideoUpload';
 import {
@@ -1845,6 +1848,10 @@ function WorkoutLogger({
   const [editedDurationMinutes, setEditedDurationMinutes] = useState(
     initialWorkout?.duration_minutes ?? 0,
   );
+  const [startTime, setStartTime] = useState(
+    workoutTimeInputValue(initialWorkout?.start_time ?? null),
+  );
+  const [endTime, setEndTime] = useState(workoutTimeInputValue(initialWorkout?.end_time ?? null));
   const [movements, setMovements] = useState<DraftMovement[]>(() =>
     initialWorkout
       ? initialWorkout.movements.map((movement) => ({
@@ -1982,7 +1989,7 @@ function WorkoutLogger({
         }
       });
     });
-    return recent.slice(0, 10);
+    return recent;
   }, [historicalWorkouts]);
 
   function suggestedSetsForExercise(exercise: Exercise): DraftSet[] {
@@ -2168,6 +2175,10 @@ function WorkoutLogger({
       setError('Add an exercise and complete at least one set before saving.');
       return;
     }
+    if (initialWorkout && Boolean(startTime) !== Boolean(endTime)) {
+      setError('Enter both a workout start time and end time, or leave both blank.');
+      return;
+    }
     setSaving(true);
     setError(null);
     const completedIdentity = finalizeWorkoutIdentity(
@@ -2185,6 +2196,8 @@ function WorkoutLogger({
         duration_minutes: initialWorkout
           ? editedDurationMinutes
           : Math.max(1, Math.round(elapsed / 60)),
+        start_time: initialWorkout && startTime && endTime ? startTime : null,
+        end_time: initialWorkout && startTime && endTime ? endTime : null,
         movements: movements.map((movement) => ({
           exercise_id: movement.exercise.id,
           notes: movement.notes.trim() || null,
@@ -2218,6 +2231,13 @@ function WorkoutLogger({
 
   const editedDurationHours = Math.floor(editedDurationMinutes / 60);
   const editedDurationRemainder = editedDurationMinutes % 60;
+  const hasCompleteTimeRange = Boolean(startTime && endTime);
+  const updateWorkoutTimes = (nextStart: string, nextEnd: string) => {
+    setStartTime(nextStart);
+    setEndTime(nextEnd);
+    const duration = workoutDurationMinutes(nextStart, nextEnd);
+    if (duration !== null) setEditedDurationMinutes(duration);
+  };
   const completedSets = movements.flatMap((movement) =>
     movement.sets.filter((item) => item.completed),
   );
@@ -2328,15 +2348,35 @@ function WorkoutLogger({
           </label>
           {initialWorkout && (
             <fieldset className="workout-duration-editor">
-              <legend>Duration</legend>
+              <legend>Workout timing</legend>
               <label>
-                Hours
+                Start time
+                <input
+                  type="time"
+                  value={startTime}
+                  onChange={(event) => updateWorkoutTimes(event.target.value, endTime)}
+                  aria-label="Workout start time"
+                />
+              </label>
+              <label>
+                End time
+                <input
+                  type="time"
+                  value={endTime}
+                  onChange={(event) => updateWorkoutTimes(startTime, event.target.value)}
+                  aria-label="Workout end time"
+                />
+              </label>
+              <label>
+                Duration hours
                 <input
                   type="number"
                   min="0"
                   max="24"
                   inputMode="numeric"
-                  value={editedDurationHours}
+                  disabled={hasCompleteTimeRange}
+                  value={editedDurationHours || ''}
+                  placeholder="0"
                   onChange={(event) => {
                     const hours = Number.isNaN(event.target.valueAsNumber)
                       ? 0
@@ -2349,13 +2389,15 @@ function WorkoutLogger({
                 />
               </label>
               <label>
-                Minutes
+                Duration minutes
                 <input
                   type="number"
                   min="0"
                   max="59"
                   inputMode="numeric"
-                  value={editedDurationRemainder}
+                  disabled={hasCompleteTimeRange}
+                  value={editedDurationRemainder || ''}
+                  placeholder="0"
                   onChange={(event) => {
                     const minutes = Number.isNaN(event.target.valueAsNumber)
                       ? 0
@@ -2370,6 +2412,11 @@ function WorkoutLogger({
                   aria-label="Workout duration minutes"
                 />
               </label>
+              <small className="workout-timing-help">
+                {hasCompleteTimeRange
+                  ? `${formatWorkoutTimeRange(startTime, endTime)} · duration calculated automatically`
+                  : 'Add both times to calculate duration automatically, including workouts ending after midnight.'}
+              </small>
             </fieldset>
           )}
         </div>
@@ -3444,11 +3491,24 @@ function MovementCard({
             </details>
             {item.completed && item.notes && <div className="completed-set-note">{item.notes}</div>}
             {index < movement.sets.length - 1 && (
-              <div className="rest-between" aria-label={`Rest after set ${index + 1}`}>
+              <div className="rest-between">
                 <i />
-                <span>
-                  <b>{formatDuration(item.rest_seconds ?? DEFAULT_REST_SECONDS)}</b> rest
-                </span>
+                <label>
+                  <select
+                    value={item.rest_seconds ?? DEFAULT_REST_SECONDS}
+                    onChange={(event) =>
+                      onUpdateSet(item.key, { rest_seconds: Number(event.target.value) })
+                    }
+                    aria-label={`Rest after set ${index + 1}`}
+                  >
+                    {restOptions.map((seconds) => (
+                      <option key={seconds} value={seconds}>
+                        {formatDuration(seconds)}
+                      </option>
+                    ))}
+                  </select>
+                  <span>rest</span>
+                </label>
                 <i />
               </div>
             )}
@@ -3860,7 +3920,6 @@ function AddSetDialog({
   const [rpe, setRpe] = useState(previous?.rpe?.toString() ?? '');
   const [notes, setNotes] = useState('');
   const [showRpe, setShowRpe] = useState(false);
-  const [showNotes, setShowNotes] = useState(false);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const onCloseRef = useRef(onClose);
 
@@ -4023,16 +4082,14 @@ function AddSetDialog({
                 </select>
               </label>
             )}
-            {showNotes && (
-              <label className="add-set-notes-field">
-                Notes
-                <input
-                  value={notes}
-                  onChange={(event) => setNotes(event.target.value)}
-                  placeholder="Optional set note"
-                />
-              </label>
-            )}
+            <label className="add-set-notes-field">
+              Notes
+              <input
+                value={notes}
+                onChange={(event) => setNotes(event.target.value)}
+                placeholder="Optional set note"
+              />
+            </label>
           </div>
           <div className="add-set-toggles">
             {!cardio && (
@@ -4067,13 +4124,6 @@ function AddSetDialog({
               onClick={() => setShowRpe((value) => !value)}
             >
               ＋ RPE
-            </button>
-            <button
-              type="button"
-              className={showNotes ? 'active' : ''}
-              onClick={() => setShowNotes((value) => !value)}
-            >
-              ＋ Notes
             </button>
           </div>
         </div>
@@ -4515,31 +4565,15 @@ function ExercisePicker({
   const query = search.trim();
   const available = exercises.filter((exercise) => !excludedIds.includes(exercise.id));
   const recent = recentExerciseIds
+    .slice(0, 10)
     .map((id) => available.find((exercise) => exercise.id === id))
     .filter((exercise): exercise is Exercise => Boolean(exercise));
   const sections: Array<{ title: string; exercises: Exercise[] }> = [];
 
   if (query) {
-    const rankedMatches = available
-      .map((exercise, originalIndex) => ({
-        exercise,
-        originalIndex,
-        score: fuzzyScoreFields(
-          [exercise.name, exercise.muscle_group, exercise.equipment ?? ''],
-          query,
-        ),
-      }))
-      .filter(
-        (match): match is { exercise: Exercise; originalIndex: number; score: number } =>
-          match.score !== null,
-      )
-      .sort(
-        (first, second) => first.score - second.score || first.originalIndex - second.originalIndex,
-      )
-      .map((match) => match.exercise);
     sections.push({
       title: 'Search results',
-      exercises: rankedMatches,
+      exercises: rankExerciseSearchMatches(available, query, recentExerciseIds),
     });
   } else if (filter === 'favorites') {
     sections.push({ title: 'Favorites', exercises: available.filter((item) => item.is_favorite) });
@@ -6814,6 +6848,9 @@ function HistoryScreen({
                     <strong>{workout.name}</strong>
                     <small>
                       {prettyDate(workout.workout_date)} ·{' '}
+                      {workout.start_time && workout.end_time
+                        ? `${formatWorkoutTimeRange(workout.start_time, workout.end_time)} · `
+                        : ''}
                       {formatMinutesDuration(workout.duration_minutes)}
                     </small>
                   </div>
@@ -6821,7 +6858,24 @@ function HistoryScreen({
                 </button>
                 {open && (
                   <div className="history-detail">
+                    <div className="workout-actions">
+                      <button onClick={() => onEdit(workout)}>Edit workout</button>
+                      <InlineConfirmButton
+                        className="delete-workout"
+                        label="Delete workout"
+                        confirmLabel="Confirm delete"
+                        onConfirm={() => onDelete(workout)}
+                      />
+                    </div>
                     <div className="history-workout-stats" aria-label="Workout totals">
+                      {workout.start_time && workout.end_time && (
+                        <span>
+                          <small>When</small>
+                          <strong>
+                            {formatWorkoutTimeRange(workout.start_time, workout.end_time)}
+                          </strong>
+                        </span>
+                      )}
                       <span>
                         <small>Time</small>
                         <strong>{formatMinutesDuration(workout.duration_minutes)}</strong>
@@ -6915,15 +6969,6 @@ function HistoryScreen({
                       </div>
                     ))}
                     {workout.notes && <p>{workout.notes}</p>}
-                    <div className="workout-actions">
-                      <button onClick={() => onEdit(workout)}>Edit workout</button>
-                      <InlineConfirmButton
-                        className="delete-workout"
-                        label="Delete workout"
-                        confirmLabel="Confirm delete"
-                        onConfirm={() => onDelete(workout)}
-                      />
-                    </div>
                   </div>
                 )}
               </article>

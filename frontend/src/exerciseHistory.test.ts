@@ -51,6 +51,8 @@ function workout(
     category: 'push',
     notes: null,
     duration_minutes: 45,
+    start_time: null,
+    end_time: null,
     is_sample: false,
     created_at: createdAt,
     updated_at: createdAt,
@@ -92,12 +94,8 @@ describe('recent exercise history', () => {
   it('excludes the workout being edited and respects the requested limit', () => {
     const workouts = [
       workout('current', '2026-07-10', '2026-07-10T09:00:00Z', [trackedSet('current-set', 0)]),
-      workout('previous', '2026-07-08', '2026-07-08T09:00:00Z', [
-        trackedSet('previous-set', 0),
-      ]),
-      workout('oldest', '2026-07-01', '2026-07-01T09:00:00Z', [
-        trackedSet('oldest-set', 0),
-      ]),
+      workout('previous', '2026-07-08', '2026-07-08T09:00:00Z', [trackedSet('previous-set', 0)]),
+      workout('oldest', '2026-07-01', '2026-07-01T09:00:00Z', [trackedSet('oldest-set', 0)]),
     ];
 
     expect(recentExerciseHistory(workouts, exercise.id, 'current', 1)[0].workoutId).toBe(

@@ -2422,6 +2422,7 @@ button.metric-card:focus-visible {
 }
 
 .details-row input[type='date'],
+.details-row input[type='time'],
 .body-entry-fields input[type='date'],
 .video-content input[type='date'] {
   width: 100%;
@@ -2449,6 +2450,17 @@ button.metric-card:focus-visible {
   font-weight: 850;
   letter-spacing: 0.03em;
   text-transform: uppercase;
+}
+
+.workout-duration-editor input:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.workout-timing-help {
+  grid-column: 1 / -1;
+  color: var(--muted-ink);
+  line-height: 1.45;
 }
 
 .movement-stack {
@@ -3339,15 +3351,29 @@ button.metric-card:focus-visible {
   background: var(--line);
 }
 
+.rest-between label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  cursor: pointer;
+}
+
 .rest-between span {
   font-size: 0.6rem;
   font-weight: 750;
   white-space: nowrap;
 }
 
-.rest-between b {
+.rest-between select {
+  min-height: 2rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.25rem 0.45rem;
+  background: var(--card);
   color: var(--accent-dark);
   font-size: 0.68rem;
+  font-weight: 800;
+  cursor: pointer;
 }
 
 .add-set-button {
@@ -4268,7 +4294,7 @@ button.metric-card:focus-visible {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 0.55rem;
-  margin-top: 0.75rem;
+  margin: 0.75rem 0 0;
 }
 
 .workout-actions button {
@@ -4929,10 +4955,6 @@ button.metric-card:focus-visible {
   color: #cbc7c2;
   font-size: 0.87rem;
   line-height: 1.45;
-}
-
-.rest-between {
-  display: none;
 }
 
 .movement-note {
@@ -8048,7 +8070,7 @@ body,
   padding: 0.2rem 0.35rem;
 }
 
-.rest-between b {
+.rest-between select {
   color: var(--accent-dark);
 }
 
@@ -8104,6 +8126,8 @@ body,
 
 .add-set-dialog {
   width: min(100%, 560px);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   overflow: hidden;
   border: 1px solid #3b4144;
   border-radius: 7px;
@@ -8138,6 +8162,8 @@ body,
 }
 
 .add-set-content {
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 1.15rem 1.25rem;
 }
 
@@ -8656,6 +8682,19 @@ body,
   .superset-picker {
     width: min(100%, 590px);
     max-height: 92dvh;
+  }
+
+  .add-set-backdrop:not(.set-dialog-backdrop) {
+    place-items: start center;
+    padding: max(0.75rem, env(safe-area-inset-top)) 0
+      calc(4rem + env(safe-area-inset-bottom));
+  }
+
+  .add-set-backdrop:not(.set-dialog-backdrop) .add-set-dialog {
+    max-height: calc(
+      100dvh - 4.75rem - env(safe-area-inset-top) - env(safe-area-inset-bottom)
+    );
+    padding-bottom: 0;
   }
 
   .add-set-fields {

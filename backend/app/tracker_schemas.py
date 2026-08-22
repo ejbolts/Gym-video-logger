@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, time
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -133,6 +133,8 @@ class TrainingWorkoutCreate(BaseModel):
     category: WorkoutCategory
     notes: str | None = Field(default=None, max_length=10_000)
     duration_minutes: int | None = Field(default=None, ge=0, le=1_440)
+    start_time: time | None = None
+    end_time: time | None = None
     movements: list[WorkoutMovementCreate] = Field(min_length=1, max_length=100)
 
     @field_validator("name", "notes", mode="before")
@@ -142,6 +144,19 @@ class TrainingWorkoutCreate(BaseModel):
 
     @model_validator(mode="after")
     def require_completed_set(self) -> TrainingWorkoutCreate:
+        if (self.start_time is None) != (self.end_time is None):
+            raise ValueError("Workout start and end times must be provided together.")
+        if self.start_time is not None and self.end_time is not None:
+            start_seconds = (
+                self.start_time.hour * 3_600 + self.start_time.minute * 60 + self.start_time.second
+            )
+            end_seconds = (
+                self.end_time.hour * 3_600 + self.end_time.minute * 60 + self.end_time.second
+            )
+            elapsed_seconds = end_seconds - start_seconds
+            if elapsed_seconds < 0:
+                elapsed_seconds += 24 * 3_600
+            self.duration_minutes = round(elapsed_seconds / 60)
         if not any(item.completed for movement in self.movements for item in movement.sets):
             raise ValueError("A workout must contain at least one completed set.")
         exercise_ids = [movement.exercise_id for movement in self.movements]
@@ -195,6 +210,8 @@ class TrainingWorkoutRead(BaseModel):
     category: WorkoutCategory
     notes: str | None
     duration_minutes: int | None
+    start_time: time | None
+    end_time: time | None
     is_sample: bool
     created_at: datetime
     updated_at: datetime

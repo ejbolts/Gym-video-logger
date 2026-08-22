@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import enum
 import uuid
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, time
 
 from sqlalchemy import (
     Boolean,
@@ -17,6 +17,7 @@ from sqlalchemy import (
     String,
     Table,
     Text,
+    Time,
     UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -365,6 +366,8 @@ class TrainingWorkout(Base):
     category: Mapped[WorkoutCategory] = mapped_column(Enum(WorkoutCategory, native_enum=False))
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     duration_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    start_time: Mapped[time | None] = mapped_column(Time, nullable=True)
+    end_time: Mapped[time | None] = mapped_column(Time, nullable=True)
     is_sample: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, server_default=func.now()
@@ -389,6 +392,11 @@ class TrainingWorkout(Base):
         CheckConstraint(
             "duration_minutes IS NULL OR duration_minutes >= 0",
             name="training_workout_duration_nonnegative",
+        ),
+        CheckConstraint(
+            "(start_time IS NULL AND end_time IS NULL) OR "
+            "(start_time IS NOT NULL AND end_time IS NOT NULL)",
+            name="training_workout_times_together",
         ),
     )
 

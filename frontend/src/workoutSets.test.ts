@@ -109,6 +109,8 @@ describe('previous exercise values', () => {
       category: 'push',
       notes: null,
       duration_minutes: 45,
+      start_time: null,
+      end_time: null,
       is_sample: false,
       created_at: createdAt,
       updated_at: createdAt,

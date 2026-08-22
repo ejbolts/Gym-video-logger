@@ -354,6 +354,42 @@ def test_workout_sets_notes_rest_and_rpe_are_saved(client):
     }
 
 
+def test_previous_workout_times_can_be_edited_and_recalculate_duration(client):
+    exercise = next(
+        item
+        for item in client.get("/api/exercises").json()
+        if item["name"] == "Barbell Bench Press"
+    )
+    payload = workout_payload(exercise["id"])
+    created = client.post("/api/workouts", json=payload)
+    assert created.status_code == 201
+    assert created.json()["start_time"] is None
+    assert created.json()["end_time"] is None
+
+    payload.update({"start_time": "23:30", "end_time": "00:45", "duration_minutes": 1})
+    updated = client.put(f"/api/workouts/{created.json()['id']}", json=payload)
+
+    assert updated.status_code == 200
+    assert updated.json()["start_time"] == "23:30:00"
+    assert updated.json()["end_time"] == "00:45:00"
+    assert updated.json()["duration_minutes"] == 75
+
+
+def test_workout_start_and_end_times_must_be_provided_together(client):
+    exercise = next(
+        item
+        for item in client.get("/api/exercises").json()
+        if item["name"] == "Barbell Bench Press"
+    )
+    payload = workout_payload(exercise["id"])
+    payload["start_time"] = "09:00"
+
+    response = client.post("/api/workouts", json=payload)
+
+    assert response.status_code == 422
+    assert "start and end times" in response.text
+
+
 def test_treadmill_incline_and_speed_are_saved(client):
     exercise = next(
         item
