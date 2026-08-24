@@ -126,7 +126,7 @@ DEFAULT_EXERCISES = (
     ("Barbell Row", WorkoutCategory.PULL, "Mid / Upper Back", "Barbell"),
     ("Pull-up", WorkoutCategory.PULL, "Lats", "Bodyweight"),
     ("Lat Pulldown", WorkoutCategory.PULL, "Lats", "Cable"),
-    ("Single-Arm Lat Pulldown", WorkoutCategory.PULL, "Lats", "Cable"),
+    ("Single-Arm Lat Pulldown (Machine)", WorkoutCategory.PULL, "Lats", "Machine"),
     ("Seated Cable Row", WorkoutCategory.PULL, "Mid / Upper Back", "Cable"),
     ("Seated Machine Row", WorkoutCategory.PULL, "Mid / Upper Back", "Machine"),
     ("Face Pull", WorkoutCategory.PULL, "Rear Delts", "Cable"),
@@ -434,12 +434,25 @@ def workout_recommendation(
 
 def seed_default_exercises(db: Session) -> None:
     existing = {item.name.casefold(): item for item in db.scalars(select(Exercise))}
+    renamed_default = False
     legacy_leg_curl = existing.get("leg curl")
     seated_leg_curl = existing.get("seated leg curl")
     if legacy_leg_curl and not legacy_leg_curl.is_custom and not seated_leg_curl:
         legacy_leg_curl.name = "Seated Leg Curl"
         existing.pop("leg curl")
         existing["seated leg curl"] = legacy_leg_curl
+        renamed_default = True
+    legacy_single_arm_lat_pulldown = existing.get("single-arm lat pulldown")
+    machine_single_arm_lat_pulldown = existing.get("single-arm lat pulldown (machine)")
+    if (
+        legacy_single_arm_lat_pulldown
+        and not legacy_single_arm_lat_pulldown.is_custom
+        and not machine_single_arm_lat_pulldown
+    ):
+        legacy_single_arm_lat_pulldown.name = "Single-Arm Lat Pulldown (Machine)"
+        existing.pop("single-arm lat pulldown")
+        existing["single-arm lat pulldown (machine)"] = legacy_single_arm_lat_pulldown
+        renamed_default = True
     defaults = (
         *(
             (name, category, ExerciseKind.STRENGTH, muscle_group, equipment)
@@ -467,6 +480,8 @@ def seed_default_exercises(db: Session) -> None:
                     equipment=equipment,
                 )
             )
+    if renamed_default:
+        bump_workout_cache_revision(db)
     db.commit()
     seed_muscle_mappings(db)
 

@@ -9,12 +9,12 @@ import {
 
 describe('exercise fuzzy search', () => {
   it('prefers a contiguous match for highlighting', () => {
-    expect(fuzzyMatchIndices('Single-Arm Lat Pulldown', 'lat')).toEqual([11, 12, 13]);
+    expect(fuzzyMatchIndices('Single-Arm Lat Pulldown (Machine)', 'lat')).toEqual([11, 12, 13]);
     expect(fuzzyMatchIndices('Plate Lat Pulldown', 'lat')).toEqual([6, 7, 8]);
   });
 
   it('matches non-adjacent letters in order', () => {
-    const name = 'Single-Arm Lat Pulldown';
+    const name = 'Single-Arm Lat Pulldown (Machine)';
     const indices = fuzzyMatchIndices(name, 'slp');
     expect(indices?.map((index) => name[index].toLocaleLowerCase()).join('')).toBe('slp');
   });

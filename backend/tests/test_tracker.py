@@ -62,7 +62,7 @@ def test_default_exercise_library_is_seeded(client):
         "Seated Leg Curl",
         "Seated Machine Row",
         "Single-Arm Cable Triceps Pushdown",
-        "Single-Arm Lat Pulldown",
+        "Single-Arm Lat Pulldown (Machine)",
         "Single-Arm Preacher Curl",
         "Single Leg Press",
         "Triceps Machine Extension",
@@ -136,11 +136,11 @@ def test_default_exercise_library_is_seeded(client):
         "Forearms",
     }
     single_arm_lat_pulldown = next(
-        item for item in exercises if item["name"] == "Single-Arm Lat Pulldown"
+        item for item in exercises if item["name"] == "Single-Arm Lat Pulldown (Machine)"
     )
     assert single_arm_lat_pulldown["category"] == "pull"
     assert single_arm_lat_pulldown["muscle_group"] == "Lats"
-    assert single_arm_lat_pulldown["equipment"] == "Cable"
+    assert single_arm_lat_pulldown["equipment"] == "Machine"
     assert single_arm_lat_pulldown["muscle_contributions"] == [
         {"muscle_name": "Lats", "role": "primary", "contribution_factor": 1.0}
     ]
@@ -304,6 +304,34 @@ def test_legacy_leg_curl_is_renamed_without_changing_its_id(client):
         assert renamed is not None
         assert renamed.id == original_id
         assert db.scalar(select(Exercise).where(Exercise.name == "Leg Curl")) is None
+
+
+def test_legacy_single_arm_lat_pulldown_is_renamed_without_changing_its_id(client):
+    from sqlalchemy import select
+
+    from app.database import SessionLocal
+    from app.models import Exercise
+    from app.tracker import seed_default_exercises
+
+    with SessionLocal() as db:
+        exercise = db.scalar(
+            select(Exercise).where(Exercise.name == "Single-Arm Lat Pulldown (Machine)")
+        )
+        assert exercise is not None
+        original_id = exercise.id
+        exercise.name = "Single-Arm Lat Pulldown"
+        exercise.equipment = "Cable"
+        db.commit()
+
+        seed_default_exercises(db)
+
+        renamed = db.scalar(
+            select(Exercise).where(Exercise.name == "Single-Arm Lat Pulldown (Machine)")
+        )
+        assert renamed is not None
+        assert renamed.id == original_id
+        assert renamed.equipment == "Machine"
+        assert db.scalar(select(Exercise).where(Exercise.name == "Single-Arm Lat Pulldown")) is None
 
 
 def test_exercise_favorites_are_persisted(client):

@@ -307,6 +307,90 @@ function bodyweightForDate(measurements: BodyMeasurement[], workoutDate: string)
   );
 }
 
+function WorkoutCompletionDialog({
+  records,
+  personalRecords,
+  onClose,
+}: {
+  records: PersonalRecord[];
+  personalRecords: PersonalRecord[];
+  onClose: () => void;
+}) {
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const onCloseRef = useRef(onClose);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
+    const root = document.getElementById('root');
+    const rootWasInert = root?.hasAttribute('inert') ?? false;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    root?.setAttribute('inert', '');
+    window.requestAnimationFrame(() => closeButtonRef.current?.focus());
+
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onCloseRef.current();
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      if (!rootWasInert) root?.removeAttribute('inert');
+      window.removeEventListener('keydown', closeOnEscape);
+    };
+  }, []);
+
+  return createPortal(
+    <div
+      className="modal-backdrop pr-summary-backdrop"
+      onPointerDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <section
+        className="pr-summary panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="workout-completion-title"
+      >
+        <button
+          ref={closeButtonRef}
+          type="button"
+          className="icon-button popup-close"
+          onClick={onClose}
+          aria-label="Close personal record summary"
+        >
+          ×
+        </button>
+        <span className="pr-trophy" aria-hidden="true">
+          🏆
+        </span>
+        <p className="section-kicker">WORKOUT COMPLETE</p>
+        <h2 id="workout-completion-title">
+          {records.length} new PR{records.length === 1 ? '' : 's'}
+        </h2>
+        {records.map((record) => (
+          <div key={record.id}>
+            <strong>{record.exercise_name}</strong>
+            <span>
+              {recordTypeLabel(record.record_type)} · {record.value} {record.unit}
+              {record.record_type === 'reps_at_weight' && record.normalized_weight !== null
+                ? ` @ ${record.normalized_weight} ${personalRecords.find((item) => item.exercise_id === record.exercise_id && (item.record_type === 'weight' || item.record_type === 'estimated_1rm'))?.unit ?? 'kg'}`
+                : ''}
+            </span>
+          </div>
+        ))}
+        <button type="button" className="pr-summary-done" onClick={onClose}>
+          Done
+        </button>
+      </section>
+    </div>,
+    document.body,
+  );
+}
+
 export function App() {
   const [tab, setTab] = useState<AppTab>(() => {
     const requested = window.location.hash.slice(1) as AppTab;
@@ -510,35 +594,11 @@ export function App() {
         </div>
       )}
       {completionRecords.length > 0 && (
-        <section className="completion-summary panel" aria-label="Workout personal records">
-          <button
-            type="button"
-            className="icon-button"
-            onClick={() => setCompletionRecords([])}
-            aria-label="Close personal record summary"
-          >
-            ×
-          </button>
-          <span className="pr-trophy">🏆</span>
-          <p className="section-kicker">WORKOUT COMPLETE</p>
-          <h2>
-            {completionRecords.length} new PR{completionRecords.length === 1 ? '' : 's'}
-          </h2>
-          {completionRecords.map((record) => (
-            <div key={record.id}>
-              <strong>{record.exercise_name}</strong>
-              <span>
-                {recordTypeLabel(record.record_type)} · {record.value} {record.unit}
-                {record.record_type === 'reps_at_weight' && record.normalized_weight !== null
-                  ? ` @ ${record.normalized_weight} ${personalRecords.find((item) => item.exercise_id === record.exercise_id && (item.record_type === 'weight' || item.record_type === 'estimated_1rm'))?.unit ?? 'kg'}`
-                  : ''}
-              </span>
-            </div>
-          ))}
-          <button className="pr-summary-done" onClick={() => setCompletionRecords([])}>
-            Done
-          </button>
-        </section>
+        <WorkoutCompletionDialog
+          records={completionRecords}
+          personalRecords={personalRecords}
+          onClose={() => setCompletionRecords([])}
+        />
       )}
 
       {!loading && tab !== 'dashboard' && tab !== 'log' && (
@@ -2958,11 +3018,7 @@ function MovementCard({
       className={`movement-card panel ${expanded ? '' : 'is-collapsed'} ${supersetLabel ? 'superset-card' : ''}`}
     >
       {supersetLabel && <div className="superset-ribbon">{supersetLabel}</div>}
-      <header
-        onClick={() => {
-          if (!expanded) setExpanded(true);
-        }}
-      >
+      <header onClick={() => setExpanded((current) => !current)}>
         <ExerciseIcon exercise={movement.exercise} number={number} />
         <div>
           <h2>
@@ -2970,8 +3026,8 @@ function MovementCard({
               type="button"
               className="movement-history-link"
               onClick={(event) => {
+                event.stopPropagation();
                 if (!expanded) {
-                  event.stopPropagation();
                   setExpanded(true);
                   return;
                 }
@@ -3222,7 +3278,12 @@ function MovementCard({
                     <span>
                       {strengthLevelPercent(item) === null ? '–' : `${strengthLevelPercent(item)}%`}
                     </span>
-                    <StrengthLevelStars item={item} />
+                    <span className="completed-set-level">
+                      <StrengthLevelStars item={item} />
+                      {item.rpe !== null && (
+                        <small className="completed-set-rpe">RPE {item.rpe}</small>
+                      )}
+                    </span>
                     <span
                       className="completed-set-menu"
                       role="button"
@@ -3490,28 +3551,26 @@ function MovementCard({
               </div>
             </details>
             {item.completed && item.notes && <div className="completed-set-note">{item.notes}</div>}
-            {index < movement.sets.length - 1 && (
-              <div className="rest-between">
-                <i />
-                <label>
-                  <select
-                    value={item.rest_seconds ?? DEFAULT_REST_SECONDS}
-                    onChange={(event) =>
-                      onUpdateSet(item.key, { rest_seconds: Number(event.target.value) })
-                    }
-                    aria-label={`Rest after set ${index + 1}`}
-                  >
-                    {restOptions.map((seconds) => (
-                      <option key={seconds} value={seconds}>
-                        {formatDuration(seconds)}
-                      </option>
-                    ))}
-                  </select>
-                  <span>rest</span>
-                </label>
-                <i />
-              </div>
-            )}
+            <div className="rest-between">
+              <i />
+              <label>
+                <select
+                  value={item.rest_seconds ?? DEFAULT_REST_SECONDS}
+                  onChange={(event) =>
+                    onUpdateSet(item.key, { rest_seconds: Number(event.target.value) })
+                  }
+                  aria-label={`Rest after set ${index + 1}`}
+                >
+                  {restOptions.map((seconds) => (
+                    <option key={seconds} value={seconds}>
+                      {formatDuration(seconds)}
+                    </option>
+                  ))}
+                </select>
+                <span>rest</span>
+              </label>
+              <i />
+            </div>
           </Fragment>
         ))}
       </div>

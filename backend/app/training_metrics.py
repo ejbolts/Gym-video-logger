@@ -96,7 +96,7 @@ DEFAULT_MUSCLE_MAPPING: dict[str, tuple[tuple[str, MuscleRole, float], ...]] = {
         ("Biceps", MuscleRole.SECONDARY, 0.5),
         ("Forearms", MuscleRole.SECONDARY, 0.5),
     ),
-    "Single-Arm Lat Pulldown": (("Lats", MuscleRole.PRIMARY, 1.0),),
+    "Single-Arm Lat Pulldown (Machine)": (("Lats", MuscleRole.PRIMARY, 1.0),),
     "Seated Cable Row": (
         ("Mid / Upper Back", MuscleRole.PRIMARY, 1.0),
         ("Lats", MuscleRole.SECONDARY, 0.5),

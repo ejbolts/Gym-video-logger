@@ -6543,6 +6543,16 @@ body,
 .cardio-fields .zone2-check {
   display: flex;
   align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+}
+.cardio-fields .zone2-check input[type='checkbox'] {
+  flex: 0 0 auto;
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--accent);
 }
 .cardio-form textarea {
   width: 100%;
@@ -6644,13 +6654,18 @@ body,
 }
 
 .pr-summary-backdrop {
-  align-items: center;
+  z-index: 300;
+  place-items: center;
+  padding: 1rem;
 }
 .pr-summary {
   position: relative;
   width: min(92vw, 430px);
+  max-height: calc(100dvh - 2rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 1.2rem;
-  text-align: center;
+  text-align: left;
 }
 
 .pr-summary .popup-close {
@@ -6687,6 +6702,17 @@ body,
   background: var(--accent);
   color: white;
   font-weight: 900;
+}
+
+@media (max-width: 620px) {
+  .pr-summary-backdrop {
+    padding: 0.5rem;
+  }
+
+  .pr-summary {
+    width: min(100%, 430px);
+    max-height: calc(100dvh - 1rem);
+  }
 }
 .history-set-pill em {
   color: #e7b469;
@@ -8834,6 +8860,21 @@ body,
   padding-bottom: 0.32rem;
 }
 
+.completed-set-level {
+  display: grid;
+  min-width: 0;
+  justify-items: start;
+  gap: 0.08rem;
+}
+
+.completed-set-rpe {
+  color: inherit;
+  font-size: 0.62rem;
+  font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
+}
+
 .set-grid-strength .set-row > .set-index {
   display: none;
 }
@@ -8904,7 +8945,7 @@ body,
   text-transform: lowercase;
 }
 
-.set-details.completed .completed-set-summary > .warmup-level {
+.set-details.completed .completed-set-summary .warmup-level {
   color: #914500;
 }
 
@@ -9916,11 +9957,11 @@ body.chart-fullscreen-open {
   text-transform: lowercase;
 }
 
-.set-details.completed .completed-set-summary > .drop-set-level {
+.set-details.completed .completed-set-summary .drop-set-level {
   color: #6f2e96;
 }
 
-.set-details.previous-set-details .completed-set-summary > .drop-set-level {
+.set-details.previous-set-details .completed-set-summary .drop-set-level {
   color: #ad76d8;
 }
 
@@ -9952,8 +9993,11 @@ body.chart-fullscreen-open {
   color: #fff;
 }
 
-.movement-card.is-collapsed > header {
+.movement-card > header {
   cursor: pointer;
+}
+
+.movement-card.is-collapsed > header {
   padding-bottom: 0.8rem;
   background: #171b1c;
 }
