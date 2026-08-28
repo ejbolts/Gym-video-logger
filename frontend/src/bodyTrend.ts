@@ -1,6 +1,7 @@
 import type { TrainingMode } from './types';
+import { dateRangeForDates, type TimeRange } from './dateRanges';
 
-export type BodyTrendRange = '1m' | '3m' | '9m' | '1y' | 'all';
+export type BodyTrendRange = TimeRange;
 
 export interface DatedMeasurement {
   measurement_date: string;
@@ -25,28 +26,15 @@ export interface WeightChartSegment {
   mode: TrainingMode;
 }
 
-function subtractCalendarMonths(dateValue: string, months: number): string {
-  const [year, month, day] = dateValue.split('-').map(Number);
-  const targetMonthIndex = year * 12 + month - 1 - months;
-  const targetYear = Math.floor(targetMonthIndex / 12);
-  const targetMonth = targetMonthIndex - targetYear * 12;
-  const lastDay = new Date(Date.UTC(targetYear, targetMonth + 1, 0)).getUTCDate();
-  return new Date(Date.UTC(targetYear, targetMonth, Math.min(day, lastDay)))
-    .toISOString()
-    .slice(0, 10);
-}
-
 export function filterMeasurementsByRange<T extends DatedMeasurement>(
   measurements: T[],
   range: BodyTrendRange,
 ): T[] {
-  if (range === 'all' || measurements.length === 0) return measurements;
-  const latestDate = measurements.reduce(
-    (latest, item) => (item.measurement_date > latest ? item.measurement_date : latest),
-    measurements[0].measurement_date,
+  const { start_date: cutoff } = dateRangeForDates(
+    measurements.map((item) => item.measurement_date),
+    range,
   );
-  const months = range === '1m' ? 1 : range === '3m' ? 3 : range === '9m' ? 9 : 12;
-  const cutoff = subtractCalendarMonths(latestDate, months);
+  if (!cutoff) return measurements;
   return measurements.filter((item) => item.measurement_date >= cutoff);
 }
 

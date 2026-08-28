@@ -658,10 +658,17 @@ def save_body_measurement(payload: BodyMeasurementCreate, db: DbSession) -> Body
 
 
 @router.get("/body-measurements/export.csv")
-def export_body_measurement_csv(db: DbSession) -> Response:
-    measurements = list(
-        db.scalars(select(BodyMeasurement).order_by(BodyMeasurement.measurement_date))
-    )
+def export_body_measurement_csv(
+    db: DbSession, start_date: date | None = None, end_date: date | None = None
+) -> Response:
+    if start_date and end_date and start_date > end_date:
+        raise HTTPException(status_code=422, detail="Start date must not be after end date.")
+    statement = select(BodyMeasurement).order_by(BodyMeasurement.measurement_date)
+    if start_date:
+        statement = statement.where(BodyMeasurement.measurement_date >= start_date)
+    if end_date:
+        statement = statement.where(BodyMeasurement.measurement_date <= end_date)
+    measurements = list(db.scalars(statement))
     content = export_body_measurements(measurements)
     filename = f"body-weight-{date.today().isoformat()}.csv"
     return Response(
@@ -1152,14 +1159,21 @@ def create_workout(payload: TrainingWorkoutCreate, db: DbSession) -> TrainingWor
 
 
 @router.get("/workouts/export.csv")
-def export_workout_csv(db: DbSession) -> Response:
-    workouts = list(
-        db.scalars(
-            select(TrainingWorkout)
-            .options(*workout_options())
-            .order_by(TrainingWorkout.workout_date, TrainingWorkout.created_at)
-        )
+def export_workout_csv(
+    db: DbSession, start_date: date | None = None, end_date: date | None = None
+) -> Response:
+    if start_date and end_date and start_date > end_date:
+        raise HTTPException(status_code=422, detail="Start date must not be after end date.")
+    statement = (
+        select(TrainingWorkout)
+        .options(*workout_options())
+        .order_by(TrainingWorkout.workout_date, TrainingWorkout.created_at)
     )
+    if start_date:
+        statement = statement.where(TrainingWorkout.workout_date >= start_date)
+    if end_date:
+        statement = statement.where(TrainingWorkout.workout_date <= end_date)
+    workouts = list(db.scalars(statement))
     content = export_workouts(workouts)
     filename = f"gym-workouts-{date.today().isoformat()}.csv"
     return Response(

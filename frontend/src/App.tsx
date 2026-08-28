@@ -9,6 +9,7 @@ import type {
   CardioSessionInput,
   DashboardData,
   Exercise,
+  ExerciseCreateInput,
   ExerciseProgress,
   MachinePhoto,
   PersonalRecord,
@@ -31,6 +32,8 @@ import {
 import type { BodyTrendRange } from './bodyTrend';
 import { monthCountFromOldestWorkout } from './calendarRange';
 import { InlineConfirmButton } from './InlineConfirmButton';
+import { NotificationDialog } from './NotificationDialog';
+import { CreateExerciseDialog } from './CreateExerciseDialog';
 import { recentExerciseHistory, type ExerciseHistoryEntry } from './exerciseHistory';
 import { fuzzyHighlightIndices, rankExerciseSearchMatches } from './exerciseSearch';
 import {
@@ -64,6 +67,13 @@ import {
   type WorkoutDraftSet as DraftSet,
 } from './workoutMovements';
 import { applySupersetSelection, clearSuperset } from './workoutSupersets';
+import { workoutPageForId } from './workoutHistory';
+import {
+  dateRangeForDates,
+  TIME_RANGE_OPTIONS,
+  type DateRange,
+  type TimeRange,
+} from './dateRanges';
 
 type AppTab = 'dashboard' | 'log' | 'body' | 'history' | 'videos' | 'settings';
 type ProgressMetric = 'estimated_1rm' | 'best_weight_kg' | 'volume_kg';
@@ -466,13 +476,6 @@ export function App() {
       setActiveWorkoutStartedAt(null);
     }
     setTab(wasEditing ? 'history' : 'dashboard');
-    setMessage(
-      newRecords.length
-        ? `Workout saved — ${newRecords.length} PR${newRecords.length === 1 ? '' : 's'}! ${newRecords.map((record) => recordTypeLabel(record.record_type)).join(', ')}`
-        : editingWorkout
-          ? 'Workout changes saved.'
-          : 'Workout saved. Nice work.',
-    );
     setEditingWorkout(null);
     setCompletionRecords(newRecords);
     return newRecords;
@@ -502,13 +505,13 @@ export function App() {
     }
   }
 
-  async function exportWorkoutCsv() {
+  async function exportWorkoutCsv(range: DateRange) {
     try {
-      const blob = await api.exportWorkouts();
+      const blob = await api.exportWorkouts(range);
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `gym-workouts-${localDate()}.csv`;
+      link.download = `gym-workouts-${range.start_date ? `${range.start_date}-to-${range.end_date}` : localDate()}.csv`;
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -574,6 +577,12 @@ export function App() {
     );
   }
 
+  async function createExercise(input: ExerciseCreateInput): Promise<Exercise> {
+    const exercise = await api.createExercise(input);
+    setExercises((current) => mergeUniqueById(current, [exercise]));
+    return exercise;
+  }
+
   async function updateTrainingMode(mode: TrainingMode) {
     try {
       await api.updateTrainingMode(mode, localDate());
@@ -586,12 +595,7 @@ export function App() {
   return (
     <div className="tracker-app">
       {message && (
-        <div className="status-banner" role="status" aria-live="polite">
-          <span>{message}</span>
-          <button type="button" onClick={() => setMessage(null)} aria-label="Close notification">
-            ×
-          </button>
-        </div>
+        <NotificationDialog key={message} message={message} onClose={() => setMessage(null)} />
       )}
       {completionRecords.length > 0 && (
         <WorkoutCompletionDialog
@@ -681,6 +685,7 @@ export function App() {
               setTab('history');
             }}
             onExerciseFavorite={updateExerciseFavorite}
+            onCreateExercise={createExercise}
             onSave={saveWorkout}
             activeStartedAt={activeWorkoutStartedAt}
             onClose={() => {
@@ -1877,6 +1882,7 @@ function WorkoutLogger({
   historicalWorkouts,
   onExerciseHistory,
   onExerciseFavorite,
+  onCreateExercise,
   onSave,
   activeStartedAt,
   onClose,
@@ -1891,6 +1897,7 @@ function WorkoutLogger({
   historicalWorkouts: TrackedWorkout[];
   onExerciseHistory: (exerciseId: string) => void;
   onExerciseFavorite: (exerciseId: string, isFavorite: boolean) => Promise<void>;
+  onCreateExercise: (input: ExerciseCreateInput) => Promise<Exercise>;
   onSave: (payload: WorkoutInput) => Promise<PersonalRecord[]>;
   activeStartedAt: number | null;
   onClose: () => void;
@@ -2630,6 +2637,7 @@ function WorkoutLogger({
           excludedIds={movements.map((item) => item.exercise.id)}
           recentExerciseIds={recentExerciseIds}
           onFavoriteChange={onExerciseFavorite}
+          onCreateExercise={onCreateExercise}
           singleSelect={switchingMovementKey !== null}
           onChoose={switchingMovementKey ? switchExercise : addExercises}
           onCreateSuperset={(selected) => addExercises(selected, true)}
@@ -4590,6 +4598,7 @@ function ExercisePicker({
   excludedIds,
   recentExerciseIds,
   onFavoriteChange,
+  onCreateExercise,
   singleSelect = false,
   onChoose,
   onCreateSuperset,
@@ -4599,6 +4608,7 @@ function ExercisePicker({
   excludedIds: string[];
   recentExerciseIds: string[];
   onFavoriteChange: (exerciseId: string, isFavorite: boolean) => Promise<void>;
+  onCreateExercise: (input: ExerciseCreateInput) => Promise<Exercise>;
   singleSelect?: boolean;
   onChoose: (exercises: Exercise[]) => void;
   onCreateSuperset?: (exercises: Exercise[]) => void;
@@ -4608,6 +4618,7 @@ function ExercisePicker({
   const [filter, setFilter] = useState<ExercisePickerFilter>('all');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [favoriteSavingIds, setFavoriteSavingIds] = useState<string[]>([]);
+  const [createExerciseOpen, setCreateExerciseOpen] = useState(false);
   const [pickerError, setPickerError] = useState<string | null>(null);
   const [viewport, setViewport] = useState(() => {
     const visualViewport = window.visualViewport;
@@ -4676,11 +4687,6 @@ function ExercisePicker({
 
   function renderExercise(exercise: Exercise) {
     const selected = selectedIds.includes(exercise.id);
-    const nameScore = [...exercise.name].reduce(
-      (total, character) => total + character.charCodeAt(0),
-      0,
-    );
-    const rating = exercise.is_favorite ? 5 : 3 + (nameScore % 3);
     return (
       <div className={`exercise-option ${selected ? 'selected' : ''}`} key={exercise.id}>
         <button
@@ -4708,7 +4714,7 @@ function ExercisePicker({
               {exercise.equipment && <em>{exercise.equipment}</em>}
             </small>
           </span>
-          <b className="exercise-option-selected">{selected ? '✓' : ''}</b>
+          {selected && <b className="exercise-option-selected">✓</b>}
         </button>
         <button
           type="button"
@@ -4718,13 +4724,9 @@ function ExercisePicker({
           disabled={favoriteSavingIds.includes(exercise.id)}
           onClick={() => void toggleFavorite(exercise)}
         >
-          <span className="exercise-rating" aria-hidden="true">
-            {[0, 1, 2, 3, 4].map((star) => (
-              <i className={star < rating ? 'filled' : ''} key={star}>
-                ★
-              </i>
-            ))}
-          </span>
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M6 3h12v18l-6-4-6 4V3Z" />
+          </svg>
         </button>
       </div>
     );
@@ -4856,6 +4858,15 @@ function ExercisePicker({
             <option value="favorites">Favorites</option>
             <option value="recent">Recently Used</option>
           </select>
+          <button
+            type="button"
+            className="create-exercise-trigger"
+            aria-label="Create new exercise"
+            aria-haspopup="dialog"
+            onClick={() => setCreateExerciseOpen(true)}
+          >
+            +
+          </button>
         </div>
         <div className="exercise-list" ref={listRef}>
           {sections.map(
@@ -4870,7 +4881,7 @@ function ExercisePicker({
           {!visibleExerciseCount && (
             <p className="muted-empty">
               {filter === 'favorites' && !query
-                ? 'Tap the star beside an exercise to add a favorite.'
+                ? 'Tap the bookmark beside an exercise to add a favorite.'
                 : filter === 'recent' && !query
                   ? 'Exercises from completed workouts will appear here.'
                   : 'No exercises match that search.'}
@@ -4905,6 +4916,29 @@ function ExercisePicker({
           </button>
         </div>
       </section>
+      {createExerciseOpen && (
+        <CreateExerciseDialog
+          exercises={exercises}
+          categoryLabels={categoryNames}
+          initialName={query}
+          initialCategory={
+            filter === 'all' || filter === 'favorites' || filter === 'recent' ? '' : filter
+          }
+          viewportHeight={viewport.height}
+          viewportTop={viewport.top}
+          onCreate={onCreateExercise}
+          onCreated={(exercise) => {
+            setCreateExerciseOpen(false);
+            setPickerError(null);
+            setFilter('all');
+            setSearch(exercise.name);
+            setSelectedIds((current) =>
+              singleSelect ? [exercise.id] : [...new Set([...current, exercise.id])],
+            );
+          }}
+          onClose={() => setCreateExerciseOpen(false)}
+        />
+      )}
     </div>,
     document.body,
   );
@@ -5034,11 +5068,13 @@ function LandscapeChartFrame({
 function ProgressScreen({
   exercises,
   currentBodyweight,
+  onOpenWorkout,
   embedded = false,
   initialExerciseId = null,
 }: {
   exercises: Exercise[];
   currentBodyweight: number | null;
+  onOpenWorkout: (workoutId: string, exerciseId: string) => void;
   embedded?: boolean;
   initialExerciseId?: string | null;
 }) {
@@ -5147,20 +5183,26 @@ function ProgressScreen({
             )}
           </section>
           {pagedProgressPoints.map((point) => (
-            <article className="progress-row" key={point.workout_id}>
-              <div>
+            <button
+              type="button"
+              className="progress-row"
+              key={point.workout_id}
+              aria-label={`View workout from ${prettyDate(point.workout_date)}`}
+              onClick={() => onOpenWorkout(point.workout_id, progress.exercise.id)}
+            >
+              <span>
                 <strong>{prettyDate(point.workout_date)}</strong>
                 <small>
                   {point.best_reps} reps · RPE {point.best_rpe ?? '–'}
                 </small>
-              </div>
+              </span>
               <strong>
                 {metric === 'volume_kg'
                   ? Math.round(point[metric]).toLocaleString()
                   : point[metric]}{' '}
                 kg
               </strong>
-            </article>
+            </button>
           ))}
           <PaginationControls
             currentPage={progressPage}
@@ -5353,6 +5395,48 @@ function ProgressChart({
   );
 }
 
+function ExportTimeFrame({
+  label,
+  value,
+  dates,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  value: TimeRange;
+  dates: string[];
+  disabled: boolean;
+  onChange: (range: TimeRange) => void;
+}) {
+  const range = dateRangeForDates(dates, value);
+  return (
+    <div className="export-time-frame">
+      <label className="chart-option-field">
+        <span>Export time frame</span>
+        <select
+          aria-label={label}
+          value={value}
+          disabled={disabled}
+          onChange={(event) => onChange(event.target.value as TimeRange)}
+        >
+          {TIME_RANGE_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <small>
+        {range.start_date && range.end_date
+          ? `${prettyDate(range.start_date)} – ${prettyDate(range.end_date)} · ends at your latest entry`
+          : dates.length
+            ? 'All saved entries'
+            : 'No saved entries — exports an empty CSV template'}
+      </small>
+    </div>
+  );
+}
+
 function SettingsScreen({
   workouts,
   measurements,
@@ -5364,17 +5448,35 @@ function SettingsScreen({
   workouts: TrackedWorkout[];
   measurements: BodyMeasurement[];
   onImportWorkouts: (file: File) => Promise<void>;
-  onExportWorkouts: () => Promise<void>;
+  onExportWorkouts: (range: DateRange) => Promise<void>;
   onDeleteSamples: () => Promise<void>;
   onDataChange: () => Promise<void>;
 }) {
   const workoutCsvInput = useRef<HTMLInputElement>(null);
   const bodyCsvInput = useRef<HTMLInputElement>(null);
   const [importingWorkouts, setImportingWorkouts] = useState(false);
+  const [exportingWorkouts, setExportingWorkouts] = useState(false);
+  const [workoutExportRange, setWorkoutExportRange] = useState<TimeRange>('all');
+  const [bodyExportRange, setBodyExportRange] = useState<TimeRange>('all');
   const [importingBodyCsv, setImportingBodyCsv] = useState(false);
   const [exportingBodyCsv, setExportingBodyCsv] = useState(false);
   const [bodyCsvMessage, setBodyCsvMessage] = useState<string | null>(null);
   const [bodyCsvError, setBodyCsvError] = useState<string | null>(null);
+
+  async function exportWorkouts() {
+    if (exportingWorkouts) return;
+    setExportingWorkouts(true);
+    try {
+      await onExportWorkouts(
+        dateRangeForDates(
+          workouts.map((workout) => workout.workout_date),
+          workoutExportRange,
+        ),
+      );
+    } finally {
+      setExportingWorkouts(false);
+    }
+  }
 
   async function exportBodyCsv() {
     if (exportingBodyCsv) return;
@@ -5382,18 +5484,23 @@ function SettingsScreen({
     setBodyCsvError(null);
     setBodyCsvMessage(null);
     try {
-      const blob = await api.exportBodyMeasurements();
+      const range = dateRangeForDates(
+        measurements.map((measurement) => measurement.measurement_date),
+        bodyExportRange,
+      );
+      const count = filterMeasurementsByRange(measurements, bodyExportRange).length;
+      const blob = await api.exportBodyMeasurements(range);
       const href = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = href;
-      link.download = `body-weight-${localDate()}.csv`;
+      link.download = `body-weight-${range.start_date ? `${range.start_date}-to-${range.end_date}` : localDate()}.csv`;
       document.body.append(link);
       link.click();
       link.remove();
       URL.revokeObjectURL(href);
       setBodyCsvMessage(
-        measurements.length
-          ? `Exported ${measurements.length} body-weight ${measurements.length === 1 ? 'entry' : 'entries'}.`
+        count
+          ? `Exported ${count} body-weight ${count === 1 ? 'entry' : 'entries'}.`
           : 'Exported an empty body-weight CSV template.',
       );
     } catch (reason) {
@@ -5438,7 +5545,14 @@ function SettingsScreen({
             <h2 id="workout-data-title">Workout data</h2>
           </div>
         </header>
-        <p>Import a workout CSV or download a backup of your complete training history.</p>
+        <p>Import a workout CSV or export your chosen time frame. All time creates a full backup.</p>
+        <ExportTimeFrame
+          label="Workout export time frame"
+          value={workoutExportRange}
+          dates={workouts.map((workout) => workout.workout_date)}
+          disabled={exportingWorkouts}
+          onChange={setWorkoutExportRange}
+        />
         <input
           ref={workoutCsvInput}
           className="sr-only"
@@ -5462,8 +5576,8 @@ function SettingsScreen({
           >
             {importingWorkouts ? 'Importing…' : '↑ Import workout CSV'}
           </button>
-          <button type="button" onClick={() => void onExportWorkouts()}>
-            ↓ Export workout CSV
+          <button type="button" disabled={exportingWorkouts} onClick={() => void exportWorkouts()}>
+            {exportingWorkouts ? 'Exporting…' : '↓ Export workout CSV'}
           </button>
           {workouts.some((workout) => workout.is_sample) && (
             <InlineConfirmButton
@@ -5484,6 +5598,13 @@ function SettingsScreen({
           </div>
         </header>
         <p>Date and Weight (kg) are required; Body Fat (%) and Notes are optional.</p>
+        <ExportTimeFrame
+          label="Bodyweight export time frame"
+          value={bodyExportRange}
+          dates={measurements.map((measurement) => measurement.measurement_date)}
+          disabled={exportingBodyCsv}
+          onChange={setBodyExportRange}
+        />
         <input
           ref={bodyCsvInput}
           className="sr-only"
@@ -6204,11 +6325,11 @@ function BodyTrendChart({
                 setActivePointIndex(null);
               }}
             >
-              <option value="1m">1 month</option>
-              <option value="3m">3 months</option>
-              <option value="9m">9 months</option>
-              <option value="1y">1 year</option>
-              <option value="all">All time</option>
+              {TIME_RANGE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
             </select>
           </label>
           <label className="chart-option-field">
@@ -6777,12 +6898,9 @@ function HistoryScreen({
   onStartWorkout: (workoutDate?: string) => void;
   onReplaceActiveWorkout: (workoutDate: string) => void;
 }) {
-  const initialWorkoutIndex = initialOpenId
-    ? workouts.findIndex((workout) => workout.id === initialOpenId)
-    : -1;
   const [openId, setOpenId] = useState<string | null>(initialOpenId);
   const [workoutPage, setWorkoutPage] = useState(
-    initialWorkoutIndex >= 0 ? Math.floor(initialWorkoutIndex / HISTORY_PAGE_SIZE) + 1 : 1,
+    () => workoutPageForId(workouts, initialOpenId, HISTORY_PAGE_SIZE) ?? 1,
   );
   const [section, setSection] = useState<'history' | 'progress' | 'cardio'>(initialSection);
   const [selectedExerciseId, setSelectedExerciseId] = useState<string | null>(initialExerciseId);
@@ -6791,6 +6909,8 @@ function HistoryScreen({
   >(null);
   const [pendingWorkoutDate, setPendingWorkoutDate] = useState<string | null>(null);
   const [expandedPhoto, setExpandedPhoto] = useState<MachinePhoto | null>(null);
+  const openWorkoutSummaryRef = useRef<HTMLButtonElement>(null);
+  const revealWorkoutRef = useRef(false);
   const workoutPageCount = Math.max(1, Math.ceil(workouts.length / HISTORY_PAGE_SIZE));
   const pagedWorkouts = workouts.slice(
     (workoutPage - 1) * HISTORY_PAGE_SIZE,
@@ -6800,6 +6920,15 @@ function HistoryScreen({
   useEffect(() => {
     setWorkoutPage((page) => Math.min(page, workoutPageCount));
   }, [workoutPageCount]);
+
+  useEffect(() => {
+    if (section !== 'history' || !revealWorkoutRef.current) return;
+    const summary = openWorkoutSummaryRef.current;
+    if (!summary) return;
+    revealWorkoutRef.current = false;
+    summary.focus({ preventScroll: true });
+    summary.scrollIntoView({ block: 'start' });
+  }, [section, openId, workoutPage]);
 
   return (
     <section className="history-screen content-page">
@@ -6827,6 +6956,15 @@ function HistoryScreen({
         <ProgressScreen
           exercises={exercises}
           currentBodyweight={currentBodyweight}
+          onOpenWorkout={(workoutId, exerciseId) => {
+            const page = workoutPageForId(workouts, workoutId, HISTORY_PAGE_SIZE);
+            if (page === null) return;
+            revealWorkoutRef.current = true;
+            setSelectedExerciseId(exerciseId);
+            setWorkoutPage(page);
+            setOpenId(workoutId);
+            setSection('history');
+          }}
           embedded
           initialExerciseId={selectedExerciseId}
         />
@@ -6895,6 +7033,7 @@ function HistoryScreen({
             return (
               <article className={`history-card panel ${open ? 'open' : ''}`} key={workout.id}>
                 <button
+                  ref={open ? openWorkoutSummaryRef : null}
                   className="history-card-summary"
                   onClick={() => setOpenId(open ? null : workout.id)}
                 >

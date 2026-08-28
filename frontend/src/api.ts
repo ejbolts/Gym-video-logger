@@ -10,6 +10,7 @@ import type {
   CsvImportResult,
   DashboardData,
   Exercise,
+  ExerciseCreateInput,
   ExerciseProgress,
   Health,
   MachinePhoto,
@@ -26,6 +27,7 @@ import type {
   TrainingPreferences,
 } from './types';
 import { cachedWorkoutsForRevision, readWorkoutCache, writeWorkoutCache } from './workoutCache';
+import { dateRangeQuery, type DateRange } from './dateRanges';
 
 export class ApiError extends Error {
   constructor(
@@ -84,13 +86,7 @@ export const api = {
   testPush: () => request<void>('/api/notifications/push/test', { method: 'POST' }),
   listSessions: () => request<WorkoutSession[]>('/api/sessions'),
   listExercises: () => request<Exercise[]>('/api/exercises'),
-  createExercise: (payload: {
-    name: string;
-    category: string;
-    kind: string;
-    muscle_group: string;
-    equipment: string | null;
-  }) =>
+  createExercise: (payload: ExerciseCreateInput) =>
     request<Exercise>('/api/exercises', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -146,7 +142,8 @@ export const api = {
     }),
   deleteBodyMeasurement: (id: string) =>
     request<void>(`/api/body-measurements/${id}`, { method: 'DELETE' }),
-  exportBodyMeasurements: () => requestBlob('/api/body-measurements/export.csv'),
+  exportBodyMeasurements: (range: DateRange = {}) =>
+    requestBlob(`/api/body-measurements/export.csv${dateRangeQuery(range)}`),
   importBodyMeasurements: (file: File) => {
     const form = new FormData();
     form.append('file', file, file.name);
@@ -203,7 +200,8 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     }),
-  exportWorkouts: () => requestBlob('/api/workouts/export.csv'),
+  exportWorkouts: (range: DateRange = {}) =>
+    requestBlob(`/api/workouts/export.csv${dateRangeQuery(range)}`),
   importWorkouts: (file: File) => {
     const form = new FormData();
     form.append('file', file, file.name);

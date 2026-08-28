@@ -99,6 +99,11 @@ export interface Exercise {
   muscle_contributions: MuscleContribution[];
 }
 
+export type ExerciseCreateInput = Pick<
+  Exercise,
+  'name' | 'category' | 'kind' | 'muscle_group' | 'equipment'
+>;
+
 export interface MachinePhoto {
   id: string;
   exercise_id: string;
