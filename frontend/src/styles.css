@@ -9610,6 +9610,126 @@ body,
   grid-template-columns: minmax(0, 1fr);
 }
 
+.progress-exercise-field {
+  position: relative;
+  min-width: 0;
+}
+
+.progress-exercise-field > label {
+  display: block;
+  margin-bottom: 0.35rem;
+  color: var(--muted-ink);
+  font-size: 0.68rem;
+  font-weight: 850;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.progress-exercise-combobox {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 2.75rem;
+}
+
+.progress-exercise-combobox input {
+  width: 100%;
+  min-width: 0;
+  min-height: 3rem;
+  border: 1px solid var(--line);
+  border-right: 0;
+  border-radius: 5px 0 0 5px;
+  padding: 0.65rem 0.8rem;
+  background: var(--page);
+  color: var(--ink);
+  font-size: 1rem;
+  font-weight: 750;
+}
+
+.progress-exercise-combobox input:focus,
+.progress-exercise-combobox:focus-within button {
+  border-color: var(--accent-dark);
+}
+
+.progress-exercise-combobox input:focus {
+  outline: 0;
+  box-shadow: inset 2px 0 var(--accent-dark), inset 0 2px var(--accent-dark),
+    inset 0 -2px var(--accent-dark);
+}
+
+.progress-exercise-combobox > button {
+  min-height: 3rem;
+  border: 1px solid var(--line);
+  border-radius: 0 5px 5px 0;
+  padding: 0;
+  background: var(--page);
+  color: var(--ink);
+  font-size: 1.2rem;
+}
+
+.progress-exercise-combobox > button:focus-visible {
+  position: relative;
+  outline: 2px solid var(--accent-dark);
+  outline-offset: -3px;
+}
+
+.progress-exercise-results {
+  position: absolute;
+  z-index: 80;
+  top: calc(100% + 0.3rem);
+  right: 0;
+  left: 0;
+  max-height: min(18rem, 45dvh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--card);
+  box-shadow: 0 18px 46px rgb(0 0 0 / 45%);
+}
+
+.progress-exercise-results > button {
+  width: 100%;
+  display: block;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  padding: 0.7rem 0.8rem;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+}
+
+.progress-exercise-results > button:last-of-type {
+  border-bottom: 0;
+}
+
+.progress-exercise-results > button.active,
+.progress-exercise-results > button[aria-selected='true'] {
+  background: color-mix(in srgb, var(--accent) 15%, var(--card));
+}
+
+.progress-exercise-results strong,
+.progress-exercise-results small {
+  display: block;
+}
+
+.progress-exercise-results strong {
+  color: var(--accent-dark);
+  font-size: 0.88rem;
+  line-height: 1.35;
+}
+
+.progress-exercise-results small {
+  margin-top: 0.18rem;
+  color: var(--muted-ink);
+  font-size: 0.68rem;
+}
+
+.progress-exercise-results > p {
+  margin: 0;
+  padding: 0.9rem;
+  color: var(--muted-ink);
+  font-size: 0.75rem;
+}
+
 body.chart-fullscreen-open {
   overflow: hidden;
 }

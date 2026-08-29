@@ -34,6 +34,7 @@ import { monthCountFromOldestWorkout } from './calendarRange';
 import { InlineConfirmButton } from './InlineConfirmButton';
 import { NotificationDialog } from './NotificationDialog';
 import { CreateExerciseDialog } from './CreateExerciseDialog';
+import { ProgressExerciseSearch } from './ProgressExerciseSearch';
 import { recentExerciseHistory, type ExerciseHistoryEntry } from './exerciseHistory';
 import { fuzzyHighlightIndices, rankExerciseSearchMatches } from './exerciseSearch';
 import {
@@ -5099,12 +5100,23 @@ function ProgressScreen({
 
   useEffect(() => {
     if (!exerciseId) return;
+    let cancelled = false;
     setProgressPage(1);
     setLoading(true);
     void api
       .exerciseProgress(exerciseId)
-      .then(setProgress)
-      .finally(() => setLoading(false));
+      .then((nextProgress) => {
+        if (!cancelled) setProgress(nextProgress);
+      })
+      .catch(() => {
+        if (!cancelled) setProgress(null);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [exerciseId]);
 
   useEffect(() => {
@@ -5118,16 +5130,11 @@ function ProgressScreen({
         <h1>Movement progress</h1>
       </div>
       <section className="panel progress-controls">
-        <label>
-          Exercise
-          <select value={exerciseId} onChange={(event) => setExerciseId(event.target.value)}>
-            {strengthExercises.map((exercise) => (
-              <option key={exercise.id} value={exercise.id}>
-                {exercise.name}
-              </option>
-            ))}
-          </select>
-        </label>
+        <ProgressExerciseSearch
+          exercises={strengthExercises}
+          exerciseId={exerciseId}
+          onChange={setExerciseId}
+        />
       </section>
       {loading && <LoadingState />}
       {!loading && progress && (

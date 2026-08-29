@@ -4,6 +4,7 @@ import {
   fuzzyMatchIndices,
   fuzzyMatchesFields,
   fuzzyScoreFields,
+  progressExerciseMatches,
   rankExerciseSearchMatches,
 } from './exerciseSearch';
 
@@ -78,5 +79,28 @@ describe('exercise fuzzy search', () => {
     ];
 
     expect(rankExerciseSearchMatches(exercises, 'lat pu', [])[0].id).toBe('direct');
+  });
+
+  it('searches progress exercises by name, muscle group, and equipment', () => {
+    const exercises = [
+      { id: 'press', name: 'Chest Press', muscle_group: 'Chest', equipment: 'Machine' },
+      { id: 'row', name: 'Seated Row', muscle_group: 'Back', equipment: 'Cable' },
+      { id: 'curl', name: 'Preacher Curl', muscle_group: 'Biceps', equipment: 'Machine' },
+    ];
+    expect(progressExerciseMatches(exercises, 'row').map((item) => item.id)).toEqual(['row']);
+    expect(progressExerciseMatches(exercises, 'back').map((item) => item.id)).toEqual(['row']);
+    expect(progressExerciseMatches(exercises, 'cable').map((item) => item.id)).toEqual(['row']);
+    expect(progressExerciseMatches(exercises, 'machine chest').map((item) => item.id)).toEqual([
+      'press',
+    ]);
+  });
+
+  it('shows the full progress exercise list alphabetically when browsing', () => {
+    const exercises = [
+      { id: 'z', name: 'Z Press', muscle_group: 'Shoulders', equipment: 'Barbell' },
+      { id: 'a', name: 'Arnold Press', muscle_group: 'Shoulders', equipment: 'Dumbbell' },
+    ];
+    expect(progressExerciseMatches(exercises, '').map((item) => item.id)).toEqual(['a', 'z']);
+    expect(progressExerciseMatches(exercises, 'no match')).toEqual([]);
   });
 });

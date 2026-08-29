@@ -130,6 +130,14 @@ export function rankExerciseSearchMatches<T extends SearchableExercise>(
     .map((match) => match.exercise);
 }
 
+export function progressExerciseMatches<T extends SearchableExercise>(
+  exercises: T[],
+  query: string,
+): T[] {
+  if (query.trim()) return rankExerciseSearchMatches(exercises, query, []);
+  return exercises.slice().sort((first, second) => first.name.localeCompare(second.name));
+}
+
 export function fuzzyHighlightIndices(value: string, query: string): number[] {
   const matches = new Set<number>();
   searchTokens(query).forEach((token) => {
