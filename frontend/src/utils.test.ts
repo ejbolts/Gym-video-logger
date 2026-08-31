@@ -61,4 +61,19 @@ describe('workout list helpers', () => {
     expect(reorder(original, 2, 0)).toEqual(['c', 'a', 'b']);
     expect(original).toEqual(['a', 'b', 'c']);
   });
+
+  it('moves a complete set record with its note and rest setting', () => {
+    const sets = [
+      { key: 'warmup', notes: 'Upper pin', rest_seconds: 120 },
+      { key: 'working', notes: 'Hard set', rest_seconds: 240 },
+      { key: 'drop', notes: 'Reduce weight', rest_seconds: 90 },
+    ];
+
+    expect(reorder(sets, 2, 1)).toEqual([
+      sets[0],
+      { key: 'drop', notes: 'Reduce weight', rest_seconds: 90 },
+      sets[1],
+    ]);
+    expect(sets.map((item) => item.key)).toEqual(['warmup', 'working', 'drop']);
+  });
 });

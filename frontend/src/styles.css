@@ -4564,6 +4564,40 @@ button.metric-card:focus-visible {
   }
 }
 
+.edge-swipe-indicator {
+  position: fixed;
+  z-index: 180;
+  top: 50%;
+  left: max(0.55rem, env(safe-area-inset-left));
+  width: 2.7rem;
+  height: 2.7rem;
+  display: grid;
+  place-items: center;
+  border: 1px solid #466171;
+  border-radius: 50%;
+  background: rgb(10 25 34 / 92%);
+  box-shadow: 0 8px 28px rgb(0 0 0 / 45%);
+  color: #38b6f4;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-130%, -50%) scale(0.84);
+  transition:
+    opacity 90ms ease,
+    transform 120ms ease;
+}
+
+.edge-swipe-indicator > span {
+  transform: translateY(-0.08rem);
+  font-size: 2rem;
+  font-weight: 500;
+  line-height: 1;
+}
+
+html.edge-swipe-active .edge-swipe-indicator {
+  opacity: 1;
+  transform: translate(0, -50%) scale(1);
+}
+
 /* Reference-match pass: flat StrengthLevel layouts and mobile sheets. */
 .tracker-app {
   min-height: 100dvh;
@@ -4896,32 +4930,25 @@ button.metric-card:focus-visible {
   gap: 0.25rem;
 }
 
-.strength-level-stars {
-  display: inline-flex;
-  min-width: 0;
-  align-items: center;
-  white-space: nowrap;
-}
-
-.strength-level-stars i {
-  color: #aaa89d;
-  font-style: normal;
-  line-height: 1;
-}
-
-.strength-level-stars i {
-  font-size: clamp(0.86rem, 4vw, 1.22rem);
-}
-
-.strength-level-stars i.filled {
-  color: var(--gold);
-}
-
 .completed-set-menu {
+  width: 1.55rem;
+  min-height: 2.2rem;
+  border: 0;
+  padding: 0;
+  background: transparent;
   color: #29a9ec;
   font-size: 1.45rem;
   line-height: 1;
   text-align: center;
+}
+
+.completed-summary-actions {
+  justify-self: stretch;
+}
+
+.completed-summary-actions .set-actions-menu-popover {
+  bottom: auto;
+  top: calc(100% + 0.3rem);
 }
 
 .set-details.completed {
@@ -5744,8 +5771,8 @@ button.metric-card:focus-visible {
     font-size: 0.75rem;
   }
 
-  .strength-level-stars i {
-    font-size: 0.78rem;
+  .set-level-label {
+    font-size: 0.72rem;
   }
 }
 
@@ -8877,14 +8904,11 @@ body,
 
   .add-set-backdrop:not(.set-dialog-backdrop) {
     place-items: start center;
-    padding: max(0.75rem, env(safe-area-inset-top)) 0
-      calc(4rem + env(safe-area-inset-bottom));
+    padding: max(0.75rem, env(safe-area-inset-top)) 0 calc(4rem + env(safe-area-inset-bottom));
   }
 
   .add-set-backdrop:not(.set-dialog-backdrop) .add-set-dialog {
-    max-height: calc(
-      100dvh - 4.75rem - env(safe-area-inset-top) - env(safe-area-inset-bottom)
-    );
+    max-height: calc(100dvh - 4.75rem - env(safe-area-inset-top) - env(safe-area-inset-bottom));
     padding-bottom: 0;
   }
 
@@ -8968,10 +8992,6 @@ body,
 
 .set-details.completed .completed-set-menu {
   color: #245a34;
-}
-
-.set-details.completed .strength-level-stars i:not(.filled) {
-  color: #4b6351;
 }
 
 .set-details.completed[open] > .set-row,
@@ -9103,14 +9123,35 @@ body,
   padding: 0.35rem 0.55rem;
 }
 
-.warmup-level {
-  color: #e18a28;
+.set-level-label {
   font-size: 0.78rem;
-  font-weight: 800;
+  font-weight: 850;
+  line-height: 1.1;
   text-transform: lowercase;
+  white-space: nowrap;
 }
 
-.set-details.completed .completed-set-summary .warmup-level {
+.set-level-working {
+  color: #29a9ec;
+}
+
+.set-level-drop {
+  color: #bb7cf0;
+}
+
+.set-level-warmup {
+  color: #e18a28;
+}
+
+.set-details.completed .completed-set-summary .set-level-working {
+  color: #006fab;
+}
+
+.set-details.completed .completed-set-summary .set-level-drop {
+  color: #6f2e96;
+}
+
+.set-details.completed .completed-set-summary .set-level-warmup {
   color: #914500;
 }
 
@@ -9651,7 +9692,9 @@ body,
 
 .progress-exercise-combobox input:focus {
   outline: 0;
-  box-shadow: inset 2px 0 var(--accent-dark), inset 0 2px var(--accent-dark),
+  box-shadow:
+    inset 2px 0 var(--accent-dark),
+    inset 0 2px var(--accent-dark),
     inset 0 -2px var(--accent-dark);
 }
 
@@ -10044,11 +10087,11 @@ body.chart-fullscreen-open {
 
 .set-details.previous-set-details .completed-set-summary > strong,
 .set-details.previous-set-details .completed-set-summary > span,
-.set-details.previous-set-details .warmup-level {
+.set-details.previous-set-details .set-level-warmup {
   color: inherit;
 }
 
-.set-details.previous-set-details .strength-level-stars {
+.set-details.previous-set-details .set-level-label {
   opacity: 0.62;
 }
 
@@ -10097,6 +10140,19 @@ body.chart-fullscreen-open {
   max-height: calc(var(--set-dialog-viewport-height, 100dvh) - 1rem);
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
+  transform: translate3d(0, var(--set-dialog-drag-y, 0px), 0);
+  transition: transform 180ms ease-out;
+  will-change: transform;
+}
+
+.set-dialog-backdrop .add-set-dialog.swipe-dragging {
+  transition: none;
+}
+
+.set-dialog-backdrop .add-set-dialog > header {
+  touch-action: pan-x;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .set-dialog-backdrop .add-set-content {
@@ -10247,18 +10303,7 @@ body.chart-fullscreen-open {
   }
 }
 
-.drop-set-level {
-  color: #bb7cf0;
-  font-size: 0.76rem;
-  font-weight: 850;
-  text-transform: lowercase;
-}
-
-.set-details.completed .completed-set-summary .drop-set-level {
-  color: #6f2e96;
-}
-
-.set-details.previous-set-details .completed-set-summary .drop-set-level {
+.set-details.previous-set-details .completed-set-summary .set-level-drop {
   color: #ad76d8;
 }
 
@@ -10356,4 +10401,336 @@ body.chart-fullscreen-open {
   .add-set-dialog > footer:has(.add-set-delete) > .suggested-set-footer-actions {
     grid-template-columns: 0.72fr 1fr;
   }
+}
+
+/* Final set-row layout: compact, single-line, and touch-reorderable. */
+.set-grid-strength .set-grid-head,
+.set-grid-strength .completed-set-summary {
+  grid-template-columns:
+    minmax(4.8rem, 1.2fr) minmax(2.5rem, 0.52fr) minmax(6.6rem, 1.2fr)
+    4.25rem;
+  gap: 0.2rem;
+}
+
+.set-grid-strength .set-grid-head {
+  padding: 0.18rem 0.34rem 0.32rem;
+}
+
+.set-grid-strength .completed-set-summary {
+  min-height: 2.38rem;
+  padding: 0.14rem 0.34rem;
+}
+
+.set-grid-strength .completed-set-level {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  justify-items: initial;
+  gap: 0.16rem;
+  white-space: nowrap;
+}
+
+.set-grid-strength .completed-set-rpe {
+  font-size: 0.58rem;
+}
+
+.set-grid-strength .set-details:not(.completed) > .set-row,
+.set-grid-strength .set-details.completed[open] > .set-row {
+  grid-template-columns:
+    minmax(0, 1.45fr) minmax(0, 0.7fr) minmax(0, 0.76fr) 2.7rem
+    1.8rem;
+  gap: 0.24rem;
+  padding: 0.18rem 0.28rem 0.22rem;
+}
+
+.set-grid-strength .set-row > input,
+.set-grid-strength .set-row > select,
+.set-grid-strength .set-row > .complete-set {
+  height: 2.2rem;
+}
+
+.set-grid-strength .set-extras {
+  grid-column: 1 / -1;
+  padding-top: 0;
+}
+
+.set-grid-strength .rest-between {
+  padding: 0.08rem 0.55rem;
+}
+
+.set-grid-cardio .set-grid-head,
+.set-grid-cardio .set-row {
+  grid-template-columns:
+    1.7rem minmax(0, 1fr) minmax(0, 1fr) minmax(2.6rem, 0.72fr) 2.45rem
+    1.8rem;
+  gap: 0.25rem;
+}
+
+.set-grid-cardio .completed-set-summary {
+  grid-template-columns: 1.7rem minmax(0, 1fr) 2.6rem 2.2rem 4.25rem;
+  gap: 0.25rem;
+  min-height: 2.5rem;
+  padding: 0.16rem 0.3rem;
+}
+
+.completed-summary-actions {
+  width: 4.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.22rem;
+  justify-self: end;
+}
+
+.set-actions-menu.is-open {
+  z-index: 140;
+}
+
+.set-grid-strength .completed-summary-actions {
+  grid-column: 4;
+}
+
+.set-grid-cardio .completed-summary-actions {
+  grid-column: 5;
+}
+
+.set-drag-handle {
+  width: 1.85rem;
+  height: 2.15rem;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: #8c9692;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.set-drag-grip {
+  display: grid;
+  grid-template-columns: repeat(2, 4px);
+  grid-template-rows: repeat(3, 4px);
+  gap: 3px;
+  pointer-events: none;
+}
+
+.set-drag-grip > i {
+  width: 4px;
+  height: 4px;
+  display: block;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.set-drag-handle:active {
+  cursor: grabbing;
+}
+
+.set-drag-handle:hover,
+.set-drag-handle:focus-visible {
+  color: #42b7ef;
+  outline: none;
+}
+
+.set-drag-handle:disabled {
+  opacity: 0.28;
+  cursor: default;
+}
+
+.set-details.completed .set-drag-handle {
+  color: #3f6049;
+}
+
+.set-details.completed .set-drag-handle:hover,
+.set-details.completed .set-drag-handle:focus-visible {
+  color: #006fab;
+}
+
+.set-details.set-dragging {
+  opacity: 0.48;
+  transform: scale(0.992);
+}
+
+.set-details.set-drop-target {
+  box-shadow: inset 0 3px #29a9ec;
+}
+
+.set-details,
+.set-details + .completed-set-note {
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease,
+    box-shadow 120ms ease;
+}
+
+@media (max-width: 390px) {
+  .set-grid-strength .set-grid-head,
+  .set-grid-strength .completed-set-summary {
+    grid-template-columns:
+      minmax(4.2rem, 1.1fr) minmax(2.25rem, 0.5fr) minmax(5.9rem, 1.15fr)
+      4rem;
+  }
+
+  .set-grid-strength .set-details:not(.completed) > .set-row,
+  .set-grid-strength .set-details.completed[open] > .set-row {
+    grid-template-columns:
+      minmax(0, 1.4fr) minmax(0, 0.68fr) minmax(0, 0.74fr) 2.55rem
+      1.7rem;
+    gap: 0.18rem;
+    padding-right: 0.2rem;
+    padding-left: 0.2rem;
+  }
+
+  .set-level-label {
+    font-size: 0.68rem;
+  }
+
+  .set-grid-strength .completed-set-rpe {
+    font-size: 0.54rem;
+  }
+}
+
+.set-grid-strength .completed-set-summary > .completed-set-value {
+  width: 100%;
+  min-width: 0;
+  min-height: 2.05rem;
+  display: flex;
+  align-items: center;
+  border: 0;
+  border-radius: 4px;
+  padding: 0 0.1rem;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 400;
+  text-align: left;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.set-grid-strength .completed-set-summary > .completed-set-reps {
+  justify-content: center;
+}
+
+.set-grid-strength .completed-set-summary > .completed-set-value:hover,
+.set-grid-strength .completed-set-summary > .completed-set-value:focus-visible {
+  background: rgb(0 111 171 / 10%);
+  color: #005f93;
+  outline: 2px solid rgb(0 111 171 / 38%);
+  outline-offset: -2px;
+}
+
+.completed-set-level-control {
+  min-width: 0;
+  min-height: 2.05rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 4px;
+  padding: 0.12rem 0.16rem;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  touch-action: manipulation;
+  white-space: nowrap;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.completed-set-level-control:hover,
+.completed-set-level-control:focus-visible {
+  background: rgb(0 111 171 / 10%);
+  outline: 2px solid rgb(0 111 171 / 38%);
+  outline-offset: -2px;
+}
+
+.completed-set-type-control {
+  flex: 0 1 auto;
+}
+
+.completed-set-level-control.completed-set-rpe {
+  flex: 0 0 auto;
+  text-align: center;
+}
+
+/* Keep both set editors compact and usable above mobile keyboards. */
+.set-dialog-backdrop .add-set-dialog > header {
+  min-height: 0;
+  gap: 0.55rem;
+  padding: 0.52rem 0.78rem;
+}
+
+.set-dialog-backdrop .add-set-dialog h2 {
+  font-size: 1.35rem;
+  font-weight: 500;
+  line-height: 1.1;
+}
+
+.set-dialog-backdrop .set-dialog-header-actions {
+  gap: 0.38rem;
+}
+
+.set-dialog-backdrop .add-set-dialog > header .set-dialog-header-actions > button {
+  width: 2.65rem;
+  height: 2.65rem;
+}
+
+.set-dialog-backdrop .add-set-content {
+  padding: 0.72rem 0.9rem;
+}
+
+.set-dialog-backdrop .add-set-previous > strong {
+  margin-bottom: 0.32rem;
+  font-size: 0.76rem;
+}
+
+.set-dialog-backdrop .add-set-previous > div {
+  gap: 0.35rem;
+}
+
+.set-dialog-backdrop .add-set-previous span {
+  padding: 0.38rem 0.55rem;
+  font-size: 0.74rem;
+}
+
+.set-dialog-backdrop .add-set-fields {
+  gap: 0.58rem;
+  margin-top: 0.65rem;
+}
+
+.set-dialog-backdrop .add-set-fields label {
+  gap: 0.25rem;
+  font-size: 0.76rem;
+}
+
+.set-dialog-backdrop .add-set-fields input,
+.set-dialog-backdrop .add-set-fields select {
+  min-height: 3.05rem;
+  padding: 0.58rem 0.7rem;
+}
+
+.set-dialog-backdrop .add-set-dialog > footer {
+  min-height: 0;
+  padding: 0.65rem 0.9rem calc(0.65rem + env(safe-area-inset-bottom));
+}
+
+.set-dialog-backdrop .add-set-dialog.keyboard-visible > header {
+  padding-top: 0.38rem;
+  padding-bottom: 0.38rem;
+}
+
+.set-dialog-backdrop .add-set-dialog.keyboard-visible .add-set-content {
+  padding-top: 0.55rem;
+  padding-bottom: 0.55rem;
+}
+
+.set-dialog-backdrop .add-set-dialog.keyboard-visible .add-set-fields input,
+.set-dialog-backdrop .add-set-dialog.keyboard-visible .add-set-fields select {
+  min-height: 2.85rem;
 }

@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
-import type { CSSProperties, FormEvent, ReactNode } from 'react';
+import type { CSSProperties, FormEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from './api';
 import type {
@@ -34,7 +34,16 @@ import { monthCountFromOldestWorkout } from './calendarRange';
 import { InlineConfirmButton } from './InlineConfirmButton';
 import { NotificationDialog } from './NotificationDialog';
 import { CreateExerciseDialog } from './CreateExerciseDialog';
+import { EdgeSwipeBack } from './EdgeSwipeBack';
 import { ProgressExerciseSearch } from './ProgressExerciseSearch';
+import { SetLevelLabel } from './SetLevelLabel';
+import { completesSetDialogDismissSwipe } from './setDialogSwipe';
+import {
+  appTabFromHash,
+  createAppHistoryState,
+  isAppHistoryState,
+  type AppTab,
+} from './appNavigation';
 import { recentExerciseHistory, type ExerciseHistoryEntry } from './exerciseHistory';
 import { fuzzyHighlightIndices, rankExerciseSearchMatches } from './exerciseSearch';
 import {
@@ -76,9 +85,9 @@ import {
   type TimeRange,
 } from './dateRanges';
 
-type AppTab = 'dashboard' | 'log' | 'body' | 'history' | 'videos' | 'settings';
 type ProgressMetric = 'estimated_1rm' | 'best_weight_kg' | 'volume_kg';
 type DashboardMetric = 'workouts' | 'sets' | 'cardio';
+type SetEditorFocus = 'weight' | 'reps' | 'type' | 'rpe' | null;
 
 const categoryNames: Record<WorkoutCategory, string> = {
   upper: 'Upper body',
@@ -137,41 +146,57 @@ function completedSetPerformance(item: DraftSet, cardio: boolean): string {
   return values.join(' × ') || 'No result entered';
 }
 
-function strengthLevelPercent(item: DraftSet): number | null {
-  if (item.warmup || item.set_type === 'warmup' || !item.reps || item.reps <= 0) return null;
-  return Math.min(100, Math.max(1, Math.round(100 / (1 + item.reps / 30))));
-}
-
-function StrengthLevelStars({ item }: { item: DraftSet }) {
-  if (item.set_type === 'drop') {
-    return (
-      <span className="drop-set-level" aria-label="Drop set">
-        dropset
-      </span>
-    );
-  }
-  const percent = strengthLevelPercent(item);
-  if (percent === null) {
-    return (
-      <span className="warmup-level" aria-label="Warm-up set">
-        warmup
-      </span>
-    );
-  }
-  const filled = percent >= 90 ? 5 : percent >= 80 ? 4 : percent >= 70 ? 3 : 2;
-  return (
-    <span className="strength-level-stars" aria-label={`${filled} out of 5 level`}>
-      {[0, 1, 2, 3, 4].map((star) => (
-        <i className={star < filled ? 'filled' : ''} key={star} aria-hidden="true">
-          ★
-        </i>
-      ))}
-    </span>
-  );
-}
-
 function moveItem<T>(items: T[], from: number, to: number): T[] {
   return reorder(items, from, to);
+}
+
+function SetDragHandle({
+  setNumber,
+  disabled,
+  onPointerDown,
+  onPointerMove,
+  onPointerUp,
+  onPointerCancel,
+  onMoveEarlier,
+  onMoveLater,
+}: {
+  setNumber: number;
+  disabled: boolean;
+  onPointerDown: (event: ReactPointerEvent<HTMLButtonElement>) => void;
+  onPointerMove: (event: ReactPointerEvent<HTMLButtonElement>) => void;
+  onPointerUp: (event: ReactPointerEvent<HTMLButtonElement>) => void;
+  onPointerCancel: (event: ReactPointerEvent<HTMLButtonElement>) => void;
+  onMoveEarlier: () => void;
+  onMoveLater: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="set-drag-handle"
+      aria-label={`Drag set ${setNumber} to reorder`}
+      title="Drag to reorder"
+      disabled={disabled}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerCancel}
+      onKeyDown={(event) => {
+        if (event.key === 'ArrowUp') {
+          event.preventDefault();
+          onMoveEarlier();
+        } else if (event.key === 'ArrowDown') {
+          event.preventDefault();
+          onMoveLater();
+        }
+      }}
+    >
+      <span className="set-drag-grip" aria-hidden="true">
+        {[0, 1, 2, 3, 4, 5].map((dot) => (
+          <i key={dot} />
+        ))}
+      </span>
+    </button>
+  );
 }
 
 function calculateDraftPrs(
@@ -403,12 +428,14 @@ function WorkoutCompletionDialog({
 }
 
 export function App() {
-  const [tab, setTab] = useState<AppTab>(() => {
-    const requested = window.location.hash.slice(1) as AppTab;
-    return ['dashboard', 'log', 'body', 'history', 'videos', 'settings'].includes(requested)
-      ? requested
-      : 'dashboard';
-  });
+  const initialHistoryState = isAppHistoryState(window.history.state) ? window.history.state : null;
+  const [tab, setTabState] = useState<AppTab>(() =>
+    initialHistoryState ? initialHistoryState.tab : appTabFromHash(window.location.hash),
+  );
+  const historyIndexRef = useRef(initialHistoryState?.index ?? 0);
+  const navigationActionRef = useRef<'push' | 'replace' | 'pop'>('replace');
+  const currentTabRef = useRef(tab);
+  currentTabRef.current = tab;
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [workouts, setWorkouts] = useState<TrackedWorkout[]>([]);
@@ -433,6 +460,24 @@ export function App() {
     activeWorkoutStartedAt === null
       ? null
       : (readActiveWorkoutDraft()?.workoutDate ?? workoutStartDate);
+  const canNavigateBack =
+    tab !== 'dashboard' ||
+    (isAppHistoryState(window.history.state) && window.history.state.index > 0);
+
+  function setTab(nextTab: AppTab, options: { replace?: boolean } = {}) {
+    if (nextTab === tab) return;
+    navigationActionRef.current = options.replace ? 'replace' : 'push';
+    setTabState(nextTab);
+  }
+
+  function navigateBack() {
+    const currentState = window.history.state;
+    if (isAppHistoryState(currentState) && currentState.index > 0) {
+      window.history.back();
+      return;
+    }
+    if (tab !== 'dashboard') setTab('dashboard', { replace: true });
+  }
 
   async function refreshData() {
     try {
@@ -462,8 +507,42 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    window.history.replaceState(null, '', `#${tab}`);
+    const action = navigationActionRef.current;
+    if (action === 'pop') {
+      navigationActionRef.current = 'replace';
+      return;
+    }
+
+    if (action === 'push') {
+      historyIndexRef.current += 1;
+      window.history.pushState(createAppHistoryState(tab, historyIndexRef.current), '', `#${tab}`);
+    } else {
+      window.history.replaceState(
+        createAppHistoryState(tab, historyIndexRef.current),
+        '',
+        `#${tab}`,
+      );
+    }
+    navigationActionRef.current = 'replace';
   }, [tab]);
+
+  useEffect(() => {
+    const restoreNavigation = (event: PopStateEvent) => {
+      const nextTab = isAppHistoryState(event.state)
+        ? event.state.tab
+        : appTabFromHash(window.location.hash);
+      if (isAppHistoryState(event.state)) historyIndexRef.current = event.state.index;
+      navigationActionRef.current = 'pop';
+      if (currentTabRef.current === nextTab) {
+        navigationActionRef.current = 'replace';
+        return;
+      }
+      setTabState(nextTab);
+    };
+
+    window.addEventListener('popstate', restoreNavigation);
+    return () => window.removeEventListener('popstate', restoreNavigation);
+  }, []);
 
   async function saveWorkout(payload: WorkoutInput) {
     const wasEditing = editingWorkout !== null;
@@ -476,7 +555,7 @@ export function App() {
       clearActiveWorkoutDraft();
       setActiveWorkoutStartedAt(null);
     }
-    setTab(wasEditing ? 'history' : 'dashboard');
+    setTab(wasEditing ? 'history' : 'dashboard', { replace: true });
     setEditingWorkout(null);
     setCompletionRecords(newRecords);
     return newRecords;
@@ -595,6 +674,7 @@ export function App() {
 
   return (
     <div className="tracker-app">
+      <EdgeSwipeBack onBack={navigateBack} enabled={canNavigateBack} />
       {message && (
         <NotificationDialog key={message} message={message} onClose={() => setMessage(null)} />
       )}
@@ -608,7 +688,7 @@ export function App() {
 
       {!loading && tab !== 'dashboard' && tab !== 'log' && (
         <header className="reference-app-header">
-          <button type="button" onClick={() => setTab('dashboard')} aria-label="Back to home">
+          <button type="button" onClick={navigateBack} aria-label="Go back">
             ‹
           </button>
           <strong>
@@ -2125,11 +2205,11 @@ function WorkoutLogger({
     setMovements((current) => moveItem(current, index, index + direction));
   }
 
-  function moveSet(movementKey: string, index: number, direction: -1 | 1) {
+  function moveSet(movementKey: string, fromIndex: number, toIndex: number) {
     setMovements((current) =>
       current.map((movement) =>
         movement.key === movementKey
-          ? { ...movement, sets: moveItem(movement.sets, index, index + direction) }
+          ? { ...movement, sets: moveItem(movement.sets, fromIndex, toIndex) }
           : movement,
       ),
     );
@@ -2555,7 +2635,7 @@ function WorkoutLogger({
             onMoveDown={() => moveMovement(movementIndex, 1)}
             canMoveUp={movementIndex > 0}
             canMoveDown={movementIndex < movements.length - 1}
-            onMoveSet={(index, direction) => moveSet(movement.key, index, direction)}
+            onMoveSet={(fromIndex, toIndex) => moveSet(movement.key, fromIndex, toIndex)}
             onDeleteSet={(index) => deleteSet(movement, index)}
             onSuperset={(button) => openSupersetPicker(movement.key, button)}
             onMachinePhotos={(machinePhotoIds) =>
@@ -2970,7 +3050,7 @@ function MovementCard({
   onMoveDown: () => void;
   canMoveUp: boolean;
   canMoveDown: boolean;
-  onMoveSet: (index: number, direction: -1 | 1) => void;
+  onMoveSet: (fromIndex: number, toIndex: number) => void;
   onDeleteSet: (index: number) => void;
   onSuperset: (button: HTMLButtonElement) => void;
 }) {
@@ -2983,7 +3063,12 @@ function MovementCard({
   const [addSetOpen, setAddSetOpen] = useState(false);
   const [openSetActionsKey, setOpenSetActionsKey] = useState<string | null>(null);
   const [editingSetKey, setEditingSetKey] = useState<string | null>(null);
+  const [editingSetFocus, setEditingSetFocus] = useState<SetEditorFocus>(null);
+  const [draggingSetKey, setDraggingSetKey] = useState<string | null>(null);
+  const [dragTargetSetKey, setDragTargetSetKey] = useState<string | null>(null);
   const [weightDrafts, setWeightDrafts] = useState<Record<string, string>>({});
+  const draggingSetKeyRef = useRef<string | null>(null);
+  const dragTargetSetKeyRef = useRef<string | null>(null);
   const movementMenuRef = useRef<HTMLDetailsElement>(null);
   const movementNoteRef = useRef<HTMLInputElement>(null);
 
@@ -2991,8 +3076,187 @@ function MovementCard({
     if (!movement.isComplete) setExpanded(true);
   }, [movement.isComplete]);
 
+  useEffect(() => {
+    if (!openSetActionsKey) return;
+
+    const closeOutside = (event: PointerEvent) => {
+      if (event.target instanceof Element && event.target.closest('.set-actions-menu')) return;
+      setOpenSetActionsKey(null);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpenSetActionsKey(null);
+    };
+
+    document.addEventListener('pointerdown', closeOutside);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('pointerdown', closeOutside);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [openSetActionsKey]);
+
   function closeMovementMenu() {
     if (movementMenuRef.current) movementMenuRef.current.open = false;
+  }
+
+  function clearSetDrag() {
+    draggingSetKeyRef.current = null;
+    dragTargetSetKeyRef.current = null;
+    setDraggingSetKey(null);
+    setDragTargetSetKey(null);
+  }
+
+  function openSetEditor(setKey: string, focus: SetEditorFocus = null) {
+    setEditingSetFocus(focus);
+    setEditingSetKey(setKey);
+  }
+
+  function closeSetEditor() {
+    setEditingSetKey(null);
+    setEditingSetFocus(null);
+  }
+
+  function beginSetDrag(event: ReactPointerEvent<HTMLButtonElement>, setKey: string) {
+    if (!event.isPrimary || (event.pointerType === 'mouse' && event.button !== 0)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    draggingSetKeyRef.current = setKey;
+    dragTargetSetKeyRef.current = setKey;
+    setDraggingSetKey(setKey);
+    setDragTargetSetKey(setKey);
+    setOpenSetActionsKey(null);
+  }
+
+  function moveSetDrag(event: ReactPointerEvent<HTMLButtonElement>) {
+    if (!draggingSetKeyRef.current) return;
+    event.preventDefault();
+    event.stopPropagation();
+
+    const target = document
+      .elementFromPoint(event.clientX, event.clientY)
+      ?.closest<HTMLElement>('.set-details[data-set-key]');
+    const targetKey = target?.dataset.setKey;
+    if (targetKey && movement.sets.some((item) => item.key === targetKey)) {
+      dragTargetSetKeyRef.current = targetKey;
+      setDragTargetSetKey(targetKey);
+    }
+
+    const scrollEdge = 64;
+    if (event.clientY < scrollEdge) window.scrollBy({ top: -12, behavior: 'auto' });
+    if (event.clientY > window.innerHeight - scrollEdge) {
+      window.scrollBy({ top: 12, behavior: 'auto' });
+    }
+  }
+
+  function finishSetDrag(event: ReactPointerEvent<HTMLButtonElement>) {
+    if (!draggingSetKeyRef.current) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+
+    const fromIndex = movement.sets.findIndex((item) => item.key === draggingSetKeyRef.current);
+    const toIndex = movement.sets.findIndex((item) => item.key === dragTargetSetKeyRef.current);
+    if (fromIndex >= 0 && toIndex >= 0 && fromIndex !== toIndex) onMoveSet(fromIndex, toIndex);
+    clearSetDrag();
+  }
+
+  function cancelSetDrag(event: ReactPointerEvent<HTMLButtonElement>) {
+    event.stopPropagation();
+    clearSetDrag();
+  }
+
+  function renderSetDragHandle(item: DraftSet, index: number) {
+    return (
+      <SetDragHandle
+        setNumber={index + 1}
+        disabled={movement.sets.length < 2}
+        onPointerDown={(event) => beginSetDrag(event, item.key)}
+        onPointerMove={moveSetDrag}
+        onPointerUp={finishSetDrag}
+        onPointerCancel={cancelSetDrag}
+        onMoveEarlier={() => {
+          if (index > 0) onMoveSet(index, index - 1);
+        }}
+        onMoveLater={() => {
+          if (index < movement.sets.length - 1) onMoveSet(index, index + 1);
+        }}
+      />
+    );
+  }
+
+  function renderCompletedSetActions(item: DraftSet, index: number) {
+    return (
+      <span
+        className={`set-actions-menu completed-summary-actions ${openSetActionsKey === item.key ? 'is-open' : ''}`}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+        }}
+      >
+        {renderSetDragHandle(item, index)}
+        <button
+          type="button"
+          className="completed-set-menu"
+          aria-label={`Options for set ${index + 1}`}
+          aria-expanded={openSetActionsKey === item.key}
+          onClick={() =>
+            setOpenSetActionsKey((current) => (current === item.key ? null : item.key))
+          }
+        >
+          ⋮
+        </button>
+        {openSetActionsKey === item.key && (
+          <span className="set-actions-menu-popover">
+            <button
+              type="button"
+              onClick={() => {
+                openSetEditor(item.key);
+                setOpenSetActionsKey(null);
+              }}
+            >
+              <span aria-hidden="true">✎</span>
+              Edit set
+            </button>
+            <button
+              type="button"
+              disabled={index === 0}
+              onClick={() => {
+                onMoveSet(index, index - 1);
+                setOpenSetActionsKey(null);
+              }}
+            >
+              <span aria-hidden="true">↑</span>
+              Move earlier
+            </button>
+            <button
+              type="button"
+              disabled={index === movement.sets.length - 1}
+              onClick={() => {
+                onMoveSet(index, index + 1);
+                setOpenSetActionsKey(null);
+              }}
+            >
+              <span aria-hidden="true">↓</span>
+              Move later
+            </button>
+            <button
+              type="button"
+              className="danger"
+              onClick={() => {
+                onDeleteSet(index);
+                setOpenSetActionsKey(null);
+              }}
+            >
+              <span aria-hidden="true">■</span>
+              Delete set
+            </button>
+          </span>
+        )}
+      </span>
+    );
   }
 
   function updateWeightDraft(item: DraftSet, rawValue: string) {
@@ -3217,12 +3481,12 @@ function MovementCard({
               <span>KM</span>
               <span>RPE</span>
               <span>Done</span>
+              <span aria-hidden="true" />
             </>
           ) : (
             <>
               <span>Weight</span>
               <span>Reps</span>
-              <span>&gt; %</span>
               <span>Level</span>
               <span aria-hidden="true" />
             </>
@@ -3231,7 +3495,8 @@ function MovementCard({
         {movement.sets.map((item, index) => (
           <Fragment key={item.key}>
             <details
-              className={`set-details ${item.completed ? 'completed' : ''} ${item.fromPrevious ? 'previous-set-details' : ''}`}
+              className={`set-details ${item.completed ? 'completed' : ''} ${item.fromPrevious ? 'previous-set-details' : ''} ${draggingSetKey === item.key ? 'set-dragging' : ''} ${dragTargetSetKey === item.key && draggingSetKey !== item.key ? 'set-drop-target' : ''}`}
+              data-set-key={item.key}
               open={!item.completed && !item.fromPrevious}
               onToggle={(event) => {
                 if ((item.completed || item.fromPrevious) && event.currentTarget.open) {
@@ -3244,7 +3509,7 @@ function MovementCard({
                 onClick={(event) => {
                   if (!item.completed && !item.fromPrevious) return;
                   event.preventDefault();
-                  setEditingSetKey(item.key);
+                  openSetEditor(item.key);
                 }}
               >
                 {cardio ? (
@@ -3253,65 +3518,66 @@ function MovementCard({
                     <strong>{completedSetPerformance(item, true)}</strong>
                     <span>{item.rpe ?? '–'}</span>
                     <b className="completed-set-check">{item.completed ? '✓' : ''}</b>
-                    <span
-                      className="completed-set-menu"
-                      role="button"
-                      tabIndex={0}
-                      aria-label={`Options for set ${index + 1}`}
-                      onClick={(event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        setEditingSetKey(item.key);
-                      }}
-                      onKeyDown={(event) => {
-                        if (event.key !== 'Enter' && event.key !== ' ') return;
-                        event.preventDefault();
-                        event.stopPropagation();
-                        setEditingSetKey(item.key);
-                      }}
-                    >
-                      ⋮
-                    </span>
+                    {renderCompletedSetActions(item, index)}
                   </>
                 ) : (
                   <>
-                    <strong className="completed-set-weight">
+                    <button
+                      type="button"
+                      className="completed-set-value completed-set-weight"
+                      aria-label={`Edit weight for set ${index + 1}`}
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        openSetEditor(item.key, 'weight');
+                      }}
+                    >
                       {item.weight_kg === null ? '–' : `${item.weight_kg} kg`}
                       {prBadges.has(item.key) && (
                         <b className="pr-badge" title={prBadges.get(item.key)?.join(', ')}>
                           PR
                         </b>
                       )}
-                    </strong>
-                    <strong>{item.reps ?? '–'}</strong>
-                    <span>
-                      {strengthLevelPercent(item) === null ? '–' : `${strengthLevelPercent(item)}%`}
-                    </span>
-                    <span className="completed-set-level">
-                      <StrengthLevelStars item={item} />
-                      {item.rpe !== null && (
-                        <small className="completed-set-rpe">RPE {item.rpe}</small>
-                      )}
-                    </span>
-                    <span
-                      className="completed-set-menu"
-                      role="button"
-                      tabIndex={0}
-                      aria-label={`Options for set ${index + 1}`}
+                    </button>
+                    <button
+                      type="button"
+                      className="completed-set-value completed-set-reps"
+                      aria-label={`Edit repetitions for set ${index + 1}`}
                       onClick={(event) => {
                         event.preventDefault();
                         event.stopPropagation();
-                        setEditingSetKey(item.key);
-                      }}
-                      onKeyDown={(event) => {
-                        if (event.key !== 'Enter' && event.key !== ' ') return;
-                        event.preventDefault();
-                        event.stopPropagation();
-                        setEditingSetKey(item.key);
+                        openSetEditor(item.key, 'reps');
                       }}
                     >
-                      ⋮
+                      {item.reps ?? '–'}
+                    </button>
+                    <span className="completed-set-level">
+                      <button
+                        type="button"
+                        className="completed-set-level-control completed-set-type-control"
+                        aria-label={`Edit set type for set ${index + 1}`}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          openSetEditor(item.key, 'type');
+                        }}
+                      >
+                        <SetLevelLabel setType={item.set_type} warmup={item.warmup} />
+                      </button>
+                      <button
+                        type="button"
+                        className="completed-set-level-control completed-set-rpe"
+                        aria-label={`Edit RPE for set ${index + 1}`}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          openSetEditor(item.key, 'rpe');
+                        }}
+                      >
+                        RPE {item.rpe ?? '–'}
+                      </button>
                     </span>
+                    {renderCompletedSetActions(item, index)}
                   </>
                 )}
               </summary>
@@ -3423,6 +3689,7 @@ function MovementCard({
                 >
                   {item.completed ? '✓' : ''}
                 </button>
+                {renderSetDragHandle(item, index)}
                 <div className="set-extras">
                   {treadmill && (
                     <fieldset className="treadmill-set-fields">
@@ -3500,7 +3767,7 @@ function MovementCard({
                     placeholder="Set note (optional)"
                   />
                   <div
-                    className={`set-actions-menu ${item.completed ? 'completed-set-actions' : ''}`}
+                    className={`set-actions-menu ${item.completed ? 'completed-set-actions' : ''} ${openSetActionsKey === item.key ? 'is-open' : ''}`}
                   >
                     <button
                       type="button"
@@ -3519,7 +3786,7 @@ function MovementCard({
                           type="button"
                           disabled={index === 0}
                           onClick={() => {
-                            onMoveSet(index, -1);
+                            onMoveSet(index, index - 1);
                             setOpenSetActionsKey(null);
                           }}
                         >
@@ -3530,7 +3797,7 @@ function MovementCard({
                           type="button"
                           disabled={index === movement.sets.length - 1}
                           onClick={() => {
-                            onMoveSet(index, 1);
+                            onMoveSet(index, index + 1);
                             setOpenSetActionsKey(null);
                           }}
                         >
@@ -3589,11 +3856,12 @@ function MovementCard({
           exerciseName={movement.exercise.name}
           setNumber={editingSetIndex + 1}
           item={editingSet}
+          initialFocus={editingSetFocus}
           cardio={cardio}
           treadmill={treadmill}
           onSave={(update) => onUpdateSet(editingSet.key, update)}
           onDelete={() => onDeleteSet(editingSetIndex)}
-          onClose={() => setEditingSetKey(null)}
+          onClose={closeSetEditor}
         />
       )}
       <button className="add-set-button" onClick={() => setAddSetOpen(true)}>
@@ -3620,10 +3888,126 @@ function MovementCard({
   );
 }
 
+function useSetDialogViewport() {
+  const initialViewportHeightRef = useRef(window.visualViewport?.height ?? window.innerHeight);
+  const [viewport, setViewport] = useState(() => ({
+    height: window.visualViewport?.height ?? window.innerHeight,
+    top: window.visualViewport?.offsetTop ?? 0,
+    keyboardVisible: false,
+  }));
+
+  useEffect(() => {
+    const visualViewport = window.visualViewport;
+    const updateViewport = () =>
+      setViewport({
+        height: visualViewport?.height ?? window.innerHeight,
+        top: visualViewport?.offsetTop ?? 0,
+        keyboardVisible:
+          initialViewportHeightRef.current - (visualViewport?.height ?? window.innerHeight) > 100,
+      });
+
+    updateViewport();
+    visualViewport?.addEventListener('resize', updateViewport);
+    visualViewport?.addEventListener('scroll', updateViewport);
+    window.addEventListener('resize', updateViewport);
+    return () => {
+      visualViewport?.removeEventListener('resize', updateViewport);
+      visualViewport?.removeEventListener('scroll', updateViewport);
+      window.removeEventListener('resize', updateViewport);
+    };
+  }, []);
+
+  return viewport;
+}
+
+function useSetDialogSwipeToDismiss(onDismiss: () => void) {
+  const onDismissRef = useRef(onDismiss);
+  const pointerRef = useRef<{
+    id: number;
+    startX: number;
+    startY: number;
+    vertical: boolean;
+  } | null>(null);
+  const [dragY, setDragY] = useState(0);
+  const [dragging, setDragging] = useState(false);
+
+  useEffect(() => {
+    onDismissRef.current = onDismiss;
+  }, [onDismiss]);
+
+  const reset = () => {
+    pointerRef.current = null;
+    setDragY(0);
+    setDragging(false);
+  };
+
+  const onPointerDown = (event: ReactPointerEvent<HTMLElement>) => {
+    const target = event.target as HTMLElement;
+    if (
+      !event.isPrimary ||
+      event.pointerType !== 'touch' ||
+      target.closest('button, input, select, textarea, a')
+    ) {
+      return;
+    }
+
+    pointerRef.current = {
+      id: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      vertical: false,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const onPointerMove = (event: ReactPointerEvent<HTMLElement>) => {
+    const pointer = pointerRef.current;
+    if (!pointer || pointer.id !== event.pointerId) return;
+
+    const deltaX = event.clientX - pointer.startX;
+    const deltaY = event.clientY - pointer.startY;
+    if (!pointer.vertical) {
+      if (Math.abs(deltaX) > 10 && Math.abs(deltaX) > Math.max(0, deltaY)) {
+        reset();
+        return;
+      }
+      if (deltaY <= 8 || deltaY <= Math.abs(deltaX) * 1.15) return;
+      pointer.vertical = true;
+      setDragging(true);
+    }
+
+    event.preventDefault();
+    setDragY(Math.max(0, deltaY));
+  };
+
+  const onPointerUp = (event: ReactPointerEvent<HTMLElement>) => {
+    const pointer = pointerRef.current;
+    if (!pointer || pointer.id !== event.pointerId) return;
+
+    const completed = completesSetDialogDismissSwipe(
+      event.clientX - pointer.startX,
+      event.clientY - pointer.startY,
+    );
+    reset();
+    if (completed) onDismissRef.current();
+  };
+
+  const onPointerCancel = (event: ReactPointerEvent<HTMLElement>) => {
+    if (pointerRef.current?.id === event.pointerId) reset();
+  };
+
+  return {
+    dragY,
+    dragging,
+    headerProps: { onPointerDown, onPointerMove, onPointerUp, onPointerCancel },
+  };
+}
+
 function CompletedSetEditDialog({
   exerciseName,
   setNumber,
   item,
+  initialFocus,
   cardio,
   treadmill,
   onSave,
@@ -3633,6 +4017,7 @@ function CompletedSetEditDialog({
   exerciseName: string;
   setNumber: number;
   item: DraftSet;
+  initialFocus: SetEditorFocus;
   cardio: boolean;
   treadmill: boolean;
   onSave: (update: Partial<DraftSet>) => void;
@@ -3656,37 +4041,12 @@ function CompletedSetEditDialog({
   const [deleteConfirmationOpen, setDeleteConfirmationOpen] = useState(false);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const onCloseRef = useRef(onClose);
-  const initialViewportHeightRef = useRef(window.visualViewport?.height ?? window.innerHeight);
-  const [viewport, setViewport] = useState(() => ({
-    height: window.visualViewport?.height ?? window.innerHeight,
-    top: window.visualViewport?.offsetTop ?? 0,
-    keyboardVisible: false,
-  }));
+  const viewport = useSetDialogViewport();
+  const swipe = useSetDialogSwipeToDismiss(onClose);
 
   useEffect(() => {
     onCloseRef.current = onClose;
   }, [onClose]);
-
-  useEffect(() => {
-    const visualViewport = window.visualViewport;
-    const updateViewport = () =>
-      setViewport({
-        height: visualViewport?.height ?? window.innerHeight,
-        top: visualViewport?.offsetTop ?? 0,
-        keyboardVisible:
-          initialViewportHeightRef.current - (visualViewport?.height ?? window.innerHeight) > 100,
-      });
-
-    updateViewport();
-    visualViewport?.addEventListener('resize', updateViewport);
-    visualViewport?.addEventListener('scroll', updateViewport);
-    window.addEventListener('resize', updateViewport);
-    return () => {
-      visualViewport?.removeEventListener('resize', updateViewport);
-      visualViewport?.removeEventListener('scroll', updateViewport);
-      window.removeEventListener('resize', updateViewport);
-    };
-  }, []);
 
   useEffect(() => {
     const root = document.getElementById('root');
@@ -3744,7 +4104,8 @@ function CompletedSetEditDialog({
       }}
     >
       <form
-        className="add-set-dialog"
+        className={`add-set-dialog ${viewport.keyboardVisible ? 'keyboard-visible' : ''} ${swipe.dragging ? 'swipe-dragging' : ''}`}
+        style={{ '--set-dialog-drag-y': `${swipe.dragY}px` } as CSSProperties}
         role="dialog"
         aria-modal="true"
         aria-labelledby="completed-set-edit-title"
@@ -3778,7 +4139,7 @@ function CompletedSetEditDialog({
             </div>
           </div>
         )}
-        <header>
+        <header {...swipe.headerProps}>
           <h2 id="completed-set-edit-title">{item.completed ? 'Edit Set' : 'Add Set'}</h2>
           <div className="set-dialog-header-actions">
             <button
@@ -3851,7 +4212,7 @@ function CompletedSetEditDialog({
                   Weight
                   <span className="unit-input">
                     <input
-                      autoFocus
+                      autoFocus={initialFocus === null || initialFocus === 'weight'}
                       inputMode="decimal"
                       value={weight}
                       onFocus={(event) => {
@@ -3868,6 +4229,7 @@ function CompletedSetEditDialog({
                 <label>
                   Reps
                   <input
+                    autoFocus={initialFocus === 'reps'}
                     inputMode="numeric"
                     value={reps}
                     onFocus={(event) => {
@@ -3886,7 +4248,11 @@ function CompletedSetEditDialog({
             <div className="set-dialog-secondary-fields">
               <label>
                 RPE
-                <select value={rpe} onChange={(event) => setRpe(event.target.value)}>
+                <select
+                  autoFocus={initialFocus === 'rpe'}
+                  value={rpe}
+                  onChange={(event) => setRpe(event.target.value)}
+                >
                   <option value="">–</option>
                   {[5, 6, 7, 7.5, 8, 8.5, 9, 9.5, 10].map((value) => (
                     <option key={value} value={value}>
@@ -3898,6 +4264,7 @@ function CompletedSetEditDialog({
               <label>
                 Type
                 <select
+                  autoFocus={initialFocus === 'type'}
                   value={setType}
                   onChange={(event) => setSetType(event.target.value as DraftSet['set_type'])}
                 >
@@ -3990,6 +4357,8 @@ function AddSetDialog({
   const [showRpe, setShowRpe] = useState(false);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const onCloseRef = useRef(onClose);
+  const viewport = useSetDialogViewport();
+  const swipe = useSetDialogSwipeToDismiss(onClose);
 
   useEffect(() => {
     onCloseRef.current = onClose;
@@ -4028,24 +4397,43 @@ function AddSetDialog({
     });
   };
 
+  const viewportStyle = {
+    '--set-dialog-viewport-top': `${viewport.top}px`,
+    '--set-dialog-viewport-height': `${viewport.height}px`,
+  } as CSSProperties;
+
   return createPortal(
     <div
-      className="modal-backdrop add-set-backdrop"
+      className="modal-backdrop add-set-backdrop set-dialog-backdrop"
+      style={viewportStyle}
       onPointerDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
     >
       <section
-        className="add-set-dialog"
+        className={`add-set-dialog ${viewport.keyboardVisible ? 'keyboard-visible' : ''} ${swipe.dragging ? 'swipe-dragging' : ''}`}
+        style={{ '--set-dialog-drag-y': `${swipe.dragY}px` } as CSSProperties}
         role="dialog"
         aria-modal="true"
         aria-labelledby="add-set-title"
       >
-        <header>
+        <header {...swipe.headerProps}>
           <h2 id="add-set-title">Add Set</h2>
-          <button ref={closeButtonRef} type="button" onClick={onClose} aria-label="Close add set">
-            ×
-          </button>
+          <div className="set-dialog-header-actions">
+            {viewport.keyboardVisible && (
+              <button
+                type="button"
+                className="set-dialog-confirm"
+                onClick={submit}
+                aria-label="Add set"
+              >
+                ✓
+              </button>
+            )}
+            <button ref={closeButtonRef} type="button" onClick={onClose} aria-label="Close add set">
+              ×
+            </button>
+          </div>
         </header>
         <div className="add-set-content">
           <div className="add-set-previous">
@@ -4195,14 +4583,16 @@ function AddSetDialog({
             </button>
           </div>
         </div>
-        <footer>
-          <button type="button" className="add-set-confirm" onClick={submit}>
-            Add Set
-          </button>
-          <button type="button" onClick={onClose}>
-            Close
-          </button>
-        </footer>
+        {!viewport.keyboardVisible && (
+          <footer>
+            <button type="button" className="add-set-confirm" onClick={submit}>
+              Add Set
+            </button>
+            <button type="button" onClick={onClose}>
+              Close
+            </button>
+          </footer>
+        )}
       </section>
     </div>,
     document.body,
@@ -5552,7 +5942,9 @@ function SettingsScreen({
             <h2 id="workout-data-title">Workout data</h2>
           </div>
         </header>
-        <p>Import a workout CSV or export your chosen time frame. All time creates a full backup.</p>
+        <p>
+          Import a workout CSV or export your chosen time frame. All time creates a full backup.
+        </p>
         <ExportTimeFrame
           label="Workout export time frame"
           value={workoutExportRange}
