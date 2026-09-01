@@ -2,7 +2,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api';
 import { InlineConfirmButton } from './InlineConfirmButton';
 import type { Health, LocalClip, SessionStatus, WorkoutSession } from './types';
-import { base64UrlToUint8Array } from './push';
+import {
+  enablePhonePushNotifications,
+  existingPhonePushSubscription,
+  PHONE_PUSH_PREFERENCE_EVENT,
+} from './push';
 import { formatBytes, formatSeconds, localDate } from './utils';
 
 type Screen = 'upload' | 'progress' | 'processing' | 'complete' | 'history';
@@ -66,21 +70,22 @@ export function VideoUpload() {
   }, []);
 
   useEffect(() => {
-    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
-    void navigator.serviceWorker.ready
-      .then((registration) => registration.pushManager.getSubscription())
-      .then(async (subscription) => {
-        if (!subscription) return;
-        const keys = subscription.toJSON().keys;
-        if (!keys?.p256dh || !keys.auth) return;
-        await api.savePushSubscription({
-          endpoint: subscription.endpoint,
-          p256dh: keys.p256dh,
-          auth: keys.auth,
+    let active = true;
+    const syncPushState = () => {
+      void existingPhonePushSubscription()
+        .then((subscription) => {
+          if (active) setPushEnabled(subscription !== null);
+        })
+        .catch(() => {
+          if (active) setPushEnabled(false);
         });
-        setPushEnabled(true);
-      })
-      .catch(() => undefined);
+    };
+    syncPushState();
+    window.addEventListener(PHONE_PUSH_PREFERENCE_EVENT, syncPushState);
+    return () => {
+      active = false;
+      window.removeEventListener(PHONE_PUSH_PREFERENCE_EVENT, syncPushState);
+    };
   }, []);
 
   useEffect(() => {
@@ -300,28 +305,7 @@ export function VideoUpload() {
     setPushEnabling(true);
     setMessage(null);
     try {
-      const config = await api.pushConfig();
-      if (!config.enabled || !config.public_key)
-        throw new Error(
-          'Phone notifications are not ready on the server. Restart it after updating.',
-        );
-      const permission = await Notification.requestPermission();
-      if (permission !== 'granted') throw new Error('Notification permission was not granted.');
-      const registration = await navigator.serviceWorker.ready;
-      const subscription =
-        (await registration.pushManager.getSubscription()) ??
-        (await registration.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: base64UrlToUint8Array(config.public_key),
-        }));
-      const keys = subscription.toJSON().keys;
-      if (!keys?.p256dh || !keys.auth)
-        throw new Error('The browser returned an incomplete push subscription.');
-      await api.savePushSubscription({
-        endpoint: subscription.endpoint,
-        p256dh: keys.p256dh,
-        auth: keys.auth,
-      });
+      await enablePhonePushNotifications();
       await api.testPush();
       setPushEnabled(true);
       setMessage('Completion alerts are enabled. A test notification is on its way.');

@@ -34,10 +34,22 @@ import { monthCountFromOldestWorkout } from './calendarRange';
 import { InlineConfirmButton } from './InlineConfirmButton';
 import { NotificationDialog } from './NotificationDialog';
 import { CreateExerciseDialog } from './CreateExerciseDialog';
+import { CachedTabPanel } from './CachedTabPanel';
+import { ConfettiBurst } from './ConfettiBurst';
 import { EdgeSwipeBack } from './EdgeSwipeBack';
 import { ProgressExerciseSearch } from './ProgressExerciseSearch';
+import { restTimerPreferenceEnabled, saveRestTimerPreference } from './restTimerPreference';
+import {
+  disablePhonePushNotifications,
+  enablePhonePushNotifications,
+  existingPhonePushSubscription,
+  PHONE_PUSH_PREFERENCE_EVENT,
+  pushNotificationsSupported,
+  showRestTimerNotification,
+} from './push';
 import { SetLevelLabel } from './SetLevelLabel';
 import { completesSetDialogDismissSwipe } from './setDialogSwipe';
+import { unusualSetEntryWarning, type SetEntryWarning } from './setEntryConfirmation';
 import {
   appTabFromHash,
   createAppHistoryState,
@@ -69,6 +81,7 @@ import {
   DEFAULT_REST_SECONDS,
   isCompletedWorkingSet,
   latestExerciseSets,
+  restTimerSecondsAfterSetUpdate,
 } from './workoutSets';
 import { finalizeWorkoutIdentity } from './workoutCategory';
 import {
@@ -77,7 +90,8 @@ import {
   type WorkoutDraftSet as DraftSet,
 } from './workoutMovements';
 import { applySupersetSelection, clearSuperset } from './workoutSupersets';
-import { workoutPageForId } from './workoutHistory';
+import { upsertWorkoutByRecency, workoutPageForId } from './workoutHistory';
+import { readDashboardCache, writeDashboardCache } from './workoutCache';
 import {
   dateRangeForDates,
   TIME_RANGE_OPTIONS,
@@ -88,6 +102,8 @@ import {
 type ProgressMetric = 'estimated_1rm' | 'best_weight_kg' | 'volume_kg';
 type DashboardMetric = 'workouts' | 'sets' | 'cardio';
 type SetEditorFocus = 'weight' | 'reps' | 'type' | 'rpe' | null;
+type RestAlertStatus =
+  'checking' | 'available' | 'enabling' | 'enabled' | 'blocked' | 'unsupported';
 
 const categoryNames: Record<WorkoutCategory, string> = {
   upper: 'Upper body',
@@ -385,6 +401,7 @@ function WorkoutCompletionDialog({
         if (event.target === event.currentTarget) onClose();
       }}
     >
+      <ConfettiBurst />
       <section
         className="pr-summary panel"
         role="dialog"
@@ -435,13 +452,17 @@ export function App() {
   const historyIndexRef = useRef(initialHistoryState?.index ?? 0);
   const navigationActionRef = useRef<'push' | 'replace' | 'pop'>('replace');
   const currentTabRef = useRef(tab);
+  const lastDataRefreshAtRef = useRef(0);
+  const initialRefreshStartedRef = useRef(false);
   currentTabRef.current = tab;
+  const [visitedTabs, setVisitedTabs] = useState(() => new Set<AppTab>([tab]));
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [workouts, setWorkouts] = useState<TrackedWorkout[]>([]);
   const [measurements, setMeasurements] = useState<BodyMeasurement[]>([]);
   const [personalRecords, setPersonalRecords] = useState<PersonalRecord[]>([]);
   const [completionRecords, setCompletionRecords] = useState<PersonalRecord[]>([]);
+  const [restTimerEnabled, setRestTimerEnabled] = useState(restTimerPreferenceEnabled);
   const [workoutStartDate, setWorkoutStartDate] = useState(localDate());
   const [editingWorkout, setEditingWorkout] = useState<TrackedWorkout | null>(null);
   const [activeWorkoutStartedAt, setActiveWorkoutStartedAt] = useState<number | null>(() => {
@@ -460,6 +481,13 @@ export function App() {
     activeWorkoutStartedAt === null
       ? null
       : (readActiveWorkoutDraft()?.workoutDate ?? workoutStartDate);
+  const dashboardWorkoutCount =
+    workouts.length > 0 || !loading
+      ? workouts.length
+      : dashboard
+        ? dashboard.heatmap.reduce((total, day) => total + day.workout_count, 0)
+        : null;
+  const dashboardExerciseCount = exercises.length > 0 || !loading ? exercises.length : null;
   const canNavigateBack =
     tab !== 'dashboard' ||
     (isAppHistoryState(window.history.state) && window.history.state.index > 0);
@@ -479,32 +507,66 @@ export function App() {
     if (tab !== 'dashboard') setTab('dashboard', { replace: true });
   }
 
-  async function refreshData() {
-    try {
-      const [nextDashboard, nextExercises, nextWorkouts, nextMeasurements, nextRecords] =
-        await Promise.all([
-          api.dashboard(),
-          api.listExercises(),
-          api.listWorkouts(),
-          api.listBodyMeasurements(),
-          api.listPersonalRecords(),
-        ]);
-      setDashboard(nextDashboard);
-      setExercises(nextExercises);
-      setWorkouts(nextWorkouts);
-      setMeasurements(nextMeasurements);
-      setPersonalRecords(nextRecords);
-      setMessage(null);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Could not load your training data.');
-    } finally {
-      setLoading(false);
+  async function refreshData({ silent = false }: { silent?: boolean } = {}) {
+    const results = await Promise.allSettled([
+      api.dashboard().then((nextDashboard) => {
+        setDashboard(nextDashboard);
+        void writeDashboardCache(nextDashboard);
+      }),
+      api.listExercises().then(setExercises),
+      api.listWorkouts().then(setWorkouts),
+      api.listBodyMeasurements().then(setMeasurements),
+      api.listPersonalRecords().then(setPersonalRecords),
+    ]);
+    const firstFailure = results.find(
+      (result): result is PromiseRejectedResult => result.status === 'rejected',
+    );
+
+    if (results.some((result) => result.status === 'fulfilled')) {
+      lastDataRefreshAtRef.current = Date.now();
     }
+    if (!silent)
+      setMessage(
+        firstFailure
+          ? firstFailure.reason instanceof Error
+            ? firstFailure.reason.message
+            : 'Could not load all of your training data.'
+          : null,
+      );
+    setLoading(false);
   }
 
   useEffect(() => {
-    void refreshData();
+    if (initialRefreshStartedRef.current) return;
+    initialRefreshStartedRef.current = true;
+    let cancelled = false;
+
+    void readDashboardCache().then((cachedDashboard) => {
+      if (!cancelled && cachedDashboard) setDashboard(cachedDashboard);
+      if (!cancelled) void refreshData();
+    });
+
+    return () => {
+      cancelled = true;
+      initialRefreshStartedRef.current = false;
+    };
   }, []);
+
+  useEffect(() => {
+    setVisitedTabs((current) => {
+      if (current.has(tab)) return current;
+      const next = new Set(current);
+      next.add(tab);
+      return next;
+    });
+
+    if (loading || Date.now() - lastDataRefreshAtRef.current < 15_000) return;
+    const refreshTimer = window.setTimeout(() => {
+      lastDataRefreshAtRef.current = Date.now();
+      void refreshData({ silent: true });
+    }, 180);
+    return () => window.clearTimeout(refreshTimer);
+  }, [loading, tab]);
 
   useEffect(() => {
     const action = navigationActionRef.current;
@@ -549,16 +611,21 @@ export function App() {
     const saved = editingWorkout
       ? await api.updateWorkout(editingWorkout.id, payload)
       : await api.createWorkout(payload);
-    const newRecords = await api.listPersonalRecords({ workoutId: saved.id });
-    await refreshData();
+
+    setWorkouts((current) => upsertWorkoutByRecency(current, saved));
     if (!wasEditing) {
       clearActiveWorkoutDraft();
       setActiveWorkoutStartedAt(null);
     }
     setTab(wasEditing ? 'history' : 'dashboard', { replace: true });
     setEditingWorkout(null);
-    setCompletionRecords(newRecords);
-    return newRecords;
+
+    void api
+      .listPersonalRecords({ workoutId: saved.id })
+      .then(setCompletionRecords)
+      .catch(() => undefined);
+    lastDataRefreshAtRef.current = Date.now();
+    void refreshData({ silent: true });
   }
 
   async function deleteWorkout(workout: TrackedWorkout) {
@@ -672,6 +739,11 @@ export function App() {
     }
   }
 
+  function updateRestTimerPreference(enabled: boolean) {
+    saveRestTimerPreference(enabled);
+    setRestTimerEnabled(enabled);
+  }
+
   return (
     <div className="tracker-app">
       <EdgeSwipeBack onBack={navigateBack} enabled={canNavigateBack} />
@@ -686,7 +758,7 @@ export function App() {
         />
       )}
 
-      {!loading && tab !== 'dashboard' && tab !== 'log' && (
+      {tab !== 'dashboard' && tab !== 'log' && (
         <header className="reference-app-header">
           <button type="button" onClick={navigateBack} aria-label="Go back">
             ‹
@@ -705,130 +777,154 @@ export function App() {
       )}
 
       <main className={`tracker-content ${tab === 'videos' ? 'video-content' : ''}`}>
-        {loading && <LoadingState />}
-        {!loading && tab === 'dashboard' && dashboard && (
-          <DashboardScreen
-            data={dashboard}
-            totalWorkouts={workouts.length}
-            totalExercises={exercises.length}
-            currentBodyweight={measurements[0]?.weight_kg ?? null}
-            onStart={startWorkout}
-            activeWorkout={activeWorkoutStartedAt !== null}
-            activeWorkoutDate={activeWorkoutDate}
-            onResumeWorkout={() => setTab('log')}
-            onReplaceActiveWorkout={(workoutDate) => startWorkout(workoutDate, true)}
-            onBody={() => setTab('body')}
-            onOpenWorkout={(id) => {
-              setHistoryOpenId(id);
-              setHistoryExerciseId(null);
-              setHistoryStartSection('history');
-              setTab('history');
-            }}
-            onEditWorkout={(id) => {
-              const workout = workouts.find((item) => item.id === id);
-              if (workout) editWorkout(workout);
-            }}
-            onHistory={() => {
-              setHistoryOpenId(null);
-              setHistoryExerciseId(null);
-              setHistoryStartSection('history');
-              setTab('history');
-            }}
-            onExercises={() => {
-              setHistoryOpenId(null);
-              setHistoryExerciseId(null);
-              setHistoryStartSection('progress');
-              setTab('history');
-            }}
-            onMeasurements={() => setTab('body')}
-            onSettings={() => setTab('settings')}
-            onVideos={() => setTab('videos')}
-          />
+        {loading && tab !== 'dashboard' && tab !== 'videos' && <DashboardMenuSkeleton />}
+        {(tab === 'dashboard' || visitedTabs.has('dashboard')) && (
+          <CachedTabPanel active={tab === 'dashboard'}>
+            {loading && dashboard === null ? (
+              <DashboardMenuSkeleton />
+            ) : (
+              <DashboardScreen
+                data={dashboard}
+                totalWorkouts={dashboardWorkoutCount}
+                totalExercises={dashboardExerciseCount}
+                currentBodyweight={measurements[0]?.weight_kg ?? null}
+                onStart={startWorkout}
+                activeWorkout={activeWorkoutStartedAt !== null}
+                activeWorkoutDate={activeWorkoutDate}
+                onResumeWorkout={() => setTab('log')}
+                onReplaceActiveWorkout={(workoutDate) => startWorkout(workoutDate, true)}
+                onBody={() => setTab('body')}
+                onOpenWorkout={(id) => {
+                  setHistoryOpenId(id);
+                  setHistoryExerciseId(null);
+                  setHistoryStartSection('history');
+                  setTab('history');
+                }}
+                onEditWorkout={(id) => {
+                  const workout = workouts.find((item) => item.id === id);
+                  if (workout) editWorkout(workout);
+                }}
+                onHistory={() => {
+                  setHistoryOpenId(null);
+                  setHistoryExerciseId(null);
+                  setHistoryStartSection('history');
+                  setTab('history');
+                }}
+                onExercises={() => {
+                  setHistoryOpenId(null);
+                  setHistoryExerciseId(null);
+                  setHistoryStartSection('progress');
+                  setTab('history');
+                }}
+                onMeasurements={() => setTab('body')}
+                onSettings={() => setTab('settings')}
+                onVideos={() => setTab('videos')}
+              />
+            )}
+          </CachedTabPanel>
         )}
-        {!loading && tab === 'log' && (
-          <WorkoutLogger
-            key={
-              editingWorkout
-                ? `edit-${editingWorkout.id}`
-                : `active-${activeWorkoutStartedAt ?? workoutStartDate}`
-            }
-            exercises={exercises}
-            recommendation={dashboard?.recommendation ?? null}
-            initialDate={workoutStartDate}
-            initialWorkout={editingWorkout}
-            currentBodyweight={measurements[0]?.weight_kg ?? null}
-            personalRecords={personalRecords}
-            historicalWorkouts={workouts}
-            onExerciseHistory={(exerciseId) => {
-              setHistoryOpenId(null);
-              setHistoryExerciseId(exerciseId);
-              setHistoryStartSection('progress');
-              setTab('history');
-            }}
-            onExerciseFavorite={updateExerciseFavorite}
-            onCreateExercise={createExercise}
-            onSave={saveWorkout}
-            activeStartedAt={activeWorkoutStartedAt}
-            onClose={() => {
-              setTab(editingWorkout ? 'history' : 'dashboard');
-              setEditingWorkout(null);
-            }}
-            onDelete={() => {
-              if (editingWorkout) {
-                void deleteWorkout(editingWorkout);
-                setTab('history');
-              } else {
-                clearActiveWorkoutDraft();
-                setActiveWorkoutStartedAt(null);
-                setTab('dashboard');
-              }
-              setEditingWorkout(null);
-            }}
-          />
+        {!loading &&
+          (tab === 'log' ||
+            (visitedTabs.has('log') &&
+              (activeWorkoutStartedAt !== null || editingWorkout !== null))) && (
+            <CachedTabPanel active={tab === 'log'}>
+              <WorkoutLogger
+                key={
+                  editingWorkout
+                    ? `edit-${editingWorkout.id}`
+                    : `active-${activeWorkoutStartedAt ?? workoutStartDate}`
+                }
+                exercises={exercises}
+                recommendation={dashboard?.recommendation ?? null}
+                initialDate={workoutStartDate}
+                initialWorkout={editingWorkout}
+                currentBodyweight={measurements[0]?.weight_kg ?? null}
+                personalRecords={personalRecords}
+                historicalWorkouts={workouts}
+                restTimerEnabled={restTimerEnabled}
+                onExerciseHistory={(exerciseId) => {
+                  setHistoryOpenId(null);
+                  setHistoryExerciseId(exerciseId);
+                  setHistoryStartSection('progress');
+                  setTab('history');
+                }}
+                onExerciseFavorite={updateExerciseFavorite}
+                onCreateExercise={createExercise}
+                onSave={saveWorkout}
+                activeStartedAt={activeWorkoutStartedAt}
+                onClose={() => {
+                  setTab(editingWorkout ? 'history' : 'dashboard');
+                  setEditingWorkout(null);
+                }}
+                onDelete={() => {
+                  if (editingWorkout) {
+                    void deleteWorkout(editingWorkout);
+                    setTab('history');
+                  } else {
+                    clearActiveWorkoutDraft();
+                    setActiveWorkoutStartedAt(null);
+                    setTab('dashboard');
+                  }
+                  setEditingWorkout(null);
+                }}
+              />
+            </CachedTabPanel>
+          )}
+        {!loading && (tab === 'body' || visitedTabs.has('body')) && (
+          <CachedTabPanel active={tab === 'body'}>
+            <BodyCompositionScreen
+              measurements={measurements}
+              trainingMode={dashboard?.training_mode ?? 'maintenance'}
+              onSave={saveMeasurement}
+              onDelete={deleteMeasurement}
+              onTrainingMode={updateTrainingMode}
+              onDataChange={refreshData}
+            />
+          </CachedTabPanel>
         )}
-        {!loading && tab === 'body' && (
-          <BodyCompositionScreen
-            measurements={measurements}
-            trainingMode={dashboard?.training_mode ?? 'maintenance'}
-            onSave={saveMeasurement}
-            onDelete={deleteMeasurement}
-            onTrainingMode={updateTrainingMode}
-            onDataChange={refreshData}
-          />
+        {!loading && (tab === 'history' || visitedTabs.has('history')) && (
+          <CachedTabPanel active={tab === 'history'}>
+            <HistoryScreen
+              key={`${historyOpenId ?? 'history'}-${historyStartSection}-${historyExerciseId ?? 'all'}`}
+              workouts={workouts}
+              measurements={measurements}
+              exercises={exercises}
+              currentBodyweight={measurements[0]?.weight_kg ?? null}
+              onEdit={editWorkout}
+              onDelete={deleteWorkout}
+              personalRecords={personalRecords}
+              onDataChange={refreshData}
+              initialOpenId={historyOpenId}
+              initialSection={historyStartSection}
+              initialExerciseId={historyExerciseId}
+              heatmap={dashboard?.heatmap ?? []}
+              activeWorkout={activeWorkoutStartedAt !== null}
+              activeWorkoutDate={activeWorkoutDate}
+              onResumeWorkout={() => setTab('log')}
+              onStartWorkout={(workoutDate) => startWorkout(workoutDate)}
+              onReplaceActiveWorkout={(workoutDate) => startWorkout(workoutDate, true)}
+            />
+          </CachedTabPanel>
         )}
-        {!loading && tab === 'history' && (
-          <HistoryScreen
-            key={`${historyOpenId ?? 'history'}-${historyStartSection}-${historyExerciseId ?? 'all'}`}
-            workouts={workouts}
-            measurements={measurements}
-            exercises={exercises}
-            currentBodyweight={measurements[0]?.weight_kg ?? null}
-            onEdit={editWorkout}
-            onDelete={deleteWorkout}
-            personalRecords={personalRecords}
-            onDataChange={refreshData}
-            initialOpenId={historyOpenId}
-            initialSection={historyStartSection}
-            initialExerciseId={historyExerciseId}
-            heatmap={dashboard?.heatmap ?? []}
-            activeWorkout={activeWorkoutStartedAt !== null}
-            activeWorkoutDate={activeWorkoutDate}
-            onResumeWorkout={() => setTab('log')}
-            onStartWorkout={(workoutDate) => startWorkout(workoutDate)}
-            onReplaceActiveWorkout={(workoutDate) => startWorkout(workoutDate, true)}
-          />
+        {!loading && (tab === 'settings' || visitedTabs.has('settings')) && (
+          <CachedTabPanel active={tab === 'settings'}>
+            <SettingsScreen
+              workouts={workouts}
+              measurements={measurements}
+              restTimerEnabled={restTimerEnabled}
+              onRestTimerEnabledChange={updateRestTimerPreference}
+              onImportWorkouts={importWorkoutCsv}
+              onExportWorkouts={exportWorkoutCsv}
+              onDeleteSamples={deleteSampleData}
+              onDataChange={refreshData}
+            />
+          </CachedTabPanel>
         )}
-        {!loading && tab === 'settings' && (
-          <SettingsScreen
-            workouts={workouts}
-            measurements={measurements}
-            onImportWorkouts={importWorkoutCsv}
-            onExportWorkouts={exportWorkoutCsv}
-            onDeleteSamples={deleteSampleData}
-            onDataChange={refreshData}
-          />
+        {(tab === 'videos' || visitedTabs.has('videos')) && (
+          <CachedTabPanel active={tab === 'videos'}>
+            <VideoUpload />
+          </CachedTabPanel>
         )}
-        {tab === 'videos' && <VideoUpload />}
       </main>
 
       <nav className="bottom-nav" aria-label="Main navigation">
@@ -893,6 +989,46 @@ function LoadingState() {
     <section className="loading-state">
       <span />
       <p>Loading your training log…</p>
+    </section>
+  );
+}
+
+function DashboardMenuSkeleton() {
+  return (
+    <section
+      className="dashboard-screen content-page menu-loading-skeleton"
+      role="status"
+      aria-live="polite"
+      aria-busy="true"
+    >
+      <p className="sr-only">Loading training menu</p>
+      <section className="profile-hero" aria-hidden="true">
+        <div className="profile-cover">
+          <div className="profile-stats">
+            {[0, 1, 2].map((item) => (
+              <div key={item}>
+                <span className="menu-skeleton-shape menu-skeleton-stat-label" />
+                <strong className="menu-skeleton-shape menu-skeleton-stat-value" />
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="training-level-strip menu-skeleton-level" aria-hidden="true">
+        <span className="menu-skeleton-shape menu-skeleton-level-label" />
+        <span className="menu-skeleton-shape menu-skeleton-level-stars" />
+        <strong className="menu-skeleton-shape menu-skeleton-level-value" />
+      </section>
+
+      <div className="dashboard-shortcuts menu-skeleton-shortcuts" aria-hidden="true">
+        {[0, 1, 2, 3, 4].map((item) => (
+          <div className="menu-skeleton-shortcut" key={item}>
+            <span className="menu-skeleton-shape menu-skeleton-icon" />
+            <strong className="menu-skeleton-shape menu-skeleton-title" />
+          </div>
+        ))}
+      </div>
     </section>
   );
 }
@@ -1010,9 +1146,9 @@ function DashboardScreen({
   onSettings,
   onVideos,
 }: {
-  data: DashboardData;
-  totalWorkouts: number;
-  totalExercises: number;
+  data: DashboardData | null;
+  totalWorkouts: number | null;
+  totalExercises: number | null;
   currentBodyweight: number | null;
   onStart: (workoutDate?: string) => void;
   activeWorkout: boolean;
@@ -1031,11 +1167,12 @@ function DashboardScreen({
   const [activeMetric, setActiveMetric] = useState<DashboardMetric | null>(null);
   const [selectedDay, setSelectedDay] = useState<DashboardData['heatmap'][number] | null>(null);
   const [pendingWorkoutDate, setPendingWorkoutDate] = useState<string | null>(null);
-  const trainingScore = Math.min(
-    99,
-    Math.max(1, Math.round(56 + Math.log10(Math.max(totalWorkouts, 1)) * 7)),
-  );
-  const trainingStars = Math.min(5, Math.max(1, Math.round(trainingScore / 20)));
+  const trainingScore =
+    totalWorkouts === null
+      ? null
+      : Math.min(99, Math.max(1, Math.round(56 + Math.log10(Math.max(totalWorkouts, 1)) * 7)));
+  const trainingStars =
+    trainingScore === null ? 0 : Math.min(5, Math.max(1, Math.round(trainingScore / 20)));
 
   return (
     <section className="dashboard-screen content-page">
@@ -1044,21 +1181,26 @@ function DashboardScreen({
           <div className="profile-stats">
             <div>
               <span>Workouts</span>
-              <strong>{totalWorkouts}</strong>
+              <strong>{totalWorkouts ?? '–'}</strong>
             </div>
             <div>
               <span>Exercises</span>
-              <strong>{totalExercises}</strong>
+              <strong>{totalExercises ?? '–'}</strong>
             </div>
             <div>
               <span>Cardio sessions</span>
-              <strong>{data.total_cardio_sessions}</strong>
+              <strong>{data?.total_cardio_sessions ?? '–'}</strong>
             </div>
           </div>
         </div>
       </section>
 
-      <section className="training-level-strip" aria-label={`Training level ${trainingScore}%`}>
+      <section
+        className="training-level-strip"
+        aria-label={
+          trainingScore === null ? 'Training level refreshing' : `Training level ${trainingScore}%`
+        }
+      >
         <span>Powerlifting Level</span>
         <span className="training-stars" aria-hidden="true">
           {Array.from({ length: 5 }, (_, index) => (
@@ -1067,7 +1209,7 @@ function DashboardScreen({
             </i>
           ))}
         </span>
-        <strong>{trainingScore}%</strong>
+        <strong>{trainingScore === null ? '–' : `${trainingScore}%`}</strong>
       </section>
 
       <div className="dashboard-shortcuts" aria-label="Quick actions">
@@ -1102,149 +1244,158 @@ function DashboardScreen({
         </button>
       </div>
 
-      <div className="dashboard-section-heading">
-        <p className="section-kicker">THIS WEEK</p>
-        <h2>Training overview</h2>
-      </div>
-      <div className="metric-grid">
-        <MetricCard
-          value={data.workouts_this_week}
-          label="Workouts"
-          suffix="this week"
-          onClick={() => setActiveMetric('workouts')}
-        />
-        <MetricCard
-          value={data.sets_this_week}
-          label="Working sets"
-          suffix="this week"
-          onClick={() => setActiveMetric('sets')}
-        />
-        <MetricCard
-          value={currentBodyweight !== null ? `${currentBodyweight} kg` : '–'}
-          label="Body weight"
-          suffix="latest check-in"
-          onClick={onBody}
-        />
-        <MetricCard
-          value={data.total_cardio_sessions}
-          label="Cardio sessions"
-          suffix="all time"
-          onClick={() => setActiveMetric('cardio')}
-        />
-      </div>
-      {activeMetric && (
-        <WeeklyInsight data={data} metric={activeMetric} onClose={() => setActiveMetric(null)} />
-      )}
-
-      <WeeklyGoalCard goal={data.weekly_goal} />
-
-      <section className={`panel dashboard-zone2 ${data.zone2.complete ? 'complete' : ''}`}>
-        <div>
-          <p className="section-kicker">ZONE 2</p>
-          <h2>
-            {data.zone2.completed_minutes} / {data.zone2.goal_minutes} minutes
-          </h2>
-          <small>
-            {data.zone2.complete
-              ? 'Goal complete'
-              : `${data.zone2.remaining_minutes} min remaining this week`}
-          </small>
-        </div>
-        <div
-          className="zone2-ring"
-          style={{ '--progress': `${data.zone2.percentage * 3.6}deg` } as CSSProperties}
-        >
-          <strong>{Math.round(data.zone2.percentage)}%</strong>
-        </div>
-      </section>
-
-      <section className="panel muscle-volume-panel">
-        <div className="panel-heading">
-          <div>
-            <p className="section-kicker">MUSCLE VOLUME</p>
-            <h2>Weekly credited sets</h2>
+      {data && (
+        <>
+          <div className="dashboard-section-heading">
+            <p className="section-kicker">THIS WEEK</p>
+            <h2>Training overview</h2>
           </div>
-          <small>Primary 1.0 · secondary 0.5</small>
-        </div>
-        <div className="muscle-volume-grid">
-          {data.muscle_volume.map((item) => (
-            <div key={item.muscle_name}>
-              <span>{item.muscle_name}</span>
-              <strong>
-                {Number.isInteger(item.set_total) ? item.set_total : item.set_total.toFixed(1)} sets
-              </strong>
-            </div>
-          ))}
-          {!data.muscle_volume.length && (
-            <p className="muted-empty">Complete a working set to see muscle volume.</p>
+          <div className="metric-grid">
+            <MetricCard
+              value={data.workouts_this_week}
+              label="Workouts"
+              suffix="this week"
+              onClick={() => setActiveMetric('workouts')}
+            />
+            <MetricCard
+              value={data.sets_this_week}
+              label="Working sets"
+              suffix="this week"
+              onClick={() => setActiveMetric('sets')}
+            />
+            <MetricCard
+              value={currentBodyweight !== null ? `${currentBodyweight} kg` : '–'}
+              label="Body weight"
+              suffix="latest check-in"
+              onClick={onBody}
+            />
+            <MetricCard
+              value={data.total_cardio_sessions}
+              label="Cardio sessions"
+              suffix="all time"
+              onClick={() => setActiveMetric('cardio')}
+            />
+          </div>
+          {activeMetric && (
+            <WeeklyInsight
+              data={data}
+              metric={activeMetric}
+              onClose={() => setActiveMetric(null)}
+            />
           )}
-        </div>
-      </section>
 
-      <section className="panel heatmap-panel">
-        <div className="panel-heading">
-          <div>
-            <p className="section-kicker">CONSISTENCY</p>
-            <h2>Training calendar</h2>
-          </div>
-        </div>
-        <WorkoutHeatmap
-          entries={data.heatmap}
-          activeWorkoutDate={activeWorkoutDate}
-          onActiveWorkoutClick={onResumeWorkout}
-          onDayClick={(workoutDate, entry) => {
-            if (entry) setSelectedDay(entry);
-            else setPendingWorkoutDate(workoutDate);
-          }}
-        />
-        <div className="heatmap-legend">
-          {(Object.keys(categoryNames) as WorkoutCategory[])
-            .filter((category) => category !== 'other' && category !== 'full_body')
-            .map((category) => (
-              <span key={category}>
-                <i style={{ background: categoryColors[category] }} /> {categoryNames[category]}
-              </span>
-            ))}
-        </div>
-        {selectedDay && (
-          <CalendarDayDetail
-            day={selectedDay}
-            onClose={() => setSelectedDay(null)}
-            onStartWorkout={(workoutDate) => {
-              setSelectedDay(null);
-              setPendingWorkoutDate(workoutDate);
-            }}
-            onEditWorkout={onEditWorkout}
-          />
-        )}
-      </section>
+          <WeeklyGoalCard goal={data.weekly_goal} />
 
-      <section className="panel recent-panel">
-        <div className="panel-heading">
-          <div>
-            <p className="section-kicker">RECENT</p>
-            <h2>Latest sessions</h2>
-          </div>
-        </div>
-        {data.recent_workouts.length === 0 ? (
-          <EmptyState
-            title="No workouts yet"
-            body="Log your first session and your dashboard will come alive."
-            action="Log workout"
-            onAction={onStart}
-          />
-        ) : (
-          data.recent_workouts
-            .slice(0, 5)
-            .map((workout) => (
-              <WorkoutSummary
-                key={workout.id}
-                workout={workout}
-                onOpen={() => onOpenWorkout(workout.id)}
+          <section className={`panel dashboard-zone2 ${data.zone2.complete ? 'complete' : ''}`}>
+            <div>
+              <p className="section-kicker">ZONE 2</p>
+              <h2>
+                {data.zone2.completed_minutes} / {data.zone2.goal_minutes} minutes
+              </h2>
+              <small>
+                {data.zone2.complete
+                  ? 'Goal complete'
+                  : `${data.zone2.remaining_minutes} min remaining this week`}
+              </small>
+            </div>
+            <div
+              className="zone2-ring"
+              style={{ '--progress': `${data.zone2.percentage * 3.6}deg` } as CSSProperties}
+            >
+              <strong>{Math.round(data.zone2.percentage)}%</strong>
+            </div>
+          </section>
+
+          <section className="panel muscle-volume-panel">
+            <div className="panel-heading">
+              <div>
+                <p className="section-kicker">MUSCLE VOLUME</p>
+                <h2>Weekly credited sets</h2>
+              </div>
+              <small>Primary 1.0 · secondary 0.5</small>
+            </div>
+            <div className="muscle-volume-grid">
+              {data.muscle_volume.map((item) => (
+                <div key={item.muscle_name}>
+                  <span>{item.muscle_name}</span>
+                  <strong>
+                    {Number.isInteger(item.set_total) ? item.set_total : item.set_total.toFixed(1)}{' '}
+                    sets
+                  </strong>
+                </div>
+              ))}
+              {!data.muscle_volume.length && (
+                <p className="muted-empty">Complete a working set to see muscle volume.</p>
+              )}
+            </div>
+          </section>
+
+          <section className="panel heatmap-panel">
+            <div className="panel-heading">
+              <div>
+                <p className="section-kicker">CONSISTENCY</p>
+                <h2>Training calendar</h2>
+              </div>
+            </div>
+            <WorkoutHeatmap
+              entries={data.heatmap}
+              activeWorkoutDate={activeWorkoutDate}
+              onActiveWorkoutClick={onResumeWorkout}
+              onDayClick={(workoutDate, entry) => {
+                if (entry) setSelectedDay(entry);
+                else setPendingWorkoutDate(workoutDate);
+              }}
+            />
+            <div className="heatmap-legend">
+              {(Object.keys(categoryNames) as WorkoutCategory[])
+                .filter((category) => category !== 'other' && category !== 'full_body')
+                .map((category) => (
+                  <span key={category}>
+                    <i style={{ background: categoryColors[category] }} /> {categoryNames[category]}
+                  </span>
+                ))}
+            </div>
+            {selectedDay && (
+              <CalendarDayDetail
+                day={selectedDay}
+                onClose={() => setSelectedDay(null)}
+                onStartWorkout={(workoutDate) => {
+                  setSelectedDay(null);
+                  setPendingWorkoutDate(workoutDate);
+                }}
+                onEditWorkout={onEditWorkout}
               />
-            ))
-        )}
-      </section>
+            )}
+          </section>
+
+          <section className="panel recent-panel">
+            <div className="panel-heading">
+              <div>
+                <p className="section-kicker">RECENT</p>
+                <h2>Latest sessions</h2>
+              </div>
+            </div>
+            {data.recent_workouts.length === 0 ? (
+              <EmptyState
+                title="No workouts yet"
+                body="Log your first session and your dashboard will come alive."
+                action="Log workout"
+                onAction={onStart}
+              />
+            ) : (
+              data.recent_workouts
+                .slice(0, 5)
+                .map((workout) => (
+                  <WorkoutSummary
+                    key={workout.id}
+                    workout={workout}
+                    onOpen={() => onOpenWorkout(workout.id)}
+                  />
+                ))
+            )}
+          </section>
+        </>
+      )}
       {pendingWorkoutDate && (
         <CalendarCreateWorkoutDialog
           workoutDate={pendingWorkoutDate}
@@ -1961,6 +2112,7 @@ function WorkoutLogger({
   currentBodyweight,
   personalRecords,
   historicalWorkouts,
+  restTimerEnabled,
   onExerciseHistory,
   onExerciseFavorite,
   onCreateExercise,
@@ -1976,10 +2128,11 @@ function WorkoutLogger({
   currentBodyweight: number | null;
   personalRecords: PersonalRecord[];
   historicalWorkouts: TrackedWorkout[];
+  restTimerEnabled: boolean;
   onExerciseHistory: (exerciseId: string) => void;
   onExerciseFavorite: (exerciseId: string, isFavorite: boolean) => Promise<void>;
   onCreateExercise: (input: ExerciseCreateInput) => Promise<Exercise>;
-  onSave: (payload: WorkoutInput) => Promise<PersonalRecord[]>;
+  onSave: (payload: WorkoutInput) => Promise<void>;
   activeStartedAt: number | null;
   onClose: () => void;
   onDelete: () => void;
@@ -2063,6 +2216,12 @@ function WorkoutLogger({
       : Math.max(0, Math.floor((Date.now() - startedAt) / 1000)),
   );
   const [restLeft, setRestLeft] = useState(0);
+  const restNotificationEndpointRef = useRef<string | null>(null);
+  const activeRestTimerRef = useRef<{
+    id: string;
+    endsAt: number;
+    serverScheduled: boolean;
+  } | null>(null);
 
   useEffect(() => {
     if (initialWorkout) return;
@@ -2108,12 +2267,45 @@ function WorkoutLogger({
   }, [category, initialWorkout, movements, name, notes, startedAt, workoutDate]);
 
   useEffect(() => {
+    if (!pushNotificationsSupported()) return;
+    let active = true;
+    const syncPushState = () => {
+      void existingPhonePushSubscription()
+        .then((subscription) => {
+          if (!active) return;
+          if (!subscription) {
+            restNotificationEndpointRef.current = null;
+            return;
+          }
+          restNotificationEndpointRef.current = subscription.endpoint;
+          const timer = activeRestTimerRef.current;
+          if (timer) scheduleRestTimerPush(timer, subscription.endpoint);
+        })
+        .catch(() => undefined);
+    };
+    syncPushState();
+    window.addEventListener(PHONE_PUSH_PREFERENCE_EVENT, syncPushState);
+    return () => {
+      active = false;
+      window.removeEventListener(PHONE_PUSH_PREFERENCE_EVENT, syncPushState);
+    };
+  }, []);
+
+  useEffect(() => {
     if (restLeft <= 0) return;
-    const timer = window.setInterval(
-      () => setRestLeft((current) => Math.max(0, current - 1)),
-      1000,
-    );
-    return () => window.clearInterval(timer);
+    const interval = window.setInterval(() => {
+      const active = activeRestTimerRef.current;
+      if (!active) return;
+      const next = Math.max(0, Math.ceil((active.endsAt - Date.now()) / 1000));
+      setRestLeft((current) => {
+        if (next === 0 && current > 0) {
+          activeRestTimerRef.current = null;
+          if (!active.serverScheduled) void showRestTimerNotification();
+        }
+        return next;
+      });
+    }, 500);
+    return () => window.clearInterval(interval);
   }, [restLeft]);
 
   const [undoDeletion, setUndoDeletion] = useState<{
@@ -2126,6 +2318,33 @@ function WorkoutLogger({
       calculateDraftPrs(movements, personalRecords, historicalWorkouts, initialWorkout?.id ?? null),
     [movements, personalRecords, historicalWorkouts, initialWorkout?.id],
   );
+  const completedSetKeysRef = useRef(
+    new Set(
+      movements.flatMap((movement) =>
+        movement.sets.filter((item) => item.completed).map((item) => item.key),
+      ),
+    ),
+  );
+  const [prConfettiBurst, setPrConfettiBurst] = useState(0);
+
+  useEffect(() => {
+    const completedSetKeys = new Set<string>();
+    let achievedNewPr = false;
+    movements.forEach((movement) => {
+      movement.sets.forEach((item) => {
+        if (!item.completed) return;
+        completedSetKeys.add(item.key);
+        if (
+          !completedSetKeysRef.current.has(item.key) &&
+          prBadges.get(movement.key)?.has(item.key)
+        ) {
+          achievedNewPr = true;
+        }
+      });
+    });
+    completedSetKeysRef.current = completedSetKeys;
+    if (achievedNewPr) setPrConfettiBurst((current) => current + 1);
+  }, [movements, prBadges]);
   const recentExerciseIds = useMemo(() => {
     const seen = new Set<string>();
     const recent: string[] = [];
@@ -2267,7 +2486,75 @@ function WorkoutLogger({
     closeSupersetPicker();
   }
 
+  function scheduleRestTimerPush(
+    timer: NonNullable<typeof activeRestTimerRef.current>,
+    endpoint: string,
+  ) {
+    const delaySeconds = Math.max(1, Math.ceil((timer.endsAt - Date.now()) / 1000));
+    timer.serverScheduled = false;
+    void api
+      .scheduleRestTimerNotification({
+        endpoint,
+        timer_id: timer.id,
+        delay_seconds: delaySeconds,
+      })
+      .then(() => {
+        if (activeRestTimerRef.current?.id === timer.id) timer.serverScheduled = true;
+      })
+      .catch(() => {
+        if (activeRestTimerRef.current?.id === timer.id) timer.serverScheduled = false;
+      });
+  }
+
+  function startRestTimer(seconds: number) {
+    if (!restTimerEnabled) return;
+    const timer = {
+      id: crypto.randomUUID(),
+      endsAt: Date.now() + seconds * 1000,
+      serverScheduled: false,
+    };
+    activeRestTimerRef.current = timer;
+    setRestLeft(seconds);
+    const endpoint = restNotificationEndpointRef.current;
+    if (endpoint) scheduleRestTimerPush(timer, endpoint);
+  }
+
+  function extendRestTimer() {
+    const timer = activeRestTimerRef.current;
+    if (!timer) return;
+    timer.endsAt += 30_000;
+    setRestLeft(Math.max(1, Math.ceil((timer.endsAt - Date.now()) / 1000)));
+    const endpoint = restNotificationEndpointRef.current;
+    if (endpoint) scheduleRestTimerPush(timer, endpoint);
+  }
+
+  function skipRestTimer() {
+    const timer = activeRestTimerRef.current;
+    activeRestTimerRef.current = null;
+    setRestLeft(0);
+    const endpoint = restNotificationEndpointRef.current;
+    if (timer && endpoint) {
+      void api.cancelRestTimerNotification({ endpoint, timer_id: timer.id }).catch(() => undefined);
+    }
+  }
+
+  useEffect(() => {
+    if (restTimerEnabled) return;
+    const timer = activeRestTimerRef.current;
+    activeRestTimerRef.current = null;
+    setRestLeft(0);
+    const endpoint = restNotificationEndpointRef.current;
+    if (timer && endpoint) {
+      void api.cancelRestTimerNotification({ endpoint, timer_id: timer.id }).catch(() => undefined);
+    }
+  }, [restTimerEnabled]);
+
   function updateSet(movementKey: string, setKey: string, update: Partial<DraftSet>) {
+    const currentSet = movements
+      .find((movement) => movement.key === movementKey)
+      ?.sets.find((item) => item.key === setKey);
+    const restSeconds = currentSet ? restTimerSecondsAfterSetUpdate(currentSet, update) : null;
+
     setMovements((current) =>
       current.map((movement) =>
         movement.key === movementKey
@@ -2280,15 +2567,18 @@ function WorkoutLogger({
           : movement,
       ),
     );
+    if (restSeconds !== null) startRestTimer(restSeconds);
   }
 
   function toggleSet(movement: DraftMovement, item: DraftSet) {
-    const nextCompleted = !item.completed;
-    updateSet(movement.key, item.key, { completed: nextCompleted });
-    if (nextCompleted && item.rest_seconds) setRestLeft(item.rest_seconds);
+    updateSet(movement.key, item.key, { completed: !item.completed });
   }
 
   function addSet(movement: DraftMovement, count = 1, update: Partial<DraftSet> = {}) {
+    const completedRestSeconds =
+      update.completed && update.rest_seconds !== null && update.rest_seconds !== undefined
+        ? update.rest_seconds
+        : null;
     setMovements((current) =>
       current.map((item) =>
         item.key === movement.key
@@ -2309,6 +2599,9 @@ function WorkoutLogger({
           : item,
       ),
     );
+    if (completedRestSeconds !== null && completedRestSeconds > 0) {
+      startRestTimer(completedRestSeconds);
+    }
   }
 
   function removeMovement(key: string) {
@@ -2398,6 +2691,9 @@ function WorkoutLogger({
 
   return (
     <section className="logger-screen content-page">
+      {prConfettiBurst > 0 && (
+        <ConfettiBurst key={prConfettiBurst} onComplete={() => setPrConfettiBurst(0)} />
+      )}
       <div className="live-workout-bar">
         <div className="live-workout-left-actions">
           <button type="button" onClick={onClose}>
@@ -2420,12 +2716,8 @@ function WorkoutLogger({
           {saving ? 'Saving…' : initialWorkout ? 'Save' : 'Finish'}
         </button>
       </div>
-      {restLeft > 0 && (
-        <RestTimer
-          seconds={restLeft}
-          onAdd={() => setRestLeft((current) => current + 30)}
-          onSkip={() => setRestLeft(0)}
-        />
+      {restTimerEnabled && restLeft > 0 && (
+        <RestTimer seconds={restLeft} onAdd={extendRestTimer} onSkip={skipRestTimer} />
       )}
 
       {recommendation && !initialWorkout && (
@@ -3067,6 +3359,10 @@ function MovementCard({
   const [draggingSetKey, setDraggingSetKey] = useState<string | null>(null);
   const [dragTargetSetKey, setDragTargetSetKey] = useState<string | null>(null);
   const [weightDrafts, setWeightDrafts] = useState<Record<string, string>>({});
+  const [pendingSetCompletion, setPendingSetCompletion] = useState<{
+    item: DraftSet;
+    warning: SetEntryWarning;
+  } | null>(null);
   const draggingSetKeyRef = useRef<string | null>(null);
   const dragTargetSetKeyRef = useRef<string | null>(null);
   const movementMenuRef = useRef<HTMLDetailsElement>(null);
@@ -3114,6 +3410,39 @@ function MovementCard({
   function closeSetEditor() {
     setEditingSetKey(null);
     setEditingSetFocus(null);
+  }
+
+  function requestSetCompletion(item: DraftSet, index: number) {
+    if (item.completed) {
+      onToggleSet(item);
+      return;
+    }
+
+    const otherSets = [
+      ...movement.sets.slice(0, index).reverse(),
+      ...movement.sets.slice(index + 1),
+    ];
+    const sameTypeReference = otherSets.find(
+      (candidate) =>
+        candidate.weight_kg !== null &&
+        candidate.set_type === item.set_type &&
+        candidate.warmup === item.warmup,
+    );
+    const referenceWeightKg =
+      sameTypeReference?.weight_kg ??
+      otherSets.find((candidate) => candidate.weight_kg !== null)?.weight_kg ??
+      null;
+    const warning = unusualSetEntryWarning({
+      reps: item.reps,
+      weightKg: item.weight_kg,
+      referenceWeightKg,
+    });
+    if (warning) {
+      if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+      setPendingSetCompletion({ item, warning });
+      return;
+    }
+    onToggleSet(item);
   }
 
   function beginSetDrag(event: ReactPointerEvent<HTMLButtonElement>, setKey: string) {
@@ -3683,8 +4012,9 @@ function MovementCard({
                   ))}
                 </select>
                 <button
+                  type="button"
                   className="complete-set"
-                  onClick={() => onToggleSet(item)}
+                  onClick={() => requestSetCompletion(item, index)}
                   aria-label={item.completed ? 'Mark set incomplete' : 'Complete set'}
                 >
                   {item.completed ? '✓' : ''}
@@ -3850,6 +4180,17 @@ function MovementCard({
           </Fragment>
         ))}
       </div>
+      {pendingSetCompletion && (
+        <SetEntryConfirmationDialog
+          warning={pendingSetCompletion.warning}
+          confirmLabel="Add set"
+          onCancel={() => setPendingSetCompletion(null)}
+          onConfirm={() => {
+            onToggleSet(pendingSetCompletion.item);
+            setPendingSetCompletion(null);
+          }}
+        />
+      )}
       {editingSet && (
         <CompletedSetEditDialog
           key={editingSet.key}
@@ -4003,6 +4344,65 @@ function useSetDialogSwipeToDismiss(onDismiss: () => void) {
   };
 }
 
+function SetEntryConfirmationDialog({
+  warning,
+  confirmLabel,
+  onConfirm,
+  onCancel,
+}: {
+  warning: SetEntryWarning;
+  confirmLabel: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const confirmButtonRef = useRef<HTMLButtonElement>(null);
+  const onCancelRef = useRef(onCancel);
+  onCancelRef.current = onCancel;
+
+  useEffect(() => {
+    window.requestAnimationFrame(() => confirmButtonRef.current?.focus());
+    const cancelOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onCancelRef.current();
+    };
+    window.addEventListener('keydown', cancelOnEscape);
+    return () => window.removeEventListener('keydown', cancelOnEscape);
+  }, []);
+
+  return createPortal(
+    <div
+      className="modal-backdrop set-entry-confirmation-backdrop"
+      onPointerDown={(event) => {
+        if (event.target === event.currentTarget) onCancel();
+      }}
+    >
+      <section
+        className="set-entry-confirmation panel"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="set-entry-confirmation-title"
+        aria-describedby="set-entry-confirmation-message"
+      >
+        <h3 id="set-entry-confirmation-title">{warning.title}</h3>
+        <p id="set-entry-confirmation-message">{warning.message}</p>
+        <footer>
+          <button type="button" onClick={onCancel}>
+            Go back
+          </button>
+          <button
+            ref={confirmButtonRef}
+            type="button"
+            className="confirm-unusual-set"
+            onClick={onConfirm}
+          >
+            {confirmLabel}
+          </button>
+        </footer>
+      </section>
+    </div>,
+    document.body,
+  );
+}
+
 function CompletedSetEditDialog({
   exerciseName,
   setNumber,
@@ -4039,6 +4439,10 @@ function CompletedSetEditDialog({
   const [restSeconds, setRestSeconds] = useState(String(item.rest_seconds ?? DEFAULT_REST_SECONDS));
   const [notes, setNotes] = useState(item.notes ?? '');
   const [deleteConfirmationOpen, setDeleteConfirmationOpen] = useState(false);
+  const [pendingSave, setPendingSave] = useState<{
+    update: Partial<DraftSet>;
+    warning: SetEntryWarning;
+  } | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const onCloseRef = useRef(onClose);
   const viewport = useSetDialogViewport();
@@ -4073,7 +4477,7 @@ function CompletedSetEditDialog({
   function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const durationMinutes = numberOrNull(duration);
-    onSave({
+    const update: Partial<DraftSet> = {
       weight_kg: cardio ? null : decimalNumberOrNull(weight),
       reps: cardio ? null : numberOrNull(reps),
       duration_seconds: cardio && durationMinutes !== null ? durationMinutes * 60 : null,
@@ -4086,7 +4490,19 @@ function CompletedSetEditDialog({
       warmup: setType === 'warmup',
       notes: notes.trim() || null,
       completed: true,
+    };
+    const warning = unusualSetEntryWarning({
+      reps: update.reps ?? null,
+      weightKg: update.weight_kg ?? null,
+      referenceWeightKg: item.weight_kg,
+      originalReps: item.completed ? item.reps : undefined,
     });
+    if (warning) {
+      if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+      setPendingSave({ update, warning });
+      return;
+    }
+    onSave(update);
     onClose();
   }
 
@@ -4111,6 +4527,17 @@ function CompletedSetEditDialog({
         aria-labelledby="completed-set-edit-title"
         onSubmit={save}
       >
+        {pendingSave && (
+          <SetEntryConfirmationDialog
+            warning={pendingSave.warning}
+            confirmLabel={item.completed ? 'Save set' : 'Add set'}
+            onCancel={() => setPendingSave(null)}
+            onConfirm={() => {
+              onSave(pendingSave.update);
+              onClose();
+            }}
+          />
+        )}
         {deleteConfirmationOpen && (
           <div
             className="set-delete-confirmation"
@@ -4350,11 +4777,19 @@ function AddSetDialog({
   );
   const [distance, setDistance] = useState(previous?.distance_km?.toString() ?? '');
   const [count, setCount] = useState('1');
+  const [restSeconds, setRestSeconds] = useState(
+    String(previous?.rest_seconds ?? DEFAULT_REST_SECONDS),
+  );
   const [warmup, setWarmup] = useState(false);
   const [dropSet, setDropSet] = useState(false);
   const [rpe, setRpe] = useState(previous?.rpe?.toString() ?? '');
   const [notes, setNotes] = useState('');
   const [showRpe, setShowRpe] = useState(false);
+  const [pendingAdd, setPendingAdd] = useState<{
+    count: number;
+    update: Partial<DraftSet>;
+    warning: SetEntryWarning;
+  } | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const onCloseRef = useRef(onClose);
   const viewport = useSetDialogViewport();
@@ -4384,17 +4819,29 @@ function AddSetDialog({
 
   const submit = () => {
     const setCount = Math.min(20, Math.max(1, Number(count) || 1));
-    onAdd(setCount, {
+    const update: Partial<DraftSet> = {
       weight_kg: cardio ? null : numberOrNull(weight),
       reps: cardio ? null : numberOrNull(reps),
       duration_seconds: cardio && numberOrNull(duration) !== null ? Number(duration) * 60 : null,
       distance_km: cardio ? numberOrNull(distance) : null,
       rpe: numberOrNull(rpe),
+      rest_seconds: Number(restSeconds),
       notes: notes || null,
       warmup,
       set_type: warmup ? 'warmup' : dropSet ? 'drop' : 'normal',
-      completed: false,
+      completed: true,
+    };
+    const warning = unusualSetEntryWarning({
+      reps: update.reps ?? null,
+      weightKg: update.weight_kg ?? null,
+      referenceWeightKg: previous?.weight_kg ?? null,
     });
+    if (warning) {
+      if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+      setPendingAdd({ count: setCount, update, warning });
+      return;
+    }
+    onAdd(setCount, update);
   };
 
   const viewportStyle = {
@@ -4410,6 +4857,14 @@ function AddSetDialog({
         if (event.target === event.currentTarget) onClose();
       }}
     >
+      {pendingAdd && (
+        <SetEntryConfirmationDialog
+          warning={pendingAdd.warning}
+          confirmLabel="Add set"
+          onCancel={() => setPendingAdd(null)}
+          onConfirm={() => onAdd(pendingAdd.count, pendingAdd.update)}
+        />
+      )}
       <section
         className={`add-set-dialog ${viewport.keyboardVisible ? 'keyboard-visible' : ''} ${swipe.dragging ? 'swipe-dragging' : ''}`}
         style={{ '--set-dialog-drag-y': `${swipe.dragY}px` } as CSSProperties}
@@ -4514,17 +4969,32 @@ function AddSetDialog({
                 </label>
               </>
             )}
-            <label>
-              Sets
-              <input
-                type="number"
-                min="1"
-                max="20"
-                inputMode="numeric"
-                value={count}
-                onChange={(event) => setCount(event.target.value)}
-              />
-            </label>
+            <div className="add-set-field-pair">
+              <label>
+                Sets
+                <input
+                  type="number"
+                  min="1"
+                  max="20"
+                  inputMode="numeric"
+                  value={count}
+                  onChange={(event) => setCount(event.target.value)}
+                />
+              </label>
+              <label>
+                Rest
+                <select
+                  value={restSeconds}
+                  onChange={(event) => setRestSeconds(event.target.value)}
+                >
+                  {restOptions.map((seconds) => (
+                    <option key={seconds} value={seconds}>
+                      {formatDuration(seconds)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
             {showRpe && (
               <label>
                 RPE
@@ -5345,13 +5815,17 @@ function RestTimer({
   onSkip: () => void;
 }) {
   return (
-    <aside className="rest-timer-inline panel">
+    <aside className="rest-timer-inline panel" aria-label="Active rest timer">
       <div>
-        <span>REST TIMER</span>
+        <span>REST</span>
         <strong>{formatDuration(seconds)}</strong>
       </div>
-      <button onClick={onAdd}>+30s</button>
-      <button onClick={onSkip}>Skip</button>
+      <button type="button" onClick={onAdd}>
+        +30s
+      </button>
+      <button type="button" onClick={onSkip}>
+        Skip
+      </button>
     </aside>
   );
 }
@@ -5837,6 +6311,8 @@ function ExportTimeFrame({
 function SettingsScreen({
   workouts,
   measurements,
+  restTimerEnabled,
+  onRestTimerEnabledChange,
   onImportWorkouts,
   onExportWorkouts,
   onDeleteSamples,
@@ -5844,6 +6320,8 @@ function SettingsScreen({
 }: {
   workouts: TrackedWorkout[];
   measurements: BodyMeasurement[];
+  restTimerEnabled: boolean;
+  onRestTimerEnabledChange: (enabled: boolean) => void;
   onImportWorkouts: (file: File) => Promise<void>;
   onExportWorkouts: (range: DateRange) => Promise<void>;
   onDeleteSamples: () => Promise<void>;
@@ -5859,6 +6337,63 @@ function SettingsScreen({
   const [exportingBodyCsv, setExportingBodyCsv] = useState(false);
   const [bodyCsvMessage, setBodyCsvMessage] = useState<string | null>(null);
   const [bodyCsvError, setBodyCsvError] = useState<string | null>(null);
+  const [notificationStatus, setNotificationStatus] = useState<RestAlertStatus>(() =>
+    pushNotificationsSupported() ? 'checking' : 'unsupported',
+  );
+  const [notificationMessage, setNotificationMessage] = useState<string | null>(null);
+  const [notificationError, setNotificationError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!pushNotificationsSupported()) return;
+    let active = true;
+    const syncPushState = () => {
+      void existingPhonePushSubscription()
+        .then((subscription) => {
+          if (!active) return;
+          setNotificationStatus(
+            subscription
+              ? 'enabled'
+              : Notification.permission === 'denied'
+                ? 'blocked'
+                : 'available',
+          );
+        })
+        .catch(() => {
+          if (active) setNotificationStatus('available');
+        });
+    };
+    syncPushState();
+    window.addEventListener(PHONE_PUSH_PREFERENCE_EVENT, syncPushState);
+    return () => {
+      active = false;
+      window.removeEventListener(PHONE_PUSH_PREFERENCE_EVENT, syncPushState);
+    };
+  }, []);
+
+  async function togglePhoneNotifications() {
+    if (notificationStatus === 'checking' || notificationStatus === 'enabling') return;
+    setNotificationMessage(null);
+    setNotificationError(null);
+    if (notificationStatus === 'enabled') {
+      setNotificationStatus('enabling');
+      await disablePhonePushNotifications();
+      setNotificationStatus('available');
+      setNotificationMessage('Phone notifications are off.');
+      return;
+    }
+
+    setNotificationStatus('enabling');
+    try {
+      await enablePhonePushNotifications();
+      setNotificationStatus('enabled');
+      setNotificationMessage('Phone notifications are on.');
+    } catch (reason) {
+      setNotificationStatus(Notification.permission === 'denied' ? 'blocked' : 'available');
+      setNotificationError(
+        reason instanceof Error ? reason.message : 'Could not enable phone notifications.',
+      );
+    }
+  }
 
   async function exportWorkouts() {
     if (exportingWorkouts) return;
@@ -5930,10 +6465,80 @@ function SettingsScreen({
       <div className="screen-intro settings-intro">
         <div>
           <p className="section-kicker">APP SETTINGS</p>
-          <h1>Data &amp; backups</h1>
-          <p>Manage occasional imports, exports, and sample data in one place.</p>
+          <h1>Settings</h1>
+          <p>Manage notifications, imports, exports, and sample data in one place.</p>
         </div>
       </div>
+
+      <section className="settings-panel panel" aria-labelledby="notification-settings-title">
+        <header>
+          <div>
+            <p className="section-kicker">ALERTS</p>
+            <h2 id="notification-settings-title">Timers &amp; notifications</h2>
+          </div>
+        </header>
+        <p>Control workout timers and alerts from the installed PWA.</p>
+        <div className="notification-setting-row">
+          <div>
+            <strong>Rest timer</strong>
+            <small>
+              {restTimerEnabled
+                ? 'Starts automatically after a completed set'
+                : 'Automatic rest countdowns are disabled'}
+            </small>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-label="Rest timer"
+            aria-checked={restTimerEnabled}
+            className={restTimerEnabled ? 'is-on' : ''}
+            onClick={() => onRestTimerEnabledChange(!restTimerEnabled)}
+          >
+            <span />
+            {restTimerEnabled ? 'On' : 'Off'}
+          </button>
+        </div>
+        <div className="notification-setting-row">
+          <div>
+            <strong>Phone alerts</strong>
+            <small>
+              {notificationStatus === 'enabled'
+                ? 'Rest timer and completed-video alerts are enabled'
+                : notificationStatus === 'unsupported'
+                  ? 'Install the PWA to enable notifications'
+                  : notificationStatus === 'blocked'
+                    ? 'Blocked in phone settings'
+                    : 'Rest timer and completed-video alerts are disabled'}
+            </small>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={notificationStatus === 'enabled'}
+            className={notificationStatus === 'enabled' ? 'is-on' : ''}
+            disabled={
+              notificationStatus === 'checking' ||
+              notificationStatus === 'enabling' ||
+              notificationStatus === 'unsupported'
+            }
+            onClick={() => void togglePhoneNotifications()}
+          >
+            <span />
+            {notificationStatus === 'enabled' ? 'On' : 'Off'}
+          </button>
+        </div>
+        {notificationMessage && (
+          <p className="notification-setting-status" role="status">
+            {notificationMessage}
+          </p>
+        )}
+        {notificationError && (
+          <p className="inline-error" role="alert">
+            {notificationError}
+          </p>
+        )}
+      </section>
 
       <section className="settings-panel panel" aria-labelledby="workout-data-title">
         <header>

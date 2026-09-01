@@ -95,3 +95,18 @@ class PushSubscriptionCreate(BaseModel):
     endpoint: str = Field(min_length=1, max_length=2_000)
     p256dh: str = Field(min_length=1, max_length=200)
     auth: str = Field(min_length=1, max_length=200)
+
+
+class PushSubscriptionDelete(BaseModel):
+    endpoint: str = Field(min_length=1, max_length=2_000)
+
+
+class RestTimerNotificationCreate(BaseModel):
+    endpoint: str = Field(min_length=1, max_length=2_000)
+    timer_id: str = Field(min_length=1, max_length=100)
+    delay_seconds: int = Field(ge=1, le=3_600)
+
+
+class RestTimerNotificationCancel(BaseModel):
+    endpoint: str = Field(min_length=1, max_length=2_000)
+    timer_id: str = Field(min_length=1, max_length=100)

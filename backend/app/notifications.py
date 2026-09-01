@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import logging
@@ -58,6 +59,9 @@ def send_push_notification(
     *,
     title: str,
     body: str,
+    endpoint: str | None = None,
+    url: str = "/",
+    tag: str | None = None,
 ) -> None:
     try:
         from pywebpush import WebPushException, webpush
@@ -68,7 +72,10 @@ def send_push_notification(
     key_path = settings.web_push_vapid_private_key_path
     _vapid_private_key(key_path)
     with session_factory() as db:
-        subscriptions = list(db.scalars(select(PushSubscription)))
+        query = select(PushSubscription)
+        if endpoint is not None:
+            query = query.where(PushSubscription.endpoint == endpoint)
+        subscriptions = list(db.scalars(query))
 
     stale_ids: list[str] = []
     for subscription in subscriptions:
@@ -78,7 +85,7 @@ def send_push_notification(
                     "endpoint": subscription.endpoint,
                     "keys": {"p256dh": subscription.p256dh, "auth": subscription.auth},
                 },
-                data=json.dumps({"title": title, "body": body, "url": "/"}),
+                data=json.dumps({"title": title, "body": body, "url": url, "tag": tag}),
                 vapid_private_key=str(key_path),
                 vapid_claims={"sub": settings.web_push_contact_email},
             )
@@ -93,3 +100,59 @@ def send_push_notification(
         with session_factory() as db:
             db.execute(delete(PushSubscription).where(PushSubscription.id.in_(stale_ids)))
             db.commit()
+
+
+class RestTimerNotificationScheduler:
+    def __init__(
+        self,
+        session_factory: Callable[[], Session],
+        settings: Settings,
+    ) -> None:
+        self.session_factory = session_factory
+        self.settings = settings
+        self._tasks: dict[str, tuple[str, asyncio.Task[None]]] = {}
+
+    def schedule(self, *, endpoint: str, timer_id: str, delay_seconds: int) -> None:
+        self._cancel_endpoint(endpoint)
+        task = asyncio.create_task(self._deliver(endpoint=endpoint, delay_seconds=delay_seconds))
+        self._tasks[endpoint] = (timer_id, task)
+        task.add_done_callback(lambda completed: self._discard(endpoint, completed))
+
+    def cancel(self, *, endpoint: str, timer_id: str) -> None:
+        current = self._tasks.get(endpoint)
+        if current is not None and current[0] == timer_id:
+            self._cancel_endpoint(endpoint)
+
+    def cancel_endpoint(self, endpoint: str) -> None:
+        self._cancel_endpoint(endpoint)
+
+    async def stop(self) -> None:
+        tasks = [task for _, task in self._tasks.values()]
+        self._tasks.clear()
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    def _cancel_endpoint(self, endpoint: str) -> None:
+        current = self._tasks.pop(endpoint, None)
+        if current is not None:
+            current[1].cancel()
+
+    def _discard(self, endpoint: str, completed: asyncio.Task[None]) -> None:
+        current = self._tasks.get(endpoint)
+        if current is not None and current[1] is completed:
+            self._tasks.pop(endpoint, None)
+
+    async def _deliver(self, *, endpoint: str, delay_seconds: int) -> None:
+        await asyncio.sleep(delay_seconds)
+        await asyncio.to_thread(
+            send_push_notification,
+            self.session_factory,
+            self.settings,
+            title="Rest complete",
+            body="Time for your next set.",
+            endpoint=endpoint,
+            url="/#log",
+            tag="rest-timer",
+        )

@@ -6,6 +6,7 @@ import {
   isCompletedWorkingSet,
   latestExerciseSet,
   latestExerciseSets,
+  restTimerSecondsAfterSetUpdate,
 } from './workoutSets';
 
 const previousSet: WorkoutSetInput = {
@@ -210,5 +211,35 @@ describe('completed working sets', () => {
   it('only counts a failed set when at least one rep was completed', () => {
     expect(isCompletedWorkingSet({ ...previousSet, failed: true, reps: 0 })).toBe(false);
     expect(isCompletedWorkingSet({ ...previousSet, failed: true, reps: 1 })).toBe(true);
+  });
+});
+
+describe('rest timer start', () => {
+  it('starts when an incomplete set becomes complete', () => {
+    expect(
+      restTimerSecondsAfterSetUpdate({ completed: false, rest_seconds: 180 }, { completed: true }),
+    ).toBe(180);
+  });
+
+  it('uses a newly selected rest duration from the same update', () => {
+    expect(
+      restTimerSecondsAfterSetUpdate(
+        { completed: false, rest_seconds: 180 },
+        { completed: true, rest_seconds: 150 },
+      ),
+    ).toBe(150);
+  });
+
+  it('does not restart when editing an already completed set', () => {
+    expect(
+      restTimerSecondsAfterSetUpdate({ completed: true, rest_seconds: 180 }, { completed: true }),
+    ).toBeNull();
+  });
+
+  it('does not start for ordinary edits or a missing rest duration', () => {
+    expect(restTimerSecondsAfterSetUpdate({ completed: false, rest_seconds: 180 }, {})).toBeNull();
+    expect(
+      restTimerSecondsAfterSetUpdate({ completed: false, rest_seconds: null }, { completed: true }),
+    ).toBeNull();
   });
 });

@@ -83,7 +83,29 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     }),
+  deletePushSubscription: (endpoint: string) =>
+    request<void>('/api/notifications/push/subscriptions', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ endpoint }),
+    }),
   testPush: () => request<void>('/api/notifications/push/test', { method: 'POST' }),
+  scheduleRestTimerNotification: (payload: {
+    endpoint: string;
+    timer_id: string;
+    delay_seconds: number;
+  }) =>
+    request<void>('/api/notifications/push/rest-timer', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+  cancelRestTimerNotification: (payload: { endpoint: string; timer_id: string }) =>
+    request<void>('/api/notifications/push/rest-timer/cancel', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
   listSessions: () => request<WorkoutSession[]>('/api/sessions'),
   listExercises: () => request<Exercise[]>('/api/exercises'),
   createExercise: (payload: ExerciseCreateInput) =>

@@ -80,3 +80,13 @@ export function isCompletedWorkingSet(item: WorkoutSetInput): boolean {
     (!item.failed || (item.reps ?? 0) > 0)
   );
 }
+
+export function restTimerSecondsAfterSetUpdate(
+  current: Pick<WorkoutSetInput, 'completed' | 'rest_seconds'>,
+  update: Partial<Pick<WorkoutSetInput, 'completed' | 'rest_seconds'>>,
+): number | null {
+  if (current.completed || update.completed !== true) return null;
+
+  const seconds = update.rest_seconds ?? current.rest_seconds;
+  return seconds !== null && seconds > 0 ? seconds : null;
+}

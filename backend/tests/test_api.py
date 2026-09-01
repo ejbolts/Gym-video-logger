@@ -22,6 +22,80 @@ def test_phone_push_subscription_can_be_saved(client):
     assert response.status_code == 204
 
 
+def test_phone_push_subscription_can_be_removed_and_cancels_its_timer(client):
+    endpoint = "https://push.example.test/removable-phone"
+    client.post(
+        "/api/notifications/push/subscriptions",
+        json={"endpoint": endpoint, "p256dh": "public-key", "auth": "auth-key"},
+    )
+    cancelled = []
+    client.app.state.rest_timer_notifications.cancel_endpoint = cancelled.append
+
+    response = client.request(
+        "DELETE",
+        "/api/notifications/push/subscriptions",
+        json={"endpoint": endpoint},
+    )
+
+    assert response.status_code == 204
+    assert cancelled == [endpoint]
+    schedule = client.put(
+        "/api/notifications/push/rest-timer",
+        json={"endpoint": endpoint, "timer_id": "timer-1", "delay_seconds": 150},
+    )
+    assert schedule.status_code == 404
+
+
+def test_rest_timer_notification_is_scheduled_for_the_subscribed_phone(client):
+    endpoint = "https://push.example.test/rest-timer-phone"
+    client.post(
+        "/api/notifications/push/subscriptions",
+        json={"endpoint": endpoint, "p256dh": "public-key", "auth": "auth-key"},
+    )
+    scheduled = []
+    client.app.state.rest_timer_notifications.schedule = lambda **payload: scheduled.append(payload)
+
+    response = client.put(
+        "/api/notifications/push/rest-timer",
+        json={"endpoint": endpoint, "timer_id": "timer-1", "delay_seconds": 150},
+    )
+
+    assert response.status_code == 204
+    assert scheduled == [{"endpoint": endpoint, "timer_id": "timer-1", "delay_seconds": 150}]
+
+
+def test_rest_timer_notification_requires_a_saved_subscription(client):
+    response = client.put(
+        "/api/notifications/push/rest-timer",
+        json={
+            "endpoint": "https://push.example.test/not-subscribed",
+            "timer_id": "timer-1",
+            "delay_seconds": 180,
+        },
+    )
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "push_subscription_not_found"
+
+
+def test_rest_timer_notification_can_be_cancelled(client):
+    cancelled = []
+    client.app.state.rest_timer_notifications.cancel = lambda **payload: cancelled.append(payload)
+
+    response = client.post(
+        "/api/notifications/push/rest-timer/cancel",
+        json={
+            "endpoint": "https://push.example.test/rest-timer-phone",
+            "timer_id": "timer-1",
+        },
+    )
+
+    assert response.status_code == 204
+    assert cancelled == [
+        {"endpoint": "https://push.example.test/rest-timer-phone", "timer_id": "timer-1"}
+    ]
+
+
 def test_session_creation_persists_expected_clip_count(client):
     session = create_session(client, expected=3)
     assert session["expected_clip_count"] == 3

@@ -7,6 +7,8 @@ self.addEventListener('push', (event) => {
       body: payload.body,
       icon: '/icon.svg',
       badge: '/icon.svg',
+      tag: payload.tag || undefined,
+      renotify: Boolean(payload.tag),
       data: { url: payload.url || '/' },
     }),
   );
@@ -19,7 +21,10 @@ self.addEventListener('notificationclick', (event) => {
       const existing = windows.find(
         (windowClient) => new URL(windowClient.url).origin === location.origin,
       );
-      return existing ? existing.focus() : clients.openWindow(event.notification.data.url);
+      if (!existing) return clients.openWindow(event.notification.data.url);
+      return existing
+        .focus()
+        .then((windowClient) => windowClient.navigate(event.notification.data.url));
     }),
   );
 });

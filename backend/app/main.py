@@ -17,7 +17,12 @@ from sqlalchemy.orm import Session, selectinload
 from .config import Settings, get_settings
 from .database import Base, SessionLocal, engine, get_db
 from .models import Clip, ClipUploadStatus, PushSubscription, SessionStatus, WorkoutSession
-from .notifications import push_available, send_push_notification, vapid_public_key
+from .notifications import (
+    RestTimerNotificationScheduler,
+    push_available,
+    send_push_notification,
+    vapid_public_key,
+)
 from .processing import ProcessingValidationError, SessionProcessor, validate_batch_ready
 from .schemas import (
     ClipPatch,
@@ -25,7 +30,10 @@ from .schemas import (
     HealthRead,
     PushConfigRead,
     PushSubscriptionCreate,
+    PushSubscriptionDelete,
     ReorderRequest,
+    RestTimerNotificationCancel,
+    RestTimerNotificationCreate,
     SessionCreate,
     SessionRead,
 )
@@ -95,10 +103,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if removed:
             logger.info("Removed abandoned partial uploads", extra={"count": removed})
         processor = SessionProcessor(SessionLocal, settings)
+        rest_timer_notifications = RestTimerNotificationScheduler(SessionLocal, settings)
         app.state.processor = processor
+        app.state.rest_timer_notifications = rest_timer_notifications
         await processor.start()
-        yield
-        await processor.stop()
+        try:
+            yield
+        finally:
+            await rest_timer_notifications.stop()
+            await processor.stop()
 
     app = FastAPI(title="Gym Video Logger", version="0.1.0", lifespan=lifespan)
 
@@ -154,6 +167,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             db.add(PushSubscription(**payload.model_dump()))
         db.commit()
 
+    @app.delete("/api/notifications/push/subscriptions", status_code=204)
+    async def delete_push_subscription(
+        payload: PushSubscriptionDelete,
+        request: Request,
+        db: Session = Depends(get_db),
+    ) -> None:
+        subscription = db.scalar(
+            select(PushSubscription).where(PushSubscription.endpoint == payload.endpoint)
+        )
+        if subscription:
+            db.delete(subscription)
+            db.commit()
+        request.app.state.rest_timer_notifications.cancel_endpoint(payload.endpoint)
+
     @app.post("/api/notifications/push/test", status_code=204)
     def send_test_push_notification() -> None:
         send_push_notification(
@@ -162,6 +189,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             title="Gym logger alerts are ready",
             body="This phone will be notified when YouTube finishes processing a workout.",
         )
+
+    @app.put("/api/notifications/push/rest-timer", status_code=204)
+    async def schedule_rest_timer_notification(
+        payload: RestTimerNotificationCreate,
+        request: Request,
+        db: Session = Depends(get_db),
+    ) -> None:
+        subscription_id = db.scalar(
+            select(PushSubscription.id).where(PushSubscription.endpoint == payload.endpoint)
+        )
+        if subscription_id is None:
+            raise api_error(404, "push_subscription_not_found", "This phone is not subscribed.")
+        request.app.state.rest_timer_notifications.schedule(**payload.model_dump())
+
+    @app.post("/api/notifications/push/rest-timer/cancel", status_code=204)
+    async def cancel_rest_timer_notification(
+        payload: RestTimerNotificationCancel,
+        request: Request,
+    ) -> None:
+        request.app.state.rest_timer_notifications.cancel(**payload.model_dump())
 
     @app.post("/api/sessions", response_model=SessionRead, status_code=201)
     def create_session(payload: SessionCreate, db: Session = Depends(get_db)) -> WorkoutSession:

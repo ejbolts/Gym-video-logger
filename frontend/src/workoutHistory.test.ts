@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { workoutPageForId } from './workoutHistory';
+import { upsertWorkoutByRecency, workoutPageForId } from './workoutHistory';
 
 describe('workout history navigation', () => {
   const workouts = Array.from({ length: 17 }, (_, index) => ({ id: `workout-${index}` }));
@@ -24,5 +24,28 @@ describe('workout history navigation', () => {
     expect(workoutPageForId(workouts, 'deleted', 8)).toBeNull();
     expect(workoutPageForId(workouts, null, 8)).toBeNull();
     expect(workoutPageForId([], 'workout-0', 8)).toBeNull();
+  });
+});
+
+describe('optimistic workout history updates', () => {
+  const older = {
+    id: 'older',
+    workout_date: '2026-08-30',
+    created_at: '2026-08-30T08:00:00Z',
+  };
+  const newer = {
+    id: 'newer',
+    workout_date: '2026-08-31',
+    created_at: '2026-08-31T08:00:00Z',
+  };
+
+  it('inserts a saved workout in display order', () => {
+    expect(upsertWorkoutByRecency([older], newer)).toEqual([newer, older]);
+  });
+
+  it('replaces an edited workout without duplicating it', () => {
+    const edited = { ...older, workout_date: '2026-09-01' };
+
+    expect(upsertWorkoutByRecency([newer, older], edited)).toEqual([edited, newer]);
   });
 });
