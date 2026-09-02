@@ -107,3 +107,10 @@ export async function showRestTimerNotification(): Promise<void> {
   };
   await registration.showNotification('Rest complete', options);
 }
+
+export async function dismissRestTimerNotifications(): Promise<void> {
+  if (!('serviceWorker' in navigator)) return;
+  const registration = await navigator.serviceWorker.getRegistration();
+  const notifications = await registration?.getNotifications({ tag: 'rest-timer' });
+  notifications?.forEach((notification) => notification.close());
+}

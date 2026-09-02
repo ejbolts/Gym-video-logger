@@ -6,15 +6,18 @@ export function ProgressExerciseSearch({
   exercises,
   exerciseId,
   onChange,
+  openRequest = 0,
 }: {
   exercises: Exercise[];
   exerciseId: string;
   onChange: (exerciseId: string) => void;
+  openRequest?: number;
 }) {
   const selected = exercises.find((exercise) => exercise.id === exerciseId) ?? null;
   const inputId = useId();
   const listId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
+  const handledOpenRequestRef = useRef(openRequest);
   const [query, setQuery] = useState(selected?.name ?? '');
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -23,6 +26,19 @@ export function ProgressExerciseSearch({
   useEffect(() => {
     setQuery(selected?.name ?? '');
   }, [selected?.id, selected?.name]);
+
+  useEffect(() => {
+    if (openRequest === handledOpenRequestRef.current) return;
+    handledOpenRequestRef.current = openRequest;
+    setQuery('');
+    setActiveIndex(0);
+    setOpen(true);
+    const frame = window.requestAnimationFrame(() => {
+      inputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      inputRef.current?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [openRequest]);
 
   function choose(exercise: Exercise) {
     onChange(exercise.id);
@@ -35,7 +51,10 @@ export function ProgressExerciseSearch({
     <div
       className="progress-exercise-field"
       onBlur={(event) => {
-        if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) {
+        if (
+          event.relatedTarget instanceof Node &&
+          event.currentTarget.contains(event.relatedTarget)
+        ) {
           return;
         }
         setOpen(false);

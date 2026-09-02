@@ -303,6 +303,7 @@ export interface DashboardData {
   volume_this_week_kg: number;
   current_streak: number;
   total_cardio_sessions: number;
+  cardio_minutes_this_week: number;
   heatmap: HeatmapDay[];
   weekly_days: WeeklyDayBreakdown[];
   recommendation: WorkoutRecommendation;

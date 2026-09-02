@@ -15,7 +15,8 @@ export function createWorkoutSet(
     reps: kind === 'strength' ? (previous?.reps ?? null) : null,
     weight_kg: kind === 'strength' ? (previous?.weight_kg ?? null) : null,
     rpe: previous?.rpe ?? null,
-    rest_seconds: previous?.rest_seconds ?? DEFAULT_REST_SECONDS,
+    rest_seconds:
+      kind === 'strength' ? (previous?.rest_seconds ?? DEFAULT_REST_SECONDS) : null,
     duration_seconds: kind === 'cardio' ? (previous?.duration_seconds ?? null) : null,
     distance_km: kind === 'cardio' ? (previous?.distance_km ?? null) : null,
     incline_percent: kind === 'cardio' ? (previous?.incline_percent ?? null) : null,
@@ -35,7 +36,7 @@ export function createSuggestedWorkoutSet(
 ): WorkoutSetInput {
   return {
     ...createWorkoutSet(kind, previous, false),
-    rest_seconds: DEFAULT_REST_SECONDS,
+    rest_seconds: kind === 'strength' ? DEFAULT_REST_SECONDS : null,
   };
 }
 
@@ -82,10 +83,11 @@ export function isCompletedWorkingSet(item: WorkoutSetInput): boolean {
 }
 
 export function restTimerSecondsAfterSetUpdate(
+  kind: ExerciseKind,
   current: Pick<WorkoutSetInput, 'completed' | 'rest_seconds'>,
   update: Partial<Pick<WorkoutSetInput, 'completed' | 'rest_seconds'>>,
 ): number | null {
-  if (current.completed || update.completed !== true) return null;
+  if (kind === 'cardio' || current.completed || update.completed !== true) return null;
 
   const seconds = update.rest_seconds ?? current.rest_seconds;
   return seconds !== null && seconds > 0 ? seconds : null;

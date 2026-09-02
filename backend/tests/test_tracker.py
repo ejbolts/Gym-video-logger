@@ -1166,7 +1166,9 @@ def test_zone2_week_boundaries_edit_and_delete(client):
     overview = client.get("/api/cardio").json()
     assert overview["current_week"]["completed_minutes"] == 60
     assert overview["previous_weeks"][0]["completed_minutes"] == 90
-    assert client.get("/api/dashboard").json()["total_cardio_sessions"] == 3
+    dashboard = client.get("/api/dashboard").json()
+    assert dashboard["total_cardio_sessions"] == 3
+    assert dashboard["cardio_minutes_this_week"] == 100
 
     current["duration_minutes"] = 120
     assert client.put(f"/api/cardio/{current_id}", json=current).status_code == 200

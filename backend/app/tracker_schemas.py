@@ -453,6 +453,7 @@ class DashboardRead(BaseModel):
     volume_this_week_kg: float
     current_streak: int
     total_cardio_sessions: int
+    cardio_minutes_this_week: int
     heatmap: list[HeatmapDay]
     weekly_days: list[WeeklyDayBreakdown]
     recommendation: WorkoutRecommendationRead

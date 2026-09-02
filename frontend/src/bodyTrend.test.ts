@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  BODY_TREND_DURATION_OPTIONS,
+  bodyTrendCutoffDate,
   filterMeasurementsByRange,
   nearestChartPointIndex,
   splitWeightLineByPhase,
+  summarizeBodyWeightTrend,
   trainingPhaseAtDate,
 } from './bodyTrend';
 
@@ -72,5 +75,39 @@ describe('body-composition chart ranges and scrubbing', () => {
     expect(nearestChartPointIndex(42, 42, 302, 4)).toBe(0);
     expect(nearestChartPointIndex(175, 42, 302, 4)).toBe(2);
     expect(nearestChartPointIndex(999, 42, 302, 4)).toBe(3);
+  });
+});
+
+describe('bodyweight trend summary', () => {
+  it('offers every requested duration', () => {
+    expect(BODY_TREND_DURATION_OPTIONS.map((option) => option.value)).toEqual([
+      '7d',
+      '14d',
+      '30d',
+      '60d',
+      '90d',
+      '6m',
+      '1y',
+    ]);
+  });
+
+  it('calculates average and median inside an inclusive day window', () => {
+    const summary = summarizeBodyWeightTrend(
+      [
+        { measurement_date: '2026-08-26', weight_kg: 60 },
+        { measurement_date: '2026-08-27', weight_kg: 80 },
+        { measurement_date: '2026-08-30', weight_kg: 90 },
+        { measurement_date: '2026-09-02', weight_kg: 100 },
+      ],
+      '7d',
+    );
+
+    expect(summary).toEqual({ average: 90, median: 90, count: 3 });
+  });
+
+  it('uses calendar months and clamps month-end dates', () => {
+    expect(bodyTrendCutoffDate('2026-08-31', '6m')).toBe('2026-02-28');
+    expect(bodyTrendCutoffDate('2024-08-31', '6m')).toBe('2024-02-29');
+    expect(bodyTrendCutoffDate('2026-09-02', '1y')).toBe('2025-09-02');
   });
 });

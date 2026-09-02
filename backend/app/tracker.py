@@ -1430,6 +1430,13 @@ def dashboard(db: DbSession) -> DashboardRead:
 
     preferences = training_preferences(db)
     cardio_sessions = list(db.scalars(select(CardioSession)))
+    cardio_week_start = start_of_week(today, preferences.week_start)
+    cardio_week_end = cardio_week_start + timedelta(days=6)
+    cardio_minutes_this_week = sum(
+        session.duration_minutes
+        for session in cardio_sessions
+        if cardio_week_start <= session.session_date <= cardio_week_end
+    )
     muscle_totals = muscle_volume(workouts, week_start, today)
     return DashboardRead(
         workouts_this_week=len(this_week),
@@ -1437,6 +1444,7 @@ def dashboard(db: DbSession) -> DashboardRead:
         volume_this_week_kg=round(volume_this_week, 1),
         current_streak=streak,
         total_cardio_sessions=len(cardio_sessions),
+        cardio_minutes_this_week=cardio_minutes_this_week,
         heatmap=heatmap,
         weekly_days=weekly_days,
         recommendation=workout_recommendation(workouts, today, training_mode),
@@ -1448,7 +1456,7 @@ def dashboard(db: DbSession) -> DashboardRead:
         ],
         zone2=zone2_week(
             cardio_sessions,
-            start_of_week(today, preferences.week_start),
+            cardio_week_start,
             preferences.zone2_goal_minutes,
         ),
         recent_workouts=workouts[:5],

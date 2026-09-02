@@ -86,6 +86,11 @@ describe('new workout sets', () => {
 
     expect(nextSet.incline_percent).toBe(12.5);
     expect(nextSet.speed_kph).toBe(5.4);
+    expect(nextSet.rest_seconds).toBeNull();
+  });
+
+  it('does not add a rest duration to suggested cardio sets', () => {
+    expect(createSuggestedWorkoutSet('cardio', previousSet).rest_seconds).toBeNull();
   });
 });
 
@@ -217,13 +222,18 @@ describe('completed working sets', () => {
 describe('rest timer start', () => {
   it('starts when an incomplete set becomes complete', () => {
     expect(
-      restTimerSecondsAfterSetUpdate({ completed: false, rest_seconds: 180 }, { completed: true }),
+      restTimerSecondsAfterSetUpdate(
+        'strength',
+        { completed: false, rest_seconds: 180 },
+        { completed: true },
+      ),
     ).toBe(180);
   });
 
   it('uses a newly selected rest duration from the same update', () => {
     expect(
       restTimerSecondsAfterSetUpdate(
+        'strength',
         { completed: false, rest_seconds: 180 },
         { completed: true, rest_seconds: 150 },
       ),
@@ -232,14 +242,34 @@ describe('rest timer start', () => {
 
   it('does not restart when editing an already completed set', () => {
     expect(
-      restTimerSecondsAfterSetUpdate({ completed: true, rest_seconds: 180 }, { completed: true }),
+      restTimerSecondsAfterSetUpdate(
+        'strength',
+        { completed: true, rest_seconds: 180 },
+        { completed: true },
+      ),
     ).toBeNull();
   });
 
   it('does not start for ordinary edits or a missing rest duration', () => {
-    expect(restTimerSecondsAfterSetUpdate({ completed: false, rest_seconds: 180 }, {})).toBeNull();
     expect(
-      restTimerSecondsAfterSetUpdate({ completed: false, rest_seconds: null }, { completed: true }),
+      restTimerSecondsAfterSetUpdate('strength', { completed: false, rest_seconds: 180 }, {}),
+    ).toBeNull();
+    expect(
+      restTimerSecondsAfterSetUpdate(
+        'strength',
+        { completed: false, rest_seconds: null },
+        { completed: true },
+      ),
+    ).toBeNull();
+  });
+
+  it('does not start for a completed cardio set', () => {
+    expect(
+      restTimerSecondsAfterSetUpdate(
+        'cardio',
+        { completed: false, rest_seconds: 180 },
+        { completed: true },
+      ),
     ).toBeNull();
   });
 });
