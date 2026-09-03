@@ -597,6 +597,7 @@ def sync_workout_cardio_sessions(db: Session, workout: TrainingWorkout) -> None:
             continue
         imported_indexes.add(movement.order_index)
         session = existing.get(movement.order_index)
+        created = session is None
         if session is None:
             session = CardioSession(
                 source_workout_id=workout.id,
@@ -607,8 +608,9 @@ def sync_workout_cardio_sessions(db: Session, workout: TrainingWorkout) -> None:
         session.activity_type = movement.exercise.name
         session.duration_minutes = duration_minutes
         session.intensity = "Imported from workout"
-        session.zone = "Zone 2"
-        session.qualifies_zone2 = True
+        if created:
+            session.zone = "Zone 2"
+            session.qualifies_zone2 = True
         session.notes = movement.notes
     for movement_index, session in existing.items():
         if movement_index not in imported_indexes:
@@ -986,7 +988,50 @@ def cardio_overview(db: DbSession) -> CardioOverviewRead:
 
 @router.post("/cardio", response_model=CardioSessionRead, status_code=201)
 def create_cardio_session(payload: CardioSessionCreate, db: DbSession) -> CardioSession:
-    session = CardioSession(**payload.model_dump())
+    if payload.exercise_id:
+        exercise = db.get(Exercise, payload.exercise_id)
+        if not exercise or exercise.kind != ExerciseKind.CARDIO:
+            raise HTTPException(status_code=422, detail="Choose a cardio exercise.")
+
+        workout = TrainingWorkout(
+            name=f"{exercise.name} cardio",
+            workout_date=payload.session_date,
+            category=WorkoutCategory.CARDIO,
+            notes=None,
+            duration_minutes=payload.duration_minutes,
+            start_time=None,
+            end_time=None,
+        )
+        movement = WorkoutMovement(exercise=exercise, order_index=0, notes=payload.notes)
+        movement.sets.append(
+            WorkoutSet(
+                order_index=0,
+                duration_seconds=payload.duration_minutes * 60,
+                completed=True,
+            )
+        )
+        workout.movements.append(movement)
+        db.add(workout)
+        db.flush()
+        session = CardioSession(
+            session_date=payload.session_date,
+            activity_type=exercise.name,
+            duration_minutes=payload.duration_minutes,
+            intensity=None,
+            zone=payload.zone,
+            qualifies_zone2=payload.zone == "Zone 2",
+            notes=payload.notes,
+            source_workout_id=workout.id,
+            source_movement_index=0,
+        )
+        db.add(session)
+        rebuild_personal_records(db)
+        bump_workout_cache_revision(db)
+        db.commit()
+        db.refresh(session)
+        return session
+
+    session = CardioSession(**payload.model_dump(exclude={"exercise_id"}))
     db.add(session)
     db.commit()
     db.refresh(session)
@@ -1002,7 +1047,7 @@ def update_cardio_session(
         raise HTTPException(status_code=404, detail="Cardio session was not found.")
     if session.source_workout_id:
         raise HTTPException(status_code=409, detail="Edit imported cardio in its workout.")
-    for key, value in payload.model_dump().items():
+    for key, value in payload.model_dump(exclude={"exercise_id"}).items():
         setattr(session, key, value)
     db.commit()
     db.refresh(session)

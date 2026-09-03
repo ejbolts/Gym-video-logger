@@ -4629,6 +4629,11 @@ button.metric-card:focus-visible {
   touch-action: pan-y;
 }
 
+.set-swipe-shell.has-open-overlay {
+  z-index: 150;
+  overflow: visible;
+}
+
 .set-swipe-content {
   position: relative;
   z-index: 2;
@@ -5496,6 +5501,8 @@ html.edge-swipe-active .edge-swipe-indicator {
 }
 
 .completed-set-note {
+  width: 100%;
+  display: block;
   margin: -1px 0 0.35rem;
   border: 1px solid #444b4e;
   border-radius: 5px;
@@ -5504,6 +5511,17 @@ html.edge-swipe-active .edge-swipe-indicator {
   color: #cbc7c2;
   font-size: 0.87rem;
   line-height: 1.45;
+  text-align: left;
+  cursor: pointer;
+}
+
+.completed-set-note:hover,
+.completed-set-note:focus-visible {
+  border-color: #1689c4;
+  background: #172126;
+  color: #eef9ff;
+  outline: 2px solid rgb(40 172 239 / 32%);
+  outline-offset: -2px;
 }
 
 .movement-note {
@@ -7194,20 +7212,6 @@ body,
   font-size: 0.62rem;
   font-weight: 800;
 }
-.cardio-fields .zone2-check {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  min-width: 0;
-}
-.cardio-fields .zone2-check input[type='checkbox'] {
-  flex: 0 0 auto;
-  width: 1rem;
-  height: 1rem;
-  margin: 0;
-  padding: 0;
-  accent-color: var(--accent);
-}
 .cardio-form textarea {
   width: 100%;
   margin: 0.7rem 0;
@@ -7233,6 +7237,25 @@ body,
   border: 0;
   background: transparent;
   color: var(--accent-dark);
+}
+.cardio-history .cardio-history-workout-link {
+  max-width: 100%;
+  padding: 0;
+  color: #28acef;
+  text-align: left;
+  cursor: pointer;
+}
+.cardio-history .cardio-history-workout-link strong {
+  overflow: hidden;
+  color: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cardio-history .cardio-history-workout-link:hover,
+.cardio-history .cardio-history-workout-link:focus-visible {
+  color: #63c9f7;
+  outline: 1px solid currentColor;
+  outline-offset: 3px;
 }
 .previous-zone2 div {
   display: flex;
@@ -9689,6 +9712,49 @@ body,
   text-underline-offset: 0.16em;
 }
 
+.movement-card h2 {
+  display: flex;
+  align-items: center;
+  gap: 0.28rem;
+}
+
+.movement-expand-toggle {
+  width: 1.7rem;
+  height: 1.7rem;
+  flex: 0 0 1.7rem;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  padding: 0;
+  background: transparent;
+  color: #8e999b;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.movement-expand-toggle svg {
+  width: 1rem;
+  height: 1rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.2;
+  transition: transform 160ms ease;
+}
+
+.movement-expand-toggle[aria-expanded='true'] svg {
+  transform: rotate(180deg);
+}
+
+.movement-expand-toggle:hover,
+.movement-expand-toggle:focus-visible {
+  background: rgb(40 172 239 / 12%);
+  color: #61c5f7;
+  outline: none;
+}
+
 .history-exercise-link {
   appearance: none;
   border: 0;
@@ -10666,6 +10732,16 @@ body.chart-fullscreen-open {
   background: #17191b;
   color: #ddd9d5;
   font: inherit;
+}
+
+.history-movement.targeted-exercise {
+  scroll-margin-block: 6rem;
+}
+
+.history-movement.targeted-exercise:focus {
+  border-color: #1689c4;
+  outline: 2px solid rgb(40 172 239 / 55%);
+  outline-offset: 4px;
 }
 
 .add-set-notes-field {

@@ -1178,6 +1178,49 @@ def test_zone2_week_boundaries_edit_and_delete(client):
     assert client.get("/api/dashboard").json()["total_cardio_sessions"] == 1
 
 
+def test_cardio_form_session_creates_a_calendar_workout(client):
+    exercise = next(
+        item
+        for item in client.get("/api/exercises").json()
+        if item["name"] == "Incline Treadmill Walking"
+    )
+    payload = {
+        "session_date": date.today().isoformat(),
+        "exercise_id": exercise["id"],
+        "activity_type": exercise["name"],
+        "duration_minutes": 35,
+        "intensity": "This should not be stored",
+        "zone": "Zone 3",
+        "qualifies_zone2": True,
+        "notes": "Steady incline",
+    }
+
+    created = client.post("/api/cardio", json=payload)
+
+    assert created.status_code == 201
+    session = created.json()
+    assert session["source_workout_id"] is not None
+    assert session["activity_type"] == exercise["name"]
+    assert session["duration_minutes"] == 35
+    assert session["intensity"] is None
+    assert session["zone"] == "Zone 3"
+    assert session["qualifies_zone2"] is False
+
+    workout = client.get(f"/api/workouts/{session['source_workout_id']}").json()
+    assert workout["category"] == "cardio"
+    assert workout["duration_minutes"] == 35
+    assert workout["movements"][0]["exercise"]["id"] == exercise["id"]
+    assert workout["movements"][0]["sets"][0]["duration_seconds"] == 2_100
+
+    dashboard = client.get("/api/dashboard").json()
+    calendar_day = next(
+        item for item in dashboard["heatmap"] if item["workout_date"] == date.today().isoformat()
+    )
+    assert any(item["id"] == workout["id"] for item in calendar_day["workouts"])
+    assert dashboard["cardio_minutes_this_week"] == 35
+    assert dashboard["zone2"]["completed_minutes"] == 0
+
+
 def test_completed_treadmill_walking_workout_counts_toward_zone2(client):
     exercise = next(
         item

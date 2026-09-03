@@ -16,11 +16,13 @@ export function SwipeToDeleteSetRow({
   children,
   label,
   disabled = false,
+  overlayOpen = false,
   onDelete,
 }: {
   children: ReactNode;
   label: string;
   disabled?: boolean;
+  overlayOpen?: boolean;
   onDelete: () => void;
 }) {
   const pointerRef = useRef<ActivePointer | null>(null);
@@ -132,7 +134,7 @@ export function SwipeToDeleteSetRow({
 
   return (
     <div
-      className={`set-swipe-shell ${dragging ? 'is-dragging' : ''} ${deleting ? 'is-deleting' : ''} ${disabled ? 'is-disabled' : ''}`}
+      className={`set-swipe-shell ${dragging ? 'is-dragging' : ''} ${deleting ? 'is-deleting' : ''} ${disabled ? 'is-disabled' : ''} ${overlayOpen ? 'has-open-overlay' : ''}`}
       style={style}
       onClickCapture={(event) => {
         if (!suppressClickRef.current) return;

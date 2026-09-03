@@ -116,7 +116,7 @@ import {
 } from './dateRanges';
 
 type ProgressMetric = 'estimated_1rm' | 'best_weight_kg' | 'volume_kg';
-type SetEditorFocus = 'weight' | 'reps' | 'type' | 'rpe' | null;
+type SetEditorFocus = 'weight' | 'reps' | 'type' | 'rpe' | 'notes' | null;
 type RestAlertStatus =
   'checking' | 'available' | 'enabling' | 'enabled' | 'blocked' | 'unsupported';
 type BackgroundActivity = { id: number; label: string };
@@ -3402,19 +3402,25 @@ function MovementCard({
               className="movement-history-link"
               onClick={(event) => {
                 event.stopPropagation();
-                if (!expanded) {
-                  setExpanded(true);
-                  return;
-                }
                 onExerciseHistory();
               }}
-              aria-label={
-                expanded
-                  ? `View full history for ${movement.exercise.name}`
-                  : `Expand ${movement.exercise.name}`
-              }
+              aria-label={`View full history for ${movement.exercise.name}`}
             >
               {movement.exercise.name}
+            </button>
+            <button
+              type="button"
+              className="movement-expand-toggle"
+              aria-label={`${expanded ? 'Collapse' : 'Expand'} ${movement.exercise.name}`}
+              aria-expanded={expanded}
+              onClick={(event) => {
+                event.stopPropagation();
+                setExpanded((current) => !current);
+              }}
+            >
+              <svg viewBox="0 0 20 20" aria-hidden="true">
+                <path d="m4 7 6 6 6-6" />
+              </svg>
             </button>
           </h2>
           <p>
@@ -3599,6 +3605,7 @@ function MovementCard({
             <SwipeToDeleteSetRow
               label={`set ${index + 1}`}
               disabled={movement.sets.length < 2}
+              overlayOpen={openSetActionsKey === item.key}
               onDelete={() => onDeleteSet(index)}
             >
               <details
@@ -3941,7 +3948,14 @@ function MovementCard({
                 </div>
               </details>
               {item.completed && item.notes && (
-                <div className="completed-set-note">{item.notes}</div>
+                <button
+                  type="button"
+                  className="completed-set-note"
+                  aria-label={`Edit note for set ${index + 1}`}
+                  onClick={() => openSetEditor(item.key, 'notes')}
+                >
+                  {item.notes}
+                </button>
               )}
             </SwipeToDeleteSetRow>
             {!cardio && (
@@ -4398,7 +4412,7 @@ function CompletedSetEditDialog({
                 <label>
                   Minutes
                   <input
-                    autoFocus
+                    autoFocus={initialFocus === null}
                     inputMode="numeric"
                     value={duration}
                     onChange={(event) => {
@@ -4524,6 +4538,7 @@ function CompletedSetEditDialog({
             <label className="add-set-notes-field">
               Set note
               <textarea
+                autoFocus={initialFocus === 'notes'}
                 value={notes}
                 onChange={(event) => setNotes(event.target.value)}
                 placeholder="Optional note"
@@ -5823,7 +5838,7 @@ function ProgressScreen({
               type="button"
               className="progress-row"
               key={point.workout_id}
-              aria-label={`View workout from ${prettyDate(point.workout_date)}`}
+              aria-label={`View ${progress.exercise.name} in workout from ${prettyDate(point.workout_date)}`}
               onClick={() => onOpenWorkout(point.workout_id, progress.exercise.id)}
             >
               <span>
@@ -7523,12 +7538,23 @@ function BodyTrendChart({
   );
 }
 
-function CardioScreen({ onDataChange }: { onDataChange: () => Promise<void> }) {
+function CardioScreen({
+  exercises,
+  onDataChange,
+  onOpenWorkout,
+}: {
+  exercises: Exercise[];
+  onDataChange: () => Promise<void>;
+  onOpenWorkout: (workoutId: string) => void;
+}) {
+  const cardioExercises = exercises.filter((exercise) => exercise.kind === 'cardio');
+  const defaultExercise = cardioExercises[0] ?? null;
   const empty: CardioSessionInput = {
     session_date: localDate(),
-    activity_type: 'Walking',
+    exercise_id: defaultExercise?.id ?? null,
+    activity_type: defaultExercise?.name ?? '',
     duration_minutes: 30,
-    intensity: 'Conversational pace',
+    intensity: null,
     zone: 'Zone 2',
     qualifies_zone2: true,
     notes: null,
@@ -7549,12 +7575,21 @@ function CardioScreen({ onDataChange }: { onDataChange: () => Promise<void> }) {
   }, []);
   async function save() {
     try {
-      if (editingId) await api.updateCardio(editingId, draft);
-      else await api.createCardio(draft);
+      if (!draft.exercise_id) {
+        setError('Choose a cardio exercise.');
+        return;
+      }
+      const payload = {
+        ...draft,
+        intensity: null,
+        qualifies_zone2: draft.zone === 'Zone 2',
+      };
+      if (editingId) await api.updateCardio(editingId, payload);
+      else await api.createCardio(payload);
       setDraft(empty);
       setEditingId(null);
-      await load();
       await onDataChange();
+      await load();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Could not save cardio.');
     }
@@ -7562,8 +7597,8 @@ function CardioScreen({ onDataChange }: { onDataChange: () => Promise<void> }) {
   async function remove(id: string) {
     try {
       await api.deleteCardio(id);
-      await load();
       await onDataChange();
+      await load();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Could not delete cardio.');
     }
@@ -7666,10 +7701,25 @@ function CardioScreen({ onDataChange }: { onDataChange: () => Promise<void> }) {
           </label>
           <label>
             Activity
-            <input
-              value={draft.activity_type}
-              onChange={(event) => setDraft({ ...draft, activity_type: event.target.value })}
-            />
+            <select
+              value={draft.exercise_id ?? ''}
+              disabled={cardioExercises.length === 0}
+              onChange={(event) => {
+                const exercise = cardioExercises.find((item) => item.id === event.target.value);
+                setDraft({
+                  ...draft,
+                  exercise_id: exercise?.id ?? null,
+                  activity_type: exercise?.name ?? '',
+                });
+              }}
+            >
+              {cardioExercises.length === 0 && <option value="">No cardio exercises</option>}
+              {cardioExercises.map((exercise) => (
+                <option key={exercise.id} value={exercise.id}>
+                  {exercise.name}
+                </option>
+              ))}
+            </select>
           </label>
           <label>
             Minutes
@@ -7684,17 +7734,13 @@ function CardioScreen({ onDataChange }: { onDataChange: () => Promise<void> }) {
             />
           </label>
           <label>
-            Intensity
-            <input
-              value={draft.intensity ?? ''}
-              onChange={(event) => setDraft({ ...draft, intensity: event.target.value || null })}
-            />
-          </label>
-          <label>
             Zone
             <select
               value={draft.zone ?? ''}
-              onChange={(event) => setDraft({ ...draft, zone: event.target.value || null })}
+              onChange={(event) => {
+                const zone = event.target.value || null;
+                setDraft({ ...draft, zone, qualifies_zone2: zone === 'Zone 2' });
+              }}
             >
               <option value="">Not set</option>
               {[1, 2, 3, 4, 5].map((zone) => (
@@ -7703,14 +7749,6 @@ function CardioScreen({ onDataChange }: { onDataChange: () => Promise<void> }) {
                 </option>
               ))}
             </select>
-          </label>
-          <label className="zone2-check">
-            <input
-              type="checkbox"
-              checked={draft.qualifies_zone2}
-              onChange={(event) => setDraft({ ...draft, qualifies_zone2: event.target.checked })}
-            />
-            Qualifies as Zone 2
           </label>
         </div>
         <textarea
@@ -7727,12 +7765,22 @@ function CardioScreen({ onDataChange }: { onDataChange: () => Promise<void> }) {
         {overview.sessions.map((session) => (
           <article key={session.id}>
             <div>
-              <strong>{session.activity_type}</strong>
+              {session.source_workout_id ? (
+                <button
+                  type="button"
+                  className="cardio-history-workout-link"
+                  onClick={() => onOpenWorkout(session.source_workout_id!)}
+                >
+                  <strong>{session.activity_type}</strong>
+                </button>
+              ) : (
+                <strong>{session.activity_type}</strong>
+              )}
               <small>
                 {prettyDate(session.session_date)} · {session.duration_minutes} min ·{' '}
                 {session.zone ?? session.intensity ?? 'Unspecified'}
-                {session.qualifies_zone2 ? ' · Zone 2 ✓' : ''}
-                {session.source_workout_id ? ' · Imported from workout' : ''}
+                {session.qualifies_zone2 ? ' ✓' : ''}
+                {session.source_workout_id ? ' · Linked workout' : ''}
               </small>
             </div>
             {!session.source_workout_id && (
@@ -7740,7 +7788,12 @@ function CardioScreen({ onDataChange }: { onDataChange: () => Promise<void> }) {
                 <button
                   onClick={() => {
                     setEditingId(session.id);
-                    setDraft(session);
+                    setDraft({
+                      ...session,
+                      exercise_id:
+                        cardioExercises.find((item) => item.name === session.activity_type)?.id ??
+                        null,
+                    });
                   }}
                 >
                   Edit
@@ -7814,12 +7867,14 @@ function HistoryScreen({
     () => workoutPageForId(workouts, initialOpenId, HISTORY_PAGE_SIZE) ?? 1,
   );
   const [selectedExerciseId, setSelectedExerciseId] = useState<string | null>(initialExerciseId);
+  const [targetExerciseId, setTargetExerciseId] = useState<string | null>(null);
   const [selectedCalendarDay, setSelectedCalendarDay] = useState<
     DashboardData['heatmap'][number] | null
   >(null);
   const [pendingWorkoutDate, setPendingWorkoutDate] = useState<string | null>(null);
   const [expandedPhoto, setExpandedPhoto] = useState<MachinePhoto | null>(null);
   const openWorkoutSummaryRef = useRef<HTMLButtonElement>(null);
+  const targetExerciseRef = useRef<HTMLDivElement>(null);
   const revealWorkoutRef = useRef(false);
   const workoutPageCount = Math.max(1, Math.ceil(workouts.length / HISTORY_PAGE_SIZE));
   const pagedWorkouts = workouts.slice(
@@ -7834,11 +7889,19 @@ function HistoryScreen({
   useEffect(() => {
     if (section !== 'history' || !revealWorkoutRef.current) return;
     const summary = openWorkoutSummaryRef.current;
-    if (!summary) return;
+    const exercise = targetExerciseId ? targetExerciseRef.current : null;
+    const target = exercise ?? summary;
+    if (!target) return;
     revealWorkoutRef.current = false;
-    summary.focus({ preventScroll: true });
-    summary.scrollIntoView({ block: 'start' });
-  }, [section, openId, workoutPage]);
+    const frame = window.requestAnimationFrame(() => {
+      target.focus({ preventScroll: true });
+      target.scrollIntoView({
+        behavior: 'smooth',
+        block: exercise ? 'center' : 'start',
+      });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [section, openId, workoutPage, targetExerciseId]);
 
   return (
     <section className="history-screen content-page">
@@ -7871,6 +7934,7 @@ function HistoryScreen({
             if (page === null) return;
             revealWorkoutRef.current = true;
             setSelectedExerciseId(exerciseId);
+            setTargetExerciseId(exerciseId);
             setWorkoutPage(page);
             setOpenId(workoutId);
             onSectionChange('history');
@@ -7880,7 +7944,19 @@ function HistoryScreen({
           exercisePickerRequest={exercisePickerRequest}
         />
       ) : section === 'cardio' ? (
-        <CardioScreen onDataChange={onDataChange} />
+        <CardioScreen
+          exercises={exercises}
+          onDataChange={onDataChange}
+          onOpenWorkout={(workoutId) => {
+            const page = workoutPageForId(workouts, workoutId, HISTORY_PAGE_SIZE);
+            if (page === null) return;
+            revealWorkoutRef.current = true;
+            setTargetExerciseId(null);
+            setWorkoutPage(page);
+            setOpenId(workoutId);
+            onSectionChange('history');
+          }}
+        />
       ) : (
         <>
           <div className="screen-intro history-intro">
@@ -7946,7 +8022,10 @@ function HistoryScreen({
                 <button
                   ref={open ? openWorkoutSummaryRef : null}
                   className="history-card-summary"
-                  onClick={() => setOpenId(open ? null : workout.id)}
+                  onClick={() => {
+                    setTargetExerciseId(null);
+                    setOpenId(open ? null : workout.id);
+                  }}
                 >
                   <i style={{ background: categoryColors[workout.category] }} />
                   <div>
@@ -8004,79 +8083,87 @@ function HistoryScreen({
                         </strong>
                       </span>
                     </div>
-                    {workout.movements.map((movement) => (
-                      <div className="history-movement" key={movement.id}>
-                        <strong>
-                          <button
-                            type="button"
-                            className="history-exercise-link"
-                            onClick={() => {
-                              setSelectedExerciseId(movement.exercise.id);
-                              onSectionChange('progress');
-                            }}
-                          >
-                            {movement.exercise.name}
-                          </button>
-                          {workoutBodyweight !== null && ` @ ${workoutBodyweight} kg`}
-                        </strong>
-                        {movement.machine_photos.length > 0 && (
-                          <>
-                            <div className="history-machine-photos">
-                              {movement.machine_photos.map((photo) => (
-                                <button
-                                  type="button"
-                                  key={photo.id}
-                                  onClick={() =>
-                                    setExpandedPhoto((current) =>
-                                      current?.id === photo.id ? null : photo,
-                                    )
-                                  }
-                                  aria-label={`${expandedPhoto?.id === photo.id ? 'Collapse' : 'Expand'} ${photo.caption}`}
-                                  aria-expanded={expandedPhoto?.id === photo.id}
-                                >
-                                  <span className="history-photo-image">
-                                    <img
-                                      src={photo.thumbnail_url}
-                                      alt={photo.caption}
-                                      loading="lazy"
-                                    />
-                                    <svg
-                                      className="history-photo-expand-icon"
-                                      viewBox="0 0 20 20"
-                                      aria-hidden="true"
-                                    >
-                                      <path d="M7 3H3v4M13 3h4v4M7 17H3v-4M13 17h4v-4" />
-                                    </svg>
-                                  </span>
-                                  <span className="history-photo-caption">{photo.caption}</span>
-                                </button>
-                              ))}
-                            </div>
-                            {expandedPhoto &&
-                              movement.machine_photos.some(
-                                (photo) => photo.id === expandedPhoto.id,
-                              ) && (
-                                <MachinePhotoDetail
-                                  photo={expandedPhoto}
-                                  onClose={() => setExpandedPhoto(null)}
-                                />
-                              )}
-                          </>
-                        )}
-                        <HistorySetFlow
-                          sets={movement.sets.filter((item) => item.completed)}
-                          personalRecords={personalRecords}
-                        />
-                        {movement.sets
-                          .filter((item) => item.notes)
-                          .map((item) => (
-                            <small key={item.id}>
-                              Set {item.order_index + 1}: {item.notes}
-                            </small>
-                          ))}
-                        {movement.notes && <MovementNotes notes={movement.notes} />}
-                      </div>
-                    ))}
+                    {workout.movements.map((movement) => {
+                      const targeted = targetExerciseId === movement.exercise.id;
+                      return (
+                        <div
+                          ref={targeted ? targetExerciseRef : null}
+                          className={`history-movement ${targeted ? 'targeted-exercise' : ''}`}
+                          key={movement.id}
+                          tabIndex={targeted ? -1 : undefined}
+                        >
+                          <strong>
+                            <button
+                              type="button"
+                              className="history-exercise-link"
+                              onClick={() => {
+                                setSelectedExerciseId(movement.exercise.id);
+                                onSectionChange('progress');
+                              }}
+                            >
+                              {movement.exercise.name}
+                            </button>
+                            {workoutBodyweight !== null && ` @ ${workoutBodyweight} kg`}
+                          </strong>
+                          {movement.machine_photos.length > 0 && (
+                            <>
+                              <div className="history-machine-photos">
+                                {movement.machine_photos.map((photo) => (
+                                  <button
+                                    type="button"
+                                    key={photo.id}
+                                    onClick={() =>
+                                      setExpandedPhoto((current) =>
+                                        current?.id === photo.id ? null : photo,
+                                      )
+                                    }
+                                    aria-label={`${expandedPhoto?.id === photo.id ? 'Collapse' : 'Expand'} ${photo.caption}`}
+                                    aria-expanded={expandedPhoto?.id === photo.id}
+                                  >
+                                    <span className="history-photo-image">
+                                      <img
+                                        src={photo.thumbnail_url}
+                                        alt={photo.caption}
+                                        loading="lazy"
+                                      />
+                                      <svg
+                                        className="history-photo-expand-icon"
+                                        viewBox="0 0 20 20"
+                                        aria-hidden="true"
+                                      >
+                                        <path d="M7 3H3v4M13 3h4v4M7 17H3v-4M13 17h4v-4" />
+                                      </svg>
+                                    </span>
+                                    <span className="history-photo-caption">{photo.caption}</span>
+                                  </button>
+                                ))}
+                              </div>
+                              {expandedPhoto &&
+                                movement.machine_photos.some(
+                                  (photo) => photo.id === expandedPhoto.id,
+                                ) && (
+                                  <MachinePhotoDetail
+                                    photo={expandedPhoto}
+                                    onClose={() => setExpandedPhoto(null)}
+                                  />
+                                )}
+                            </>
+                          )}
+                          <HistorySetFlow
+                            sets={movement.sets.filter((item) => item.completed)}
+                            personalRecords={personalRecords}
+                          />
+                          {movement.sets
+                            .filter((item) => item.notes)
+                            .map((item) => (
+                              <small key={item.id}>
+                                Set {item.order_index + 1}: {item.notes}
+                              </small>
+                            ))}
+                          {movement.notes && <MovementNotes notes={movement.notes} />}
+                        </div>
+                      );
+                    })}
                     {workout.notes && <p>{workout.notes}</p>}
                   </div>
                 )}

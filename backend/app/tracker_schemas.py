@@ -396,7 +396,7 @@ class MuscleVolumeRead(BaseModel):
     set_total: float
 
 
-class CardioSessionCreate(BaseModel):
+class CardioSessionFields(BaseModel):
     session_date: date
     activity_type: str = Field(min_length=1, max_length=100)
     duration_minutes: int = Field(gt=0, le=1_440)
@@ -411,7 +411,11 @@ class CardioSessionCreate(BaseModel):
         return value.strip() or None if isinstance(value, str) else value
 
 
-class CardioSessionRead(CardioSessionCreate):
+class CardioSessionCreate(CardioSessionFields):
+    exercise_id: str | None = Field(default=None, min_length=1, max_length=36)
+
+
+class CardioSessionRead(CardioSessionFields):
     model_config = ConfigDict(from_attributes=True)
 
     id: str

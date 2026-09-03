@@ -351,6 +351,7 @@ export interface Zone2Week {
 
 export interface CardioSessionInput {
   session_date: string;
+  exercise_id?: string | null;
   activity_type: string;
   duration_minutes: number;
   intensity: string | null;
