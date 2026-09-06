@@ -9,13 +9,13 @@ from typing import Annotated
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from .config import Settings, get_settings
 from .database import Base, SessionLocal, engine, get_db
+from .frontend import FrontendFiles
 from .models import Clip, ClipUploadStatus, PushSubscription, SessionStatus, WorkoutSession
 from .notifications import (
     RestTimerNotificationScheduler,
@@ -498,7 +498,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     frontend_dist = Path(__file__).resolve().parents[2] / "frontend" / "dist"
     if frontend_dist.is_dir():
-        app.mount("/", StaticFiles(directory=frontend_dist, html=True), name="frontend")
+        app.mount("/", FrontendFiles(directory=frontend_dist, html=True), name="frontend")
 
     return app
 

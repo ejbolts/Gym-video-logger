@@ -22,7 +22,7 @@ Phone PWA ── private Tailnet HTTPS ── Tailscale Serve ── 127.0.0.1:8
                                             local uploads / ffmpeg / YouTube
 ```
 
-- `frontend/`: React, TypeScript, Vite and `vite-plugin-pwa`; the default screen is the upload workflow.
+- `frontend/`: React, TypeScript, Vite and `vite-plugin-pwa`; the default screen is the two-row menu with total and weekly stats.
 - `backend/app/`: FastAPI API, SQLite/SQLAlchemy models, streamed multipart storage, in-process processor, and YouTube uploader interface.
 - `backend/migrations/`: Alembic initial schema migration.
 - `data/` (ignored by Git): SQLite database, reusable machine photos, original uploads, normalized temp files, and stitched outputs.
@@ -95,6 +95,14 @@ uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000
 ```
 
 Open `http://127.0.0.1:8000`. For frontend hot reload during development, run `npm run dev` from `frontend/`; Vite proxies `/api` to the local FastAPI server.
+
+On Windows, `./start-app.ps1` builds the current frontend before starting the server and opens that same production build on port 8000. Use `./start-app.ps1 -Dev` only for development on port 5173. Phone access should proxy port 8000 too; this installation uses `https://mainpc.tail494810.ts.net:8446`.
+
+The menu has one current dark/blue theme, with three total stats above three weekly/bodyweight-trend stats. The old powerlifting stars menu is retired. Building replaces the previous `frontend/dist` assets. The server revalidates HTML, the service worker, and the manifest; fingerprinted assets may be cached. Service-worker updates activate in the background, clean obsolete precaches, and are checked when returning to the app or reconnecting. Reload or reopen the app to display the new version; open workouts and uploads are never forcibly reloaded. Workout data, drafts, settings, and push subscriptions are retained.
+
+Cardio sessions accept optional whole-number calories (kcal), preferably active calories from the machine or watch. In Cardio history, **Log calories / Edit calories** works for both standalone sessions and cardio linked to a workout. Blank means unknown; zero is a recorded value. The menu and Cardio screen show a **Fat-energy equivalent** card with This week, This month, 3 months, 6 months, This year and All time views. The week follows the saved week-start preference; month/year are calendar periods to today, and 3/6 months are rolling periods anchored to today. Future sessions are excluded. The card shows how many sessions have calorie entries so partial totals are clear.
+
+The comparison uses 7,700 kcal per kg as a conventional approximation and is explicitly not measured fat loss or a food deficit. It does not estimate calories automatically or infer past entries from duration. See [Hall's discussion of the energy rule and its limitations](https://pubmed.ncbi.nlm.nih.gov/17848938/). Upgrade to migration `0017_cardio_calories` and restart the backend before serving the calorie-enabled frontend; normal `start-app.ps1` startup handles the migration and build.
 
 The normal multipart upload is intentionally non-resumable: if a file upload fails, retrying restarts only that file. The client-generated clip ID makes the retry idempotent, while successful clips remain intact.
 

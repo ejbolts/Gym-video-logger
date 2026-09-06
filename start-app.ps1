@@ -1,5 +1,6 @@
 param(
-  [switch]$NoBrowser
+  [switch]$NoBrowser,
+  [switch]$Dev
 )
 
 $ErrorActionPreference = 'Stop'
@@ -8,8 +9,8 @@ Set-StrictMode -Version Latest
 $projectRoot = $PSScriptRoot
 $frontendRoot = Join-Path $projectRoot 'frontend'
 $venvPython = Join-Path $projectRoot '.venv\Scripts\python.exe'
-$frontendUrl = 'http://127.0.0.1:5173'
 $backendUrl = 'http://127.0.0.1:8000'
+$frontendUrl = if ($Dev) { 'http://127.0.0.1:5173' } else { $backendUrl }
 $logRoot = Join-Path ([IO.Path]::GetTempPath()) 'form-gym-logger'
 $backendLog = Join-Path $logRoot 'backend.log'
 $backendErrorLog = Join-Path $logRoot 'backend-error.log'
@@ -158,19 +159,33 @@ try {
   }
   Invoke-Alembic @('upgrade', 'head')
 
+  if (-not $Dev) {
+    Write-Host 'Building the current app for PC and phone...' -ForegroundColor Cyan
+    Push-Location $frontendRoot
+    try {
+      & $npm run build
+      if ($LASTEXITCODE -ne 0) { throw 'Could not build the current app.' }
+    }
+    finally {
+      Pop-Location
+    }
+  }
+
   Write-Host 'Starting FORM...' -ForegroundColor Cyan
   $backendProcess = Start-Process -FilePath $venvPython `
     -ArgumentList @('-m', 'uvicorn', 'app.main:app', '--app-dir', 'backend', '--host', '127.0.0.1', '--port', '8000') `
     -WorkingDirectory $projectRoot -WindowStyle Hidden -PassThru `
     -RedirectStandardOutput $backendLog -RedirectStandardError $backendErrorLog
 
-  $frontendProcess = Start-Process -FilePath $npm `
-    -ArgumentList @('run', 'dev', '--', '--host', '127.0.0.1', '--port', '5173', '--strictPort') `
-    -WorkingDirectory $frontendRoot -WindowStyle Hidden -PassThru `
-    -RedirectStandardOutput $frontendLog -RedirectStandardError $frontendErrorLog
+  if ($Dev) {
+    $frontendProcess = Start-Process -FilePath $npm `
+      -ArgumentList @('run', 'dev', '--', '--host', '127.0.0.1', '--port', '5173', '--strictPort') `
+      -WorkingDirectory $frontendRoot -WindowStyle Hidden -PassThru `
+      -RedirectStandardOutput $frontendLog -RedirectStandardError $frontendErrorLog
+  }
 
   Wait-ForApp $backendUrl $backendProcess 'Backend'
-  Wait-ForApp $frontendUrl $frontendProcess 'Frontend'
+  if ($Dev) { Wait-ForApp $frontendUrl $frontendProcess 'Frontend' }
 
   Write-Host ''
   Write-Host "FORM is running at $frontendUrl" -ForegroundColor Green
@@ -181,7 +196,7 @@ try {
     Start-Process $frontendUrl
   }
 
-  while (-not $backendProcess.HasExited -and -not $frontendProcess.HasExited) {
+  while (-not $backendProcess.HasExited -and ($null -eq $frontendProcess -or -not $frontendProcess.HasExited)) {
     Start-Sleep -Seconds 1
   }
 

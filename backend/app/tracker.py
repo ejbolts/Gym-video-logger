@@ -12,6 +12,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from .body_measurement_csv import export_body_measurements, import_body_measurements
+from .cardio_energy import cardio_energy_periods
 from .config import Settings, get_settings
 from .database import get_db
 from .models import (
@@ -47,6 +48,7 @@ from .tracker_schemas import (
     BodyWeightGoalRead,
     CalendarExerciseRead,
     CalendarWorkoutRead,
+    CardioCaloriesUpdate,
     CardioOverviewRead,
     CardioSessionCreate,
     CardioSessionRead,
@@ -584,6 +586,9 @@ def sync_workout_cardio_sessions(db: Session, workout: TrainingWorkout) -> None:
         )
     }
     imported_indexes: set[int] = set()
+    calories_by_exercise = {
+        session.source_exercise_id: session.calories_kcal for session in existing.values()
+    }
     for movement in workout.movements:
         if movement.exercise.kind != ExerciseKind.CARDIO:
             continue
@@ -607,6 +612,8 @@ def sync_workout_cardio_sessions(db: Session, workout: TrainingWorkout) -> None:
         session.session_date = workout.workout_date
         session.activity_type = movement.exercise.name
         session.duration_minutes = duration_minutes
+        session.source_exercise_id = movement.exercise_id
+        session.calories_kcal = calories_by_exercise.get(movement.exercise_id)
         session.intensity = "Imported from workout"
         if created:
             session.zone = "Zone 2"
@@ -983,6 +990,7 @@ def cardio_overview(db: DbSession) -> CardioOverviewRead:
             for offset in range(1, 9)
         ],
         sessions=sessions,
+        energy_periods=cardio_energy_periods(sessions, date.today(), preferences.week_start),
     )
 
 
@@ -1017,6 +1025,8 @@ def create_cardio_session(payload: CardioSessionCreate, db: DbSession) -> Cardio
             session_date=payload.session_date,
             activity_type=exercise.name,
             duration_minutes=payload.duration_minutes,
+            calories_kcal=payload.calories_kcal,
+            source_exercise_id=exercise.id,
             intensity=None,
             zone=payload.zone,
             qualifies_zone2=payload.zone == "Zone 2",
@@ -1048,7 +1058,22 @@ def update_cardio_session(
     if session.source_workout_id:
         raise HTTPException(status_code=409, detail="Edit imported cardio in its workout.")
     for key, value in payload.model_dump(exclude={"exercise_id"}).items():
+        if key == "calories_kcal" and key not in payload.model_fields_set:
+            continue
         setattr(session, key, value)
+    db.commit()
+    db.refresh(session)
+    return session
+
+
+@router.patch("/cardio/{session_id}/calories", response_model=CardioSessionRead)
+def update_cardio_calories(
+    session_id: str, payload: CardioCaloriesUpdate, db: DbSession
+) -> CardioSession:
+    session = db.get(CardioSession, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Cardio session was not found.")
+    session.calories_kcal = payload.calories_kcal
     db.commit()
     db.refresh(session)
     return session
@@ -1490,6 +1515,7 @@ def dashboard(db: DbSession) -> DashboardRead:
         current_streak=streak,
         total_cardio_sessions=len(cardio_sessions),
         cardio_minutes_this_week=cardio_minutes_this_week,
+        cardio_energy_periods=cardio_energy_periods(cardio_sessions, today, preferences.week_start),
         heatmap=heatmap,
         weekly_days=weekly_days,
         recommendation=workout_recommendation(workouts, today, training_mode),

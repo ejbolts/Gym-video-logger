@@ -9,6 +9,7 @@ data/
 backend/data/
 frontend/node_modules/
 frontend/dist/
+artifacts/cardio-preview-build/
 frontend/coverage/
 backend/tests/.test-data/
 *.log

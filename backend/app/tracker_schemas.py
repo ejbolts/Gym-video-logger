@@ -400,6 +400,7 @@ class CardioSessionFields(BaseModel):
     session_date: date
     activity_type: str = Field(min_length=1, max_length=100)
     duration_minutes: int = Field(gt=0, le=1_440)
+    calories_kcal: int | None = Field(default=None, ge=0, le=100_000)
     intensity: str | None = Field(default=None, max_length=100)
     zone: str | None = Field(default=None, max_length=30)
     qualifies_zone2: bool = False
@@ -413,6 +414,21 @@ class CardioSessionFields(BaseModel):
 
 class CardioSessionCreate(CardioSessionFields):
     exercise_id: str | None = Field(default=None, min_length=1, max_length=36)
+
+
+class CardioCaloriesUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    calories_kcal: int | None = Field(ge=0, le=100_000)
+
+
+class CardioEnergyPeriodRead(BaseModel):
+    period: Literal["week", "month", "3m", "6m", "year", "all"]
+    start_date: date
+    end_date: date
+    calories_kcal: int
+    logged_sessions: int
+    total_sessions: int
 
 
 class CardioSessionRead(CardioSessionFields):
@@ -449,6 +465,7 @@ class CardioOverviewRead(BaseModel):
     current_week: Zone2WeekRead
     previous_weeks: list[Zone2WeekRead]
     sessions: list[CardioSessionRead]
+    energy_periods: list[CardioEnergyPeriodRead]
 
 
 class DashboardRead(BaseModel):
@@ -458,6 +475,7 @@ class DashboardRead(BaseModel):
     current_streak: int
     total_cardio_sessions: int
     cardio_minutes_this_week: int
+    cardio_energy_periods: list[CardioEnergyPeriodRead]
     heatmap: list[HeatmapDay]
     weekly_days: list[WeeklyDayBreakdown]
     recommendation: WorkoutRecommendationRead

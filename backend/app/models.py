@@ -565,6 +565,8 @@ class CardioSession(Base):
     session_date: Mapped[date] = mapped_column(Date, index=True)
     activity_type: Mapped[str] = mapped_column(String(100))
     duration_minutes: Mapped[int] = mapped_column(Integer)
+    calories_kcal: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    source_exercise_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     intensity: Mapped[str | None] = mapped_column(String(100), nullable=True)
     zone: Mapped[str | None] = mapped_column(String(30), nullable=True)
     qualifies_zone2: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -581,6 +583,10 @@ class CardioSession(Base):
     )
 
     __table_args__ = (
+        CheckConstraint(
+            "calories_kcal IS NULL OR (calories_kcal >= 0 AND calories_kcal <= 100000)",
+            name="cardio_calories_range",
+        ),
         CheckConstraint(
             "duration_minutes > 0 AND duration_minutes <= 1440", name="cardio_duration_range"
         ),

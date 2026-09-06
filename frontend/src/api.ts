@@ -215,6 +215,12 @@ export const api = {
       body: JSON.stringify(payload),
     }),
   deleteCardio: (id: string) => request<void>(`/api/cardio/${id}`, { method: 'DELETE' }),
+  updateCardioCalories: (id: string, calories_kcal: number | null) =>
+    request<CardioSession>(`/api/cardio/${id}/calories`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ calories_kcal }),
+    }),
   getTrainingPreferences: () => request<TrainingPreferences>('/api/training-preferences'),
   updateTrainingPreferences: (payload: TrainingPreferences) =>
     request<TrainingPreferences>('/api/training-preferences', {

@@ -6,6 +6,7 @@ import type {
   BodyMeasurement,
   BodyWeightGoal,
   CardioOverview,
+  CardioSession,
   CardioSessionInput,
   DashboardData,
   Exercise,
@@ -44,6 +45,9 @@ import { NotificationDialog } from './NotificationDialog';
 import { PopupDialog } from './PopupDialog';
 import { CreateExerciseDialog } from './CreateExerciseDialog';
 import { BackgroundActivityBar } from './BackgroundActivityBar';
+import { CardioEnergyCard } from './CardioEnergyCard';
+import { CardioCaloriesEditor } from './CardioCaloriesEditor';
+import { fatEnergyEquivalent, parseCardioCalories } from './cardioEnergy';
 import { CachedTabPanel } from './CachedTabPanel';
 import { ConfettiBurst } from './ConfettiBurst';
 import { EdgeSwipeBack } from './EdgeSwipeBack';
@@ -1368,6 +1372,7 @@ export function DashboardScreen({
       {workoutStartedAt !== null && (
         <DashboardLiveWorkoutButton startedAt={workoutStartedAt} onClick={onWorkoutLive} />
       )}
+      <CardioEnergyCard summaries={data?.cardio_energy_periods} />
     </section>
   );
 }
@@ -7554,6 +7559,7 @@ function CardioScreen({
     exercise_id: defaultExercise?.id ?? null,
     activity_type: defaultExercise?.name ?? '',
     duration_minutes: 30,
+    calories_kcal: null,
     intensity: null,
     zone: 'Zone 2',
     qualifies_zone2: true,
@@ -7561,6 +7567,9 @@ function CardioScreen({
   };
   const [overview, setOverview] = useState<CardioOverview | null>(null);
   const [draft, setDraft] = useState<CardioSessionInput>(empty);
+  const [calorieInput, setCalorieInput] = useState('');
+  const [calorieSession, setCalorieSession] = useState<CardioSession | null>(null);
+  const [saving, setSaving] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const load = () =>
@@ -7574,24 +7583,31 @@ function CardioScreen({
     void load();
   }, []);
   async function save() {
+    if (saving) return;
+    setError(null);
     try {
-      if (!draft.exercise_id) {
+      if (!editingId && !draft.exercise_id) {
         setError('Choose a cardio exercise.');
         return;
       }
       const payload = {
         ...draft,
+        calories_kcal: parseCardioCalories(calorieInput),
         intensity: null,
         qualifies_zone2: draft.zone === 'Zone 2',
       };
+      setSaving(true);
       if (editingId) await api.updateCardio(editingId, payload);
       else await api.createCardio(payload);
       setDraft(empty);
+      setCalorieInput('');
       setEditingId(null);
       await onDataChange();
       await load();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Could not save cardio.');
+    } finally {
+      setSaving(false);
     }
   }
   async function remove(id: string) {
@@ -7608,6 +7624,20 @@ function CardioScreen({
   return (
     <div className="cardio-screen">
       {error && <p className="inline-error">{error}</p>}
+      <CardioEnergyCard summaries={overview.energy_periods} />
+      {calorieSession && (
+        <CardioCaloriesEditor
+          key={calorieSession.id}
+          session={calorieSession}
+          onClose={() => setCalorieSession(null)}
+          onSave={async (calories) => {
+            const saved = await api.updateCardioCalories(calorieSession.id, calories);
+            if (editingId === saved.id) setCalorieInput(saved.calories_kcal?.toString() ?? '');
+            await onDataChange();
+            await load();
+          }}
+        />
+      )}
       <section className={`panel zone2-card ${week.complete ? 'complete' : ''}`}>
         <div className="panel-heading">
           <div>
@@ -7750,15 +7780,45 @@ function CardioScreen({
               ))}
             </select>
           </label>
+          <label>
+            Calories burned (kcal)
+            <input
+              type="number"
+              min="0"
+              max="100000"
+              step="1"
+              inputMode="numeric"
+              value={calorieInput}
+              onChange={(event) => setCalorieInput(event.target.value)}
+              placeholder="e.g. 350"
+            />
+          </label>
         </div>
+        <p className="cardio-calorie-hint">
+          Optional: enter your machine or watch estimate, preferably active calories.
+        </p>
         <textarea
           value={draft.notes ?? ''}
           onChange={(event) => setDraft({ ...draft, notes: event.target.value || null })}
           placeholder="Notes"
         />
-        <button className="primary-action" onClick={() => void save()}>
-          {editingId ? 'Save changes' : 'Add cardio session'}
+        <button className="primary-action" disabled={saving} onClick={() => void save()}>
+          {saving ? 'Saving…' : editingId ? 'Save changes' : 'Add cardio session'}
         </button>
+        {editingId && (
+          <button
+            type="button"
+            disabled={saving}
+            onClick={() => {
+              setEditingId(null);
+              setDraft(empty);
+              setCalorieInput('');
+              setError(null);
+            }}
+          >
+            Cancel edit
+          </button>
+        )}
       </section>
       <section className="panel cardio-history">
         <h2>Cardio history</h2>
@@ -7782,29 +7842,44 @@ function CardioScreen({
                 {session.qualifies_zone2 ? ' ✓' : ''}
                 {session.source_workout_id ? ' · Linked workout' : ''}
               </small>
+              <small className="cardio-session-energy">
+                {session.calories_kcal == null
+                  ? 'Calories not logged'
+                  : `${session.calories_kcal.toLocaleString()} kcal · ≈ ${fatEnergyEquivalent(session.calories_kcal)} fat-energy equivalent`}
+              </small>
             </div>
-            {!session.source_workout_id && (
-              <>
-                <button
-                  onClick={() => {
-                    setEditingId(session.id);
-                    setDraft({
-                      ...session,
-                      exercise_id:
-                        cardioExercises.find((item) => item.name === session.activity_type)?.id ??
-                        null,
-                    });
-                  }}
-                >
-                  Edit
-                </button>
-                <InlineConfirmButton
-                  label="Delete"
-                  confirmLabel="Delete session"
-                  onConfirm={() => remove(session.id)}
-                />
-              </>
-            )}
+            <div className="cardio-session-actions">
+              <button
+                type="button"
+                onClick={() => setCalorieSession(session)}
+                aria-label={`${session.calories_kcal == null ? 'Log' : 'Edit'} calories for ${session.activity_type} on ${session.session_date}`}
+              >
+                {session.calories_kcal == null ? 'Log calories' : 'Edit calories'}
+              </button>
+              {!session.source_workout_id && (
+                <>
+                  <button
+                    onClick={() => {
+                      setEditingId(session.id);
+                      setCalorieInput(session.calories_kcal?.toString() ?? '');
+                      setDraft({
+                        ...session,
+                        exercise_id:
+                          cardioExercises.find((item) => item.name === session.activity_type)?.id ??
+                          null,
+                      });
+                    }}
+                  >
+                    Edit
+                  </button>
+                  <InlineConfirmButton
+                    label="Delete"
+                    confirmLabel="Delete session"
+                    onConfirm={() => remove(session.id)}
+                  />
+                </>
+              )}
+            </div>
           </article>
         ))}
       </section>

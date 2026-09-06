@@ -304,6 +304,7 @@ export interface DashboardData {
   current_streak: number;
   total_cardio_sessions: number;
   cardio_minutes_this_week: number;
+  cardio_energy_periods: CardioEnergyPeriod[];
   heatmap: HeatmapDay[];
   weekly_days: WeeklyDayBreakdown[];
   recommendation: WorkoutRecommendation;
@@ -354,6 +355,7 @@ export interface CardioSessionInput {
   exercise_id?: string | null;
   activity_type: string;
   duration_minutes: number;
+  calories_kcal?: number | null;
   intensity: string | null;
   zone: string | null;
   qualifies_zone2: boolean;
@@ -372,6 +374,16 @@ export interface CardioOverview {
   current_week: Zone2Week;
   previous_weeks: Zone2Week[];
   sessions: CardioSession[];
+  energy_periods: CardioEnergyPeriod[];
+}
+
+export interface CardioEnergyPeriod {
+  period: 'week' | 'month' | '3m' | '6m' | 'year' | 'all';
+  start_date: string;
+  end_date: string;
+  calories_kcal: number;
+  logged_sessions: number;
+  total_sessions: number;
 }
 
 export interface BodyWeightGoalInput {

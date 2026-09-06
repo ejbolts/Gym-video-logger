@@ -6,16 +6,20 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      registerType: 'prompt',
+      // Registration is managed in appUpdates.ts without interrupting open forms.
+      injectRegister: false,
       workbox: {
+        skipWaiting: true,
+        clientsClaim: true,
+        cleanupOutdatedCaches: true,
         importScripts: ['push-notifications.js'],
       },
       manifest: {
         name: 'Gym Logger',
         short_name: 'Gym Logger',
         description: 'Private workout tracking, progress, and video logging',
-        theme_color: '#18201d',
-        background_color: '#f4f5f1',
+        theme_color: '#121516',
+        background_color: '#121516',
         display: 'standalone',
         start_url: '/',
         icons: [
