@@ -401,6 +401,10 @@ class CardioSessionFields(BaseModel):
     activity_type: str = Field(min_length=1, max_length=100)
     duration_minutes: int = Field(gt=0, le=1_440)
     calories_kcal: int | None = Field(default=None, ge=0, le=100_000)
+    average_heart_rate_bpm: int | None = Field(default=None, ge=20, le=250)
+    distance_km: float | None = Field(default=None, ge=0, le=10_000)
+    average_speed_kph: float | None = Field(default=None, ge=0, le=100)
+    incline_percent: float | None = Field(default=None, ge=0, le=100)
     intensity: str | None = Field(default=None, max_length=100)
     zone: str | None = Field(default=None, max_length=30)
     qualifies_zone2: bool = False
@@ -422,6 +426,16 @@ class CardioCaloriesUpdate(BaseModel):
     calories_kcal: int | None = Field(ge=0, le=100_000)
 
 
+class CardioMetricsUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    calories_kcal: int | None = Field(default=None, ge=0, le=100_000)
+    average_heart_rate_bpm: int | None = Field(default=None, ge=20, le=250)
+    distance_km: float | None = Field(default=None, ge=0, le=10_000)
+    average_speed_kph: float | None = Field(default=None, ge=0, le=100)
+    incline_percent: float | None = Field(default=None, ge=0, le=100)
+
+
 class CardioEnergyPeriodRead(BaseModel):
     period: Literal["week", "month", "3m", "6m", "year", "all"]
     start_date: date
@@ -429,6 +443,21 @@ class CardioEnergyPeriodRead(BaseModel):
     calories_kcal: int
     logged_sessions: int
     total_sessions: int
+    previous_start_date: date | None
+    previous_end_date: date | None
+    previous_calories_kcal: int | None
+    average_heart_rate_bpm: float | None
+    previous_average_heart_rate_bpm: float | None
+    distance_km: float
+    previous_distance_km: float | None
+    average_speed_kph: float | None
+    previous_average_speed_kph: float | None
+    average_incline_percent: float | None
+    previous_average_incline_percent: float | None
+    heart_rate_sessions: int
+    distance_sessions: int
+    speed_sessions: int
+    incline_sessions: int
 
 
 class CardioSessionRead(CardioSessionFields):

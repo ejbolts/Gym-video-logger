@@ -5039,6 +5039,148 @@ html.edge-swipe-active .edge-swipe-indicator {
   background: #2a3031;
 }
 
+.dashboard-screen {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+.dashboard-bodyweight-quick {
+  width: min(100%, 57rem);
+  margin: auto auto max(1rem, env(safe-area-inset-bottom));
+  border: 1px solid #285b73;
+  border-radius: 12px;
+  padding: 1rem;
+  background: linear-gradient(145deg, #152229, #11191d);
+}
+
+.dashboard-bodyweight-quick > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.dashboard-bodyweight-quick h2,
+.dashboard-bodyweight-quick p {
+  margin: 0;
+}
+
+.dashboard-bodyweight-quick h2 {
+  color: #eeece8;
+  font-size: 1.35rem;
+}
+
+.dashboard-bodyweight-quick > header > span {
+  border: 1px solid #4a555a;
+  border-radius: 999px;
+  padding: 0.35rem 0.65rem;
+  color: #aeb7bb;
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+.dashboard-bodyweight-quick > header > span.logged {
+  border-color: #237da5;
+  color: #67c8f3;
+}
+
+.dashboard-bodyweight-hint {
+  padding-top: 0.35rem;
+  color: #9da7ab;
+  font-size: 0.78rem;
+}
+
+.dashboard-bodyweight-options {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.4rem;
+  margin-top: 0.85rem;
+}
+
+.dashboard-bodyweight-options button {
+  min-width: 0;
+  min-height: 2.65rem;
+  border: 1px solid #3e515a;
+  border-radius: 7px;
+  padding: 0.4rem 0.15rem;
+  background: #172126;
+  color: #c8ced0;
+  font-size: clamp(0.78rem, 3.4vw, 0.95rem);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.dashboard-bodyweight-options button[aria-pressed='true'] {
+  border-color: #35b5ec;
+  background: #117cac;
+  color: white;
+}
+
+.dashboard-bodyweight-save {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(7rem, 0.7fr);
+  gap: 0.55rem;
+  margin-top: 0.6rem;
+}
+
+.dashboard-bodyweight-save label {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  border: 1px solid #435057;
+  border-radius: 7px;
+  background: #101719;
+}
+
+.dashboard-bodyweight-save input {
+  width: 100%;
+  min-width: 0;
+  height: 2.8rem;
+  border: 0;
+  padding: 0 0.7rem;
+  background: transparent;
+  color: #f1efec;
+  font-size: 1rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 750;
+}
+
+.dashboard-bodyweight-save input:focus {
+  outline: 2px solid #279ed2;
+  outline-offset: -1px;
+}
+
+.dashboard-bodyweight-save b {
+  padding-right: 0.7rem;
+  color: #939da1;
+  font-size: 0.78rem;
+}
+
+.dashboard-bodyweight-save > button {
+  min-height: 2.8rem;
+  border: 1px solid #2daee6;
+  border-radius: 7px;
+  background: #1596cf;
+  color: white;
+  font-weight: 800;
+}
+
+.dashboard-bodyweight-save > button:disabled {
+  opacity: 0.6;
+}
+
+.dashboard-bodyweight-message {
+  padding-top: 0.55rem;
+  color: #67dca0;
+  font-size: 0.78rem;
+}
+
+.dashboard-bodyweight-quick > .inline-error {
+  margin-top: 0.55rem;
+}
+
 @keyframes dashboard-live-pulse {
   0%,
   100% {
@@ -11377,6 +11519,115 @@ html {
 }
 .cardio-history .cardio-session-energy {
   color: #70d5ff;
+}
+
+.cardio-history .cardio-session-performance {
+  color: #c4cbce;
+}
+
+.cardio-progress-dates {
+  display: grid;
+  gap: 0.18rem;
+  margin: 0.85rem 0;
+  color: #b7c1c6;
+  font-size: 0.75rem;
+  text-align: center;
+}
+
+.cardio-progress-dates span {
+  color: #819099;
+  font-size: 0.68rem;
+}
+
+.cardio-progress-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.cardio-progress-grid article {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  gap: 0.22rem;
+  border: 1px solid #304751;
+  border-radius: 8px;
+  padding: 0.7rem;
+  background: rgb(7 18 23 / 48%);
+}
+
+.cardio-progress-grid article > span {
+  color: #9caab1;
+  font-size: 0.67rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.cardio-progress-grid article > strong {
+  overflow: hidden;
+  color: #eff3f3;
+  font-size: clamp(1rem, 4.2vw, 1.28rem);
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cardio-progress-grid article > small {
+  color: #8f9ca2;
+  font-size: 0.65rem;
+  line-height: 1.25;
+}
+
+.cardio-progress-grid article > .cardio-progress-comparison {
+  min-height: 1.25em;
+  color: #64c8f3;
+}
+
+.cardio-metrics-dialog {
+  padding: 1rem;
+}
+
+.cardio-metrics-dialog > p {
+  margin: 0 0 0.8rem;
+  color: #aeb7bb;
+  font-size: 0.78rem;
+}
+
+.cardio-metric-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.cardio-metric-fields label {
+  min-width: 0;
+  display: grid;
+  gap: 0.3rem;
+  color: #aeb7bb;
+  font-size: 0.72rem;
+}
+
+.cardio-metric-fields input {
+  width: 100%;
+  min-width: 0;
+  min-height: 2.75rem;
+  border: 1px solid #475259;
+  border-radius: 6px;
+  padding: 0.55rem;
+  background: #101617;
+  color: #f1efec;
+  font-size: 1rem;
+}
+
+.cardio-metrics-dialog > .cardio-metric-hint {
+  margin-top: 0.65rem;
+  color: #7f8c92;
+}
+
+@media (max-width: 390px) {
+  .cardio-metric-fields {
+    grid-template-columns: 1fr;
+  }
 }
 .cardio-calorie-dialog form {
   padding: 1rem;

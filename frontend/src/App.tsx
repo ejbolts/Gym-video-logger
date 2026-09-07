@@ -46,8 +46,8 @@ import { PopupDialog } from './PopupDialog';
 import { CreateExerciseDialog } from './CreateExerciseDialog';
 import { BackgroundActivityBar } from './BackgroundActivityBar';
 import { CardioEnergyCard } from './CardioEnergyCard';
-import { CardioCaloriesEditor } from './CardioCaloriesEditor';
-import { fatEnergyEquivalent, parseCardioCalories } from './cardioEnergy';
+import { CardioMetricsEditor } from './CardioMetricsEditor';
+import { fatEnergyEquivalent } from './cardioEnergy';
 import { CachedTabPanel } from './CachedTabPanel';
 import { ConfettiBurst } from './ConfettiBurst';
 import { EdgeSwipeBack } from './EdgeSwipeBack';
@@ -515,6 +515,9 @@ export function App() {
     () => summarizeBodyWeightTrend(measurements, bodyTrendPreference.duration),
     [bodyTrendPreference.duration, measurements],
   );
+  const todayMeasurement = measurements.find(
+    (measurement) => measurement.measurement_date === localDate(),
+  );
   const backgroundActivityLabel =
     backgroundActivities.length > 0
       ? backgroundActivities[backgroundActivities.length - 1].label
@@ -937,6 +940,15 @@ export function App() {
                 onMeasurements={() => setTab('body')}
                 onSettings={() => setTab('settings')}
                 onWorkoutLive={() => setTab('log')}
+                todayBodyweight={todayMeasurement?.weight_kg ?? null}
+                onSaveBodyweight={(weight) =>
+                  saveMeasurement({
+                    measurement_date: localDate(),
+                    weight_kg: weight,
+                    body_fat_pct: todayMeasurement?.body_fat_pct ?? null,
+                    notes: todayMeasurement?.notes ?? null,
+                  })
+                }
               />
             )}
           </CachedTabPanel>
@@ -1299,6 +1311,8 @@ export function DashboardScreen({
   onMeasurements,
   onSettings,
   onWorkoutLive,
+  todayBodyweight,
+  onSaveBodyweight,
 }: {
   data: DashboardData | null;
   totalWorkouts: number | null;
@@ -1311,6 +1325,8 @@ export function DashboardScreen({
   onMeasurements: () => void;
   onSettings: () => void;
   onWorkoutLive: () => void;
+  todayBodyweight: number | null;
+  onSaveBodyweight: (weight: number) => Promise<void>;
 }) {
   const cardioMinutesThisWeek =
     data?.cardio_minutes_this_week ?? data?.zone2?.completed_minutes ?? null;
@@ -1372,7 +1388,131 @@ export function DashboardScreen({
       {workoutStartedAt !== null && (
         <DashboardLiveWorkoutButton startedAt={workoutStartedAt} onClick={onWorkoutLive} />
       )}
-      <CardioEnergyCard summaries={data?.cardio_energy_periods} />
+      <DashboardQuickBodyweight
+        latestBodyweight={bodyweight}
+        todayBodyweight={todayBodyweight}
+        onSave={onSaveBodyweight}
+      />
+    </section>
+  );
+}
+
+function quickBodyweightOptions(reference: number | null): number[] {
+  const center = Math.round((reference ?? 80) * 10) / 10;
+  return [-0.2, -0.1, 0, 0.1, 0.2].map((offset) => Number((center + offset).toFixed(1)));
+}
+
+export function DashboardQuickBodyweight({
+  latestBodyweight,
+  todayBodyweight,
+  onSave,
+}: {
+  latestBodyweight: number | null;
+  todayBodyweight: number | null;
+  onSave: (weight: number) => Promise<void>;
+}) {
+  const initialWeight = todayBodyweight ?? latestBodyweight;
+  const [weight, setWeight] = useState(initialWeight === null ? '' : initialWeight.toFixed(1));
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const options = quickBodyweightOptions(latestBodyweight);
+  const selectedWeight = Number(weight);
+
+  useEffect(() => {
+    const nextWeight = todayBodyweight ?? latestBodyweight;
+    if (nextWeight !== null) setWeight(nextWeight.toFixed(1));
+  }, [latestBodyweight, todayBodyweight]);
+
+  async function save() {
+    if (!Number.isFinite(selectedWeight) || selectedWeight <= 0 || selectedWeight > 500) {
+      setError('Enter a bodyweight between 1 and 500 kg.');
+      setMessage(null);
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    setMessage(null);
+    try {
+      await onSave(selectedWeight);
+      setMessage(`${selectedWeight.toFixed(1)} kg saved for today.`);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : 'Could not save today’s weight.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section className="panel dashboard-bodyweight-quick" aria-labelledby="daily-bodyweight-title">
+      <header>
+        <div>
+          <p className="section-kicker">DAILY CHECK-IN</p>
+          <h2 id="daily-bodyweight-title">Bodyweight</h2>
+        </div>
+        <span className={todayBodyweight === null ? '' : 'logged'}>
+          {todayBodyweight === null ? 'Not logged' : `Today · ${todayBodyweight.toFixed(1)} kg`}
+        </span>
+      </header>
+      <p className="dashboard-bodyweight-hint">Quick select, adjust if needed, then save.</p>
+      <div
+        className="dashboard-bodyweight-options"
+        role="group"
+        aria-label="Quick select bodyweight"
+      >
+        {options.map((option) => (
+          <button
+            type="button"
+            key={option}
+            aria-pressed={Math.abs(selectedWeight - option) < 0.01}
+            onClick={() => {
+              setWeight(option.toFixed(1));
+              setError(null);
+              setMessage(null);
+            }}
+          >
+            {option.toFixed(1)}
+          </button>
+        ))}
+      </div>
+      <form
+        className="dashboard-bodyweight-save"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void save();
+        }}
+      >
+        <label>
+          <span className="sr-only">Bodyweight in kilograms</span>
+          <input
+            type="number"
+            inputMode="decimal"
+            min="1"
+            max="500"
+            step="0.1"
+            value={weight}
+            onChange={(event) => {
+              setWeight(event.target.value);
+              setError(null);
+              setMessage(null);
+            }}
+          />
+          <b>kg</b>
+        </label>
+        <button type="submit" disabled={saving}>
+          {saving ? 'Saving…' : todayBodyweight === null ? 'Save today' : 'Update today'}
+        </button>
+      </form>
+      {message && (
+        <p className="dashboard-bodyweight-message" role="status">
+          {message}
+        </p>
+      )}
+      {error && (
+        <p className="inline-error" role="alert">
+          {error}
+        </p>
+      )}
     </section>
   );
 }
@@ -7560,6 +7700,10 @@ function CardioScreen({
     activity_type: defaultExercise?.name ?? '',
     duration_minutes: 30,
     calories_kcal: null,
+    average_heart_rate_bpm: null,
+    distance_km: null,
+    average_speed_kph: null,
+    incline_percent: null,
     intensity: null,
     zone: 'Zone 2',
     qualifies_zone2: true,
@@ -7567,8 +7711,7 @@ function CardioScreen({
   };
   const [overview, setOverview] = useState<CardioOverview | null>(null);
   const [draft, setDraft] = useState<CardioSessionInput>(empty);
-  const [calorieInput, setCalorieInput] = useState('');
-  const [calorieSession, setCalorieSession] = useState<CardioSession | null>(null);
+  const [metricSession, setMetricSession] = useState<CardioSession | null>(null);
   const [saving, setSaving] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -7592,7 +7735,6 @@ function CardioScreen({
       }
       const payload = {
         ...draft,
-        calories_kcal: parseCardioCalories(calorieInput),
         intensity: null,
         qualifies_zone2: draft.zone === 'Zone 2',
       };
@@ -7600,7 +7742,6 @@ function CardioScreen({
       if (editingId) await api.updateCardio(editingId, payload);
       else await api.createCardio(payload);
       setDraft(empty);
-      setCalorieInput('');
       setEditingId(null);
       await onDataChange();
       await load();
@@ -7625,14 +7766,13 @@ function CardioScreen({
     <div className="cardio-screen">
       {error && <p className="inline-error">{error}</p>}
       <CardioEnergyCard summaries={overview.energy_periods} />
-      {calorieSession && (
-        <CardioCaloriesEditor
-          key={calorieSession.id}
-          session={calorieSession}
-          onClose={() => setCalorieSession(null)}
-          onSave={async (calories) => {
-            const saved = await api.updateCardioCalories(calorieSession.id, calories);
-            if (editingId === saved.id) setCalorieInput(saved.calories_kcal?.toString() ?? '');
+      {metricSession && (
+        <CardioMetricsEditor
+          key={metricSession.id}
+          session={metricSession}
+          onClose={() => setMetricSession(null)}
+          onSave={async (metrics) => {
+            await api.updateCardioMetrics(metricSession.id, metrics);
             await onDataChange();
             await load();
           }}
@@ -7788,14 +7928,77 @@ function CardioScreen({
               max="100000"
               step="1"
               inputMode="numeric"
-              value={calorieInput}
-              onChange={(event) => setCalorieInput(event.target.value)}
+              value={draft.calories_kcal ?? ''}
+              onChange={(event) =>
+                setDraft({ ...draft, calories_kcal: numberOrNull(event.target.value) })
+              }
               placeholder="e.g. 350"
+            />
+          </label>
+          <label>
+            Average HR (bpm)
+            <input
+              type="number"
+              min="20"
+              max="250"
+              step="1"
+              inputMode="numeric"
+              value={draft.average_heart_rate_bpm ?? ''}
+              onChange={(event) =>
+                setDraft({ ...draft, average_heart_rate_bpm: numberOrNull(event.target.value) })
+              }
+              placeholder="e.g. 142"
+            />
+          </label>
+          <label>
+            Distance (km)
+            <input
+              type="number"
+              min="0"
+              max="10000"
+              step="0.01"
+              inputMode="decimal"
+              value={draft.distance_km ?? ''}
+              onChange={(event) =>
+                setDraft({ ...draft, distance_km: numberOrNull(event.target.value) })
+              }
+              placeholder="Optional"
+            />
+          </label>
+          <label>
+            Average speed (km/h)
+            <input
+              type="number"
+              min="0"
+              max="100"
+              step="0.1"
+              inputMode="decimal"
+              value={draft.average_speed_kph ?? ''}
+              onChange={(event) =>
+                setDraft({ ...draft, average_speed_kph: numberOrNull(event.target.value) })
+              }
+              placeholder="Optional"
+            />
+          </label>
+          <label>
+            Incline (%)
+            <input
+              type="number"
+              min="0"
+              max="100"
+              step="0.1"
+              inputMode="decimal"
+              value={draft.incline_percent ?? ''}
+              onChange={(event) =>
+                setDraft({ ...draft, incline_percent: numberOrNull(event.target.value) })
+              }
+              placeholder="Optional"
             />
           </label>
         </div>
         <p className="cardio-calorie-hint">
-          Optional: enter your machine or watch estimate, preferably active calories.
+          Performance metrics are optional. For calories, prefer your watch or machine’s active
+          calorie estimate.
         </p>
         <textarea
           value={draft.notes ?? ''}
@@ -7812,7 +8015,6 @@ function CardioScreen({
             onClick={() => {
               setEditingId(null);
               setDraft(empty);
-              setCalorieInput('');
               setError(null);
             }}
           >
@@ -7847,21 +8049,42 @@ function CardioScreen({
                   ? 'Calories not logged'
                   : `${session.calories_kcal.toLocaleString()} kcal · ≈ ${fatEnergyEquivalent(session.calories_kcal)} fat-energy equivalent`}
               </small>
+              <small className="cardio-session-performance">
+                {[
+                  session.average_heart_rate_bpm == null
+                    ? null
+                    : `${session.average_heart_rate_bpm} bpm avg`,
+                  session.distance_km == null ? null : `${session.distance_km} km`,
+                  session.average_speed_kph == null
+                    ? null
+                    : `${session.average_speed_kph} km/h avg`,
+                  session.incline_percent == null ? null : `${session.incline_percent}% incline`,
+                ]
+                  .filter((value): value is string => value !== null)
+                  .join(' · ') || 'Performance metrics not logged'}
+              </small>
             </div>
             <div className="cardio-session-actions">
               <button
                 type="button"
-                onClick={() => setCalorieSession(session)}
-                aria-label={`${session.calories_kcal == null ? 'Log' : 'Edit'} calories for ${session.activity_type} on ${session.session_date}`}
+                onClick={() => setMetricSession(session)}
+                aria-label={`Edit performance metrics for ${session.activity_type} on ${session.session_date}`}
               >
-                {session.calories_kcal == null ? 'Log calories' : 'Edit calories'}
+                {[
+                  session.calories_kcal,
+                  session.average_heart_rate_bpm,
+                  session.distance_km,
+                  session.average_speed_kph,
+                  session.incline_percent,
+                ].some((value) => value != null)
+                  ? 'Edit metrics'
+                  : 'Log metrics'}
               </button>
               {!session.source_workout_id && (
                 <>
                   <button
                     onClick={() => {
                       setEditingId(session.id);
-                      setCalorieInput(session.calories_kcal?.toString() ?? '');
                       setDraft({
                         ...session,
                         exercise_id:

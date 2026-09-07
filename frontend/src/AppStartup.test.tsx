@@ -43,6 +43,8 @@ describe('App startup', () => {
         onMeasurements={vi.fn()}
         onSettings={vi.fn()}
         onWorkoutLive={vi.fn()}
+        todayBodyweight={null}
+        onSaveBodyweight={vi.fn()}
       />,
     );
 
@@ -58,6 +60,9 @@ describe('App startup', () => {
     expect(markup).toContain('dashboard-live-duration');
     expect(markup).toContain('1:05');
     expect(markup).toContain('Measurements');
+    expect(markup).toContain('DAILY CHECK-IN');
+    expect(markup).toContain('Quick select bodyweight');
+    expect(markup).not.toContain('Fat-energy equivalent');
     expect(markup).not.toContain('Powerlifting Level');
     expect(markup).not.toContain('heatmap-panel');
     expect(markup).not.toContain('recent-panel');
@@ -78,10 +83,13 @@ describe('App startup', () => {
         onMeasurements={vi.fn()}
         onSettings={vi.fn()}
         onWorkoutLive={vi.fn()}
+        todayBodyweight={84.1}
+        onSaveBodyweight={vi.fn()}
       />,
     );
 
     expect(markup).toContain('Weekly cardio</span><strong>50 min</strong>');
+    expect(markup).toContain('Today · 84.1 kg');
     expect(markup).not.toContain('dashboard-live-workout');
   });
 

@@ -1,0 +1,47 @@
+import type { ReactNode } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { CardioMetricsEditor } from './CardioMetricsEditor';
+import type { CardioSession } from './types';
+
+vi.mock('react-dom', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('react-dom')>()),
+  createPortal: (children: ReactNode) => children,
+}));
+
+beforeEach(() => vi.stubGlobal('document', { body: {} }));
+afterEach(() => vi.unstubAllGlobals());
+
+describe('cardio metrics editor', () => {
+  it('shows every optional cardio performance field', () => {
+    const session = {
+      id: 'session-1',
+      session_date: '2026-09-07',
+      activity_type: 'Incline treadmill walking',
+      duration_minutes: 30,
+      calories_kcal: 350,
+      average_heart_rate_bpm: 142,
+      distance_km: 4.2,
+      average_speed_kph: 8.4,
+      incline_percent: 8,
+      intensity: null,
+      zone: 'Zone 2',
+      qualifies_zone2: true,
+      notes: null,
+      source_workout_id: 'workout-1',
+      created_at: '2026-09-07T00:00:00Z',
+      updated_at: '2026-09-07T00:00:00Z',
+    } satisfies CardioSession;
+
+    const markup = renderToStaticMarkup(
+      <CardioMetricsEditor session={session} onClose={vi.fn()} onSave={vi.fn()} />,
+    );
+
+    expect(markup).toContain('Cardio metrics');
+    expect(markup).toContain('Calories (kcal)');
+    expect(markup).toContain('Average HR (bpm)');
+    expect(markup).toContain('Distance (km)');
+    expect(markup).toContain('Average speed (km/h)');
+    expect(markup).toContain('Incline (%)');
+  });
+});

@@ -356,6 +356,10 @@ export interface CardioSessionInput {
   activity_type: string;
   duration_minutes: number;
   calories_kcal?: number | null;
+  average_heart_rate_bpm?: number | null;
+  distance_km?: number | null;
+  average_speed_kph?: number | null;
+  incline_percent?: number | null;
   intensity: string | null;
   zone: string | null;
   qualifies_zone2: boolean;
@@ -384,6 +388,29 @@ export interface CardioEnergyPeriod {
   calories_kcal: number;
   logged_sessions: number;
   total_sessions: number;
+  previous_start_date: string | null;
+  previous_end_date: string | null;
+  previous_calories_kcal: number | null;
+  average_heart_rate_bpm: number | null;
+  previous_average_heart_rate_bpm: number | null;
+  distance_km: number;
+  previous_distance_km: number | null;
+  average_speed_kph: number | null;
+  previous_average_speed_kph: number | null;
+  average_incline_percent: number | null;
+  previous_average_incline_percent: number | null;
+  heart_rate_sessions: number;
+  distance_sessions: number;
+  speed_sessions: number;
+  incline_sessions: number;
+}
+
+export interface CardioMetricsInput {
+  calories_kcal: number | null;
+  average_heart_rate_bpm: number | null;
+  distance_km: number | null;
+  average_speed_kph: number | null;
+  incline_percent: number | null;
 }
 
 export interface BodyWeightGoalInput {

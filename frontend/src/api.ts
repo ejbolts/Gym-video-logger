@@ -6,6 +6,7 @@ import type {
   CardioOverview,
   CardioSession,
   CardioSessionInput,
+  CardioMetricsInput,
   Clip,
   CsvImportResult,
   DashboardData,
@@ -220,6 +221,12 @@ export const api = {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ calories_kcal }),
+    }),
+  updateCardioMetrics: (id: string, payload: CardioMetricsInput) =>
+    request<CardioSession>(`/api/cardio/${id}/metrics`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
     }),
   getTrainingPreferences: () => request<TrainingPreferences>('/api/training-preferences'),
   updateTrainingPreferences: (payload: TrainingPreferences) =>

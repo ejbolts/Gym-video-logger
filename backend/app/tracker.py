@@ -49,6 +49,7 @@ from .tracker_schemas import (
     CalendarExerciseRead,
     CalendarWorkoutRead,
     CardioCaloriesUpdate,
+    CardioMetricsUpdate,
     CardioOverviewRead,
     CardioSessionCreate,
     CardioSessionRead,
@@ -586,8 +587,12 @@ def sync_workout_cardio_sessions(db: Session, workout: TrainingWorkout) -> None:
         )
     }
     imported_indexes: set[int] = set()
-    calories_by_exercise = {
-        session.source_exercise_id: session.calories_kcal for session in existing.values()
+    manual_metrics_by_exercise = {
+        session.source_exercise_id: {
+            "calories_kcal": session.calories_kcal,
+            "average_heart_rate_bpm": session.average_heart_rate_bpm,
+        }
+        for session in existing.values()
     }
     for movement in workout.movements:
         if movement.exercise.kind != ExerciseKind.CARDIO:
@@ -613,7 +618,40 @@ def sync_workout_cardio_sessions(db: Session, workout: TrainingWorkout) -> None:
         session.activity_type = movement.exercise.name
         session.duration_minutes = duration_minutes
         session.source_exercise_id = movement.exercise_id
-        session.calories_kcal = calories_by_exercise.get(movement.exercise_id)
+        manual_metrics = manual_metrics_by_exercise.get(movement.exercise_id, {})
+        session.calories_kcal = manual_metrics.get("calories_kcal")
+        session.average_heart_rate_bpm = manual_metrics.get("average_heart_rate_bpm")
+        completed_sets = [item for item in movement.sets if item.completed]
+        distances = [item.distance_km for item in completed_sets if item.distance_km is not None]
+        speed_sets = [item for item in completed_sets if item.speed_kph is not None]
+        incline_sets = [item for item in completed_sets if item.incline_percent is not None]
+        session.distance_km = round(sum(distances), 2) if distances else None
+        session.average_speed_kph = (
+            round(
+                sum(item.speed_kph * (item.duration_seconds or 0) for item in speed_sets)
+                / sum(item.duration_seconds or 0 for item in speed_sets),
+                1,
+            )
+            if sum(item.duration_seconds or 0 for item in speed_sets) > 0
+            else (
+                round(sum(item.speed_kph for item in speed_sets) / len(speed_sets), 1)
+                if speed_sets
+                else None
+            )
+        )
+        session.incline_percent = (
+            round(
+                sum(item.incline_percent * (item.duration_seconds or 0) for item in incline_sets)
+                / sum(item.duration_seconds or 0 for item in incline_sets),
+                1,
+            )
+            if sum(item.duration_seconds or 0 for item in incline_sets) > 0
+            else (
+                round(sum(item.incline_percent for item in incline_sets) / len(incline_sets), 1)
+                if incline_sets
+                else None
+            )
+        )
         session.intensity = "Imported from workout"
         if created:
             session.zone = "Zone 2"
@@ -1015,6 +1053,9 @@ def create_cardio_session(payload: CardioSessionCreate, db: DbSession) -> Cardio
             WorkoutSet(
                 order_index=0,
                 duration_seconds=payload.duration_minutes * 60,
+                distance_km=payload.distance_km,
+                speed_kph=payload.average_speed_kph,
+                incline_percent=payload.incline_percent,
                 completed=True,
             )
         )
@@ -1026,6 +1067,10 @@ def create_cardio_session(payload: CardioSessionCreate, db: DbSession) -> Cardio
             activity_type=exercise.name,
             duration_minutes=payload.duration_minutes,
             calories_kcal=payload.calories_kcal,
+            average_heart_rate_bpm=payload.average_heart_rate_bpm,
+            distance_km=payload.distance_km,
+            average_speed_kph=payload.average_speed_kph,
+            incline_percent=payload.incline_percent,
             source_exercise_id=exercise.id,
             intensity=None,
             zone=payload.zone,
@@ -1057,8 +1102,15 @@ def update_cardio_session(
         raise HTTPException(status_code=404, detail="Cardio session was not found.")
     if session.source_workout_id:
         raise HTTPException(status_code=409, detail="Edit imported cardio in its workout.")
+    optional_metrics = {
+        "calories_kcal",
+        "average_heart_rate_bpm",
+        "distance_km",
+        "average_speed_kph",
+        "incline_percent",
+    }
     for key, value in payload.model_dump(exclude={"exercise_id"}).items():
-        if key == "calories_kcal" and key not in payload.model_fields_set:
+        if key in optional_metrics and key not in payload.model_fields_set:
             continue
         setattr(session, key, value)
     db.commit()
@@ -1074,6 +1126,64 @@ def update_cardio_calories(
     if not session:
         raise HTTPException(status_code=404, detail="Cardio session was not found.")
     session.calories_kcal = payload.calories_kcal
+    db.commit()
+    db.refresh(session)
+    return session
+
+
+@router.patch("/cardio/{session_id}/metrics", response_model=CardioSessionRead)
+def update_cardio_metrics(
+    session_id: str, payload: CardioMetricsUpdate, db: DbSession
+) -> CardioSession:
+    session = db.get(CardioSession, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Cardio session was not found.")
+    for key in payload.model_fields_set:
+        setattr(session, key, getattr(payload, key))
+    if session.source_workout_id and {
+        "distance_km",
+        "average_speed_kph",
+        "incline_percent",
+    }.intersection(payload.model_fields_set):
+        workout = load_workout(db, session.source_workout_id)
+        movement = next(
+            (
+                item
+                for item in workout.movements
+                if item.order_index == session.source_movement_index
+            ),
+            None,
+        )
+        if movement:
+            completed_sets = [item for item in movement.sets if item.completed]
+            if "distance_km" in payload.model_fields_set and completed_sets:
+                total_duration = sum(
+                    workout_set.duration_seconds or 0 for workout_set in completed_sets
+                )
+                distributed_distance = 0.0
+                for index, workout_set in enumerate(completed_sets):
+                    if session.distance_km is None:
+                        workout_set.distance_km = None
+                    elif index == len(completed_sets) - 1:
+                        workout_set.distance_km = round(
+                            session.distance_km - distributed_distance, 3
+                        )
+                    else:
+                        share = (
+                            (workout_set.duration_seconds or 0) / total_duration
+                            if total_duration
+                            else 1 / len(completed_sets)
+                        )
+                        workout_set.distance_km = round(session.distance_km * share, 3)
+                        distributed_distance += workout_set.distance_km
+            if "average_speed_kph" in payload.model_fields_set:
+                for workout_set in completed_sets:
+                    workout_set.speed_kph = session.average_speed_kph
+            if "incline_percent" in payload.model_fields_set:
+                for workout_set in completed_sets:
+                    workout_set.incline_percent = session.incline_percent
+            rebuild_personal_records(db)
+            bump_workout_cache_revision(db)
     db.commit()
     db.refresh(session)
     return session

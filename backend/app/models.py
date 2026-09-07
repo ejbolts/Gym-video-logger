@@ -566,6 +566,10 @@ class CardioSession(Base):
     activity_type: Mapped[str] = mapped_column(String(100))
     duration_minutes: Mapped[int] = mapped_column(Integer)
     calories_kcal: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    average_heart_rate_bpm: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    distance_km: Mapped[float | None] = mapped_column(Float, nullable=True)
+    average_speed_kph: Mapped[float | None] = mapped_column(Float, nullable=True)
+    incline_percent: Mapped[float | None] = mapped_column(Float, nullable=True)
     source_exercise_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     intensity: Mapped[str | None] = mapped_column(String(100), nullable=True)
     zone: Mapped[str | None] = mapped_column(String(30), nullable=True)
@@ -586,6 +590,23 @@ class CardioSession(Base):
         CheckConstraint(
             "calories_kcal IS NULL OR (calories_kcal >= 0 AND calories_kcal <= 100000)",
             name="cardio_calories_range",
+        ),
+        CheckConstraint(
+            "average_heart_rate_bpm IS NULL OR "
+            "(average_heart_rate_bpm >= 20 AND average_heart_rate_bpm <= 250)",
+            name="cardio_average_heart_rate_range",
+        ),
+        CheckConstraint(
+            "distance_km IS NULL OR (distance_km >= 0 AND distance_km <= 10000)",
+            name="cardio_distance_range",
+        ),
+        CheckConstraint(
+            "average_speed_kph IS NULL OR (average_speed_kph >= 0 AND average_speed_kph <= 100)",
+            name="cardio_average_speed_range",
+        ),
+        CheckConstraint(
+            "incline_percent IS NULL OR (incline_percent >= 0 AND incline_percent <= 100)",
+            name="cardio_incline_range",
         ),
         CheckConstraint(
             "duration_minutes > 0 AND duration_minutes <= 1440", name="cardio_duration_range"

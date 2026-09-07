@@ -50,6 +50,54 @@ def test_record_edit_clear_and_delete_calories(client):
     assert period(client.get("/api/cardio").json()["energy_periods"])["calories_kcal"] == 0
 
 
+def test_record_and_edit_cardio_performance_metrics(client):
+    session = client.post(
+        "/api/cardio",
+        json=cardio_payload(
+            calories_kcal=350,
+            average_heart_rate_bpm=142,
+            distance_km=5.25,
+            average_speed_kph=10.5,
+            incline_percent=6.5,
+        ),
+    ).json()
+
+    assert session["average_heart_rate_bpm"] == 142
+    assert session["distance_km"] == 5.25
+    assert session["average_speed_kph"] == 10.5
+    assert session["incline_percent"] == 6.5
+
+    updated = client.patch(
+        f"/api/cardio/{session['id']}/metrics",
+        json={
+            "calories_kcal": 400,
+            "average_heart_rate_bpm": 145,
+            "distance_km": 5.5,
+            "average_speed_kph": 11,
+            "incline_percent": None,
+        },
+    )
+    assert updated.status_code == 200
+    assert updated.json()["calories_kcal"] == 400
+    assert updated.json()["average_heart_rate_bpm"] == 145
+    assert updated.json()["distance_km"] == 5.5
+    assert updated.json()["average_speed_kph"] == 11
+    assert updated.json()["incline_percent"] is None
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("average_heart_rate_bpm", 251),
+        ("distance_km", -1),
+        ("average_speed_kph", 101),
+        ("incline_percent", 101),
+    ],
+)
+def test_invalid_cardio_performance_metrics_are_rejected(client, field, value):
+    assert client.post("/api/cardio", json=cardio_payload(**{field: value})).status_code == 422
+
+
 @pytest.mark.parametrize("calories", [-1, 2.5, 100001, "not a number"])
 def test_invalid_calories_are_rejected(client, calories):
     assert (
@@ -124,20 +172,67 @@ def test_cardio_creation_with_exercise_retains_calories_after_sync(client):
         item for item in client.get("/api/exercises").json() if item["kind"] == "cardio"
     )
     session = client.post(
-        "/api/cardio", json=cardio_payload(exercise_id=exercise["id"], calories_kcal=420)
+        "/api/cardio",
+        json=cardio_payload(
+            exercise_id=exercise["id"],
+            calories_kcal=420,
+            average_heart_rate_bpm=144,
+            distance_km=5.2,
+            average_speed_kph=10.4,
+            incline_percent=7,
+        ),
     ).json()
     assert session["calories_kcal"] == 420
     workout = client.get(f"/api/workouts/{session['source_workout_id']}").json()
+    assert workout["movements"][0]["sets"][0]["distance_km"] == 5.2
+    assert workout["movements"][0]["sets"][0]["speed_kph"] == 10.4
+    assert workout["movements"][0]["sets"][0]["incline_percent"] == 7
     payload = {
         "name": workout["name"],
         "workout_date": workout["workout_date"],
         "category": "cardio",
         "movements": [
-            {"exercise_id": exercise["id"], "sets": [{"duration_seconds": 1800, "completed": True}]}
+            {
+                "exercise_id": exercise["id"],
+                "sets": [
+                    {
+                        "duration_seconds": 1800,
+                        "distance_km": 5.5,
+                        "speed_kph": 11,
+                        "incline_percent": 8,
+                        "completed": True,
+                    }
+                ],
+            }
         ],
     }
     assert client.put(f"/api/workouts/{workout['id']}", json=payload).status_code == 200
-    assert client.get("/api/cardio").json()["sessions"][0]["calories_kcal"] == 420
+    synced = client.get("/api/cardio").json()["sessions"][0]
+    assert synced["calories_kcal"] == 420
+    assert synced["average_heart_rate_bpm"] == 144
+    assert synced["distance_km"] == 5.5
+    assert synced["average_speed_kph"] == 11
+    assert synced["incline_percent"] == 8
+    revision = client.get("/api/workouts/revision").json()["revision"]
+    assert (
+        client.patch(
+            f"/api/cardio/{synced['id']}/metrics",
+            json={
+                "calories_kcal": 425,
+                "average_heart_rate_bpm": 146,
+                "distance_km": 5.75,
+                "average_speed_kph": 11.5,
+                "incline_percent": 9,
+            },
+        ).status_code
+        == 200
+    )
+    edited_workout = client.get(f"/api/workouts/{workout['id']}").json()
+    edited_set = edited_workout["movements"][0]["sets"][0]
+    assert edited_set["distance_km"] == 5.75
+    assert edited_set["speed_kph"] == 11.5
+    assert edited_set["incline_percent"] == 9
+    assert client.get("/api/workouts/revision").json()["revision"] != revision
 
 
 def test_periods_use_today_not_latest_session_and_respect_week_start():
@@ -171,6 +266,53 @@ def test_periods_use_today_not_latest_session_and_respect_week_start():
     assert saturday.calories_kcal == 300
     assert months_before(date(2024, 5, 31), 3) == date(2024, 2, 29)
     assert months_before(date(2025, 5, 31), 3) == date(2025, 2, 28)
+
+
+def test_periods_compare_weighted_cardio_performance_with_prior_period():
+    today = date(2026, 9, 7)  # Monday.
+    sessions = [
+        CardioSession(
+            session_date=today,
+            duration_minutes=30,
+            calories_kcal=300,
+            average_heart_rate_bpm=140,
+            distance_km=5,
+            average_speed_kph=10,
+            incline_percent=5,
+        ),
+        CardioSession(
+            session_date=today,
+            duration_minutes=60,
+            calories_kcal=600,
+            average_heart_rate_bpm=150,
+            distance_km=8,
+            average_speed_kph=8,
+            incline_percent=10,
+        ),
+        CardioSession(
+            session_date=date(2026, 9, 6),
+            duration_minutes=45,
+            calories_kcal=400,
+            average_heart_rate_bpm=130,
+            distance_km=4,
+            average_speed_kph=7,
+            incline_percent=2,
+        ),
+    ]
+
+    week = cardio_energy_periods(sessions, today, "monday")[0]
+
+    assert week.calories_kcal == 900
+    assert week.previous_calories_kcal == 400
+    assert week.average_heart_rate_bpm == 146.7
+    assert week.previous_average_heart_rate_bpm == 130
+    assert week.distance_km == 13
+    assert week.previous_distance_km == 4
+    assert week.average_speed_kph == 8.7
+    assert week.average_incline_percent == 8.3
+    assert week.heart_rate_sessions == week.distance_sessions == 2
+    assert week.previous_start_date == date(2026, 8, 31)
+    assert week.previous_end_date == date(2026, 9, 6)
 
 
 def test_empty_and_future_only_periods_are_empty():
