@@ -3,9 +3,11 @@ import {
   ACTIVE_WORKOUT_DRAFT_KEY,
   clearActiveWorkoutDraft,
   readActiveWorkoutDraft,
+  savedWorkoutMatchesOldDraft,
   writeActiveWorkoutDraft,
 } from './workoutDraft';
 import type { ActiveWorkoutDraft, DraftStorage } from './workoutDraft';
+import type { TrackedSet, TrackedWorkout } from './types';
 
 class MemoryStorage implements DraftStorage {
   values = new Map<string, string>();
@@ -59,6 +61,97 @@ const draft: ActiveWorkoutDraft = {
 };
 
 describe('active workout draft persistence', () => {
+  it('recognizes an old draft after its matching completed sets are saved', () => {
+    const stored = {
+      ...draft,
+      startedAt: Date.UTC(2026, 7, 23),
+      workoutDate: '2026-08-23',
+      movements: [
+        {
+          ...draft.movements[0],
+          sets: [
+            { ...draft.movements[0].sets[0], reps: 10, weight_kg: 69, warmup: true },
+            {
+              ...draft.movements[0].sets[0],
+              key: 'set-2',
+              reps: 5,
+              weight_kg: 86,
+              completed: false,
+            },
+            { ...draft.movements[0].sets[0], key: 'set-3', reps: 9, weight_kg: 96 },
+          ],
+        },
+      ],
+    };
+    const trackedSet = (
+      item: (typeof stored.movements)[0]['sets'][number],
+      id: string,
+      order_index: number,
+    ): TrackedSet => ({
+      ...item,
+      id,
+      order_index,
+      incline_percent: item.incline_percent ?? null,
+      speed_kph: item.speed_kph ?? null,
+      bodyweight_kg: item.bodyweight_kg ?? null,
+      percentile: item.percentile ?? null,
+      warmup: item.warmup ?? false,
+      set_type: item.set_type ?? 'normal',
+      failed: item.failed ?? false,
+      target_reps: item.target_reps ?? null,
+    });
+    const saved: TrackedWorkout = {
+      id: 'saved',
+      name: 'Push workout',
+      workout_date: '2026-08-23',
+      category: 'push',
+      notes: null,
+      duration_minutes: 72,
+      start_time: null,
+      end_time: null,
+      is_sample: false,
+      created_at: '',
+      updated_at: '',
+      movements: [
+        {
+          id: 'movement',
+          order_index: 0,
+          notes: null,
+          exercise: {
+            id: 'bench',
+            name: 'Bench',
+            category: 'push',
+            kind: 'strength',
+            muscle_group: 'Chest',
+            equipment: null,
+            is_custom: true,
+            is_favorite: false,
+            muscle_contributions: [],
+          },
+          machine_photos: [],
+          superset_group_id: null,
+          superset_name: null,
+          sets: [
+            trackedSet(stored.movements[0].sets[0], 'one', 0),
+            trackedSet(stored.movements[0].sets[1], 'two', 1),
+            trackedSet(stored.movements[0].sets[2], 'three', 2),
+          ],
+        },
+      ],
+    };
+    expect(savedWorkoutMatchesOldDraft(stored, saved, Date.UTC(2026, 8, 12))).toBe(true);
+    expect(savedWorkoutMatchesOldDraft(stored, saved, Date.UTC(2026, 7, 23, 1))).toBe(false);
+    saved.movements[0].sets[2].reps = 8;
+    expect(savedWorkoutMatchesOldDraft(stored, saved, Date.UTC(2026, 8, 12))).toBe(false);
+  });
+  it('preserves a corrected duration when an old active workout is reopened', () => {
+    const storage = new MemoryStorage();
+    writeActiveWorkoutDraft({ ...draft, durationOverrideMinutes: 72 }, storage);
+    expect(readActiveWorkoutDraft(storage)?.durationOverrideMinutes).toBe(72);
+    expect(readActiveWorkoutDraft(storage)?.movements).toEqual(draft.movements);
+    writeActiveWorkoutDraft({ ...draft, durationOverrideMinutes: 28_740 }, storage);
+    expect(readActiveWorkoutDraft(storage)).toBeNull();
+  });
   it('round-trips and clears a workout draft', () => {
     const storage = new MemoryStorage();
 

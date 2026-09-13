@@ -251,8 +251,10 @@ def record_training_phase(db: Session, mode: TrainingMode, effective_date: date)
     return phase
 
 
-def weekly_goal(workouts: list[TrainingWorkout], today: date, mode: TrainingMode) -> WeeklyGoalRead:
-    week_start = today - timedelta(days=today.weekday())
+def weekly_goal(
+    workouts: list[TrainingWorkout], today: date, mode: TrainingMode, week_start_day: str = "monday"
+) -> WeeklyGoalRead:
+    week_start = start_of_week(today, week_start_day)
     week_end = week_start + timedelta(days=6)
     active_start = today - timedelta(days=27)
     active_groups: set[str] = set()
@@ -979,7 +981,7 @@ def zone2_week(
     session_minutes = sum(
         item.duration_minutes
         for item in sessions
-        if item.qualifies_zone2 and week <= item.session_date <= end
+        if item.qualifies_zone2 and week <= item.session_date <= min(end, date.today())
     )
     completed = session_minutes
     return Zone2WeekRead(
@@ -1448,8 +1450,9 @@ def dashboard(db: DbSession) -> DashboardRead:
             .order_by(TrainingWorkout.workout_date.desc(), TrainingWorkout.created_at.desc())
         )
     )
-    week_start = today - timedelta(days=today.weekday())
-    this_week = [workout for workout in workouts if workout.workout_date >= week_start]
+    preferences = training_preferences(db)
+    week_start = start_of_week(today, preferences.week_start)
+    this_week = [workout for workout in workouts if week_start <= workout.workout_date <= today]
     measurements = list(
         db.scalars(select(BodyMeasurement).order_by(BodyMeasurement.measurement_date))
     )
@@ -1611,11 +1614,10 @@ def dashboard(db: DbSession) -> DashboardRead:
     preferences = training_preferences(db)
     cardio_sessions = list(db.scalars(select(CardioSession)))
     cardio_week_start = start_of_week(today, preferences.week_start)
-    cardio_week_end = cardio_week_start + timedelta(days=6)
     cardio_minutes_this_week = sum(
         session.duration_minutes
         for session in cardio_sessions
-        if cardio_week_start <= session.session_date <= cardio_week_end
+        if cardio_week_start <= session.session_date <= today
     )
     muscle_totals = muscle_volume(workouts, week_start, today)
     return DashboardRead(
@@ -1630,7 +1632,7 @@ def dashboard(db: DbSession) -> DashboardRead:
         weekly_days=weekly_days,
         recommendation=workout_recommendation(workouts, today, training_mode),
         training_mode=training_mode,
-        weekly_goal=weekly_goal(workouts, today, training_mode),
+        weekly_goal=weekly_goal(workouts, today, training_mode, preferences.week_start),
         muscle_volume=[
             MuscleVolumeRead(muscle_name=name, set_total=value)
             for name, value in sorted(muscle_totals.items())

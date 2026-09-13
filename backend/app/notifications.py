@@ -4,7 +4,9 @@ import asyncio
 import base64
 import json
 import logging
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from threading import RLock
 from typing import TYPE_CHECKING
 
 from cryptography.hazmat.primitives import serialization
@@ -13,7 +15,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from .config import Settings
-from .models import PushSubscription
+from .models import ActiveWorkoutReminder, PushSubscription
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -62,12 +64,12 @@ def send_push_notification(
     endpoint: str | None = None,
     url: str = "/",
     tag: str | None = None,
-) -> None:
+) -> bool:
     try:
         from pywebpush import WebPushException, webpush
     except ImportError:
         logger.warning("Push notification skipped because pywebpush is not installed")
-        return
+        return False
 
     key_path = settings.web_push_vapid_private_key_path
     _vapid_private_key(key_path)
@@ -77,6 +79,7 @@ def send_push_notification(
             query = query.where(PushSubscription.endpoint == endpoint)
         subscriptions = list(db.scalars(query))
 
+    delivered = False
     stale_ids: list[str] = []
     for subscription in subscriptions:
         try:
@@ -88,7 +91,9 @@ def send_push_notification(
                 data=json.dumps({"title": title, "body": body, "url": url, "tag": tag}),
                 vapid_private_key=str(key_path),
                 vapid_claims={"sub": settings.web_push_contact_email},
+                timeout=10,
             )
+            delivered = True
         except WebPushException as error:
             response = getattr(error, "response", None)
             if response is not None and response.status_code in {404, 410}:
@@ -100,6 +105,91 @@ def send_push_notification(
         with session_factory() as db:
             db.execute(delete(PushSubscription).where(PushSubscription.id.in_(stale_ids)))
             db.commit()
+
+    return delivered
+
+
+class ActiveWorkoutReminderScheduler:
+    def __init__(self, session_factory: Callable[[], Session], settings: Settings) -> None:
+        self.session_factory = session_factory
+        self.settings = settings
+        self._task: asyncio.Task[None] | None = None
+        self._lock = RLock()
+
+    def start(self) -> None:
+        self._task = asyncio.create_task(self._run())
+
+    async def stop(self) -> None:
+        if self._task:
+            self._task.cancel()
+            await asyncio.gather(self._task, return_exceptions=True)
+
+    def schedule(self, *, endpoint: str, timer_id: str, started_at: float) -> None:
+        with self._lock, self.session_factory() as db:
+            reminder = db.get(ActiveWorkoutReminder, endpoint)
+            if reminder and reminder.timer_id == timer_id:
+                return  # Reconnecting must not postpone or repeat the same reminder.
+            if reminder is None:
+                reminder = ActiveWorkoutReminder(endpoint=endpoint)
+                db.add(reminder)
+            reminder.timer_id = timer_id
+            reminder.due_at = datetime.fromtimestamp(started_at, UTC) + timedelta(hours=2)
+            reminder.delivered = False
+            reminder.cancelled = False
+            db.commit()
+
+    def cancel(self, *, endpoint: str, timer_id: str | None = None) -> None:
+        with self._lock, self.session_factory() as db:
+            reminder = db.get(ActiveWorkoutReminder, endpoint)
+            if reminder and (timer_id is None or reminder.timer_id == timer_id):
+                reminder.cancelled = True
+                db.commit()
+
+    def deliver_due(self) -> None:
+        with self._lock, self.session_factory() as db:
+            reminders = list(
+                db.scalars(
+                    select(ActiveWorkoutReminder).where(
+                        ActiveWorkoutReminder.due_at <= datetime.now(UTC),
+                        ActiveWorkoutReminder.delivered.is_(False),
+                        ActiveWorkoutReminder.cancelled.is_(False),
+                    )
+                )
+            )
+            for reminder in reminders:
+                if (
+                    db.scalar(
+                        select(PushSubscription.id).where(
+                            PushSubscription.endpoint == reminder.endpoint
+                        )
+                    )
+                    is None
+                ):
+                    reminder.cancelled = True
+                    db.commit()
+                    continue
+                delivered = send_push_notification(
+                    self.session_factory,
+                    self.settings,
+                    title="Workout still active",
+                    body=(
+                        "Your workout has been running for 2 hours. Still training? "
+                        "Finish and save it when you're done."
+                    ),
+                    endpoint=reminder.endpoint,
+                    url="/#log",
+                    tag="active-workout",
+                )
+                reminder.delivered = delivered
+                db.commit()
+
+    async def _run(self) -> None:
+        while True:
+            try:
+                await asyncio.to_thread(self.deliver_due)
+            except Exception:
+                logger.exception("Could not deliver active workout reminders")
+            await asyncio.sleep(15)
 
 
 class RestTimerNotificationScheduler:

@@ -107,6 +107,22 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     }),
+  scheduleActiveWorkoutReminder: (payload: {
+    endpoint: string;
+    timer_id: string;
+    started_at: number;
+  }) =>
+    request<void>('/api/notifications/push/active-workout', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+  cancelActiveWorkoutReminder: (payload: { endpoint: string; timer_id: string }) =>
+    request<void>('/api/notifications/push/active-workout/cancel', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
   listSessions: () => request<WorkoutSession[]>('/api/sessions'),
   listExercises: () => request<Exercise[]>('/api/exercises'),
   createExercise: (payload: ExerciseCreateInput) =>

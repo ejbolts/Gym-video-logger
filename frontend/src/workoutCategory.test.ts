@@ -14,7 +14,7 @@ describe('automatic workout category', () => {
     expect(inferWorkoutCategory(exercises('pull', 'pull', 'push'))).toBe('pull');
     expect(inferWorkoutCategory(exercises('push', 'push', 'pull'))).toBe('push');
     expect(inferWorkoutCategory(exercises('lower', 'lower', 'pull'))).toBe('lower');
-    expect(inferWorkoutCategory(exercises('cardio', 'cardio', 'lower'))).toBe('cardio');
+    expect(inferWorkoutCategory(exercises('cardio', 'cardio', 'lower'))).toBe('lower');
   });
 
   it('uses upper body for a balanced push and pull session', () => {

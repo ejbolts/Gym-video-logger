@@ -114,6 +114,10 @@ On the installed phone PWA, open the app through its Tailscale HTTPS address and
 
 The workout logger uses the same subscription for rest-timer alerts. Start a rest timer and tap **Alert** on its compact top bar once; subsequent rest timers notify that phone automatically, including while the PWA is backgrounded or the screen is locked. Extending or skipping the visible timer reschedules or cancels its pending notification.
 
+With Phone alerts enabled, an active workout also schedules one reminder at two hours. The server stores this reminder so it survives restarts and can notify a backgrounded phone. Saving or cancelling the workout cancels its reminder; if the phone is offline, cancellation retries when it reconnects. Open the updated app once to register an existing workout's reminder. Upgrade to migration `0019_active_workout_reminders` before restarting the backend. A workout left running can be saved with **Actual duration (minutes)**; the correction stays in its local draft until saved.
+
+**Weekly cardio (all)** includes every cardio session, whereas the **Zone 2 cardio** goal includes only sessions marked as qualifying for Zone 2. Weekly dashboard totals and goals follow the saved week-start preference and exclude future entries. A Sunday start means Sunday through Saturday.
+
 Mixed portrait and landscape clips are normalized to a shared 1920x1080, 30 FPS MP4 canvas before stitching. Each clip retains its original aspect ratio: portrait clips are pillarboxed and wide clips are letterboxed where necessary. This avoids distortion and makes the concat step reliable; a single YouTube video cannot safely change its encoded frame dimensions mid-playback.
 
 ## Checks

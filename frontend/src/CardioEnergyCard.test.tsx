@@ -28,41 +28,12 @@ const week: CardioEnergyPeriod = {
 };
 
 describe('cardio energy card', () => {
-  it('compares all cardio performance metrics across the requested ranges', () => {
+  it('starts with the comparison details minimized', () => {
     const markup = renderToStaticMarkup(<CardioEnergyCard summaries={[week]} />);
-    expect(markup).toContain('≈ 200 g');
-    expect(markup).toContain('1,540 kcal');
-    expect(markup).toContain('↑ 340 kcal vs prior');
-    expect(markup).toContain('↑ 44 g vs prior');
-    expect(markup).toContain('3 of 4 sessions logged');
-    expect(markup).toContain('142 bpm');
-    expect(markup).toContain('18.25 km');
-    expect(markup).toContain('9.4 km/h');
-    expect(markup).toContain('7.5%');
-    expect(markup).toContain('Compared with');
-    expect(markup).toContain('not measured fat burned or weight loss');
-    for (const label of [
-      'This week',
-      'This month',
-      '3 months',
-      '6 months',
-      'This year',
-      'All time',
-    ]) {
-      expect(markup).toContain(label);
-    }
-  });
-  it('keeps unknown calories distinct from zero', () => {
-    const unknown = renderToStaticMarkup(
-      <CardioEnergyCard summaries={[{ ...week, logged_sessions: 0, calories_kcal: 0 }]} />,
-    );
-    expect(unknown).toContain('No calories logged');
-    expect(unknown).not.toContain('≈ 0 g');
-    const zero = renderToStaticMarkup(
-      <CardioEnergyCard summaries={[{ ...week, logged_sessions: 1, calories_kcal: 0 }]} />,
-    );
-    expect(zero).toContain('≈ 0 g');
-    expect(zero).toContain('0 kcal');
+    expect(markup).toContain('aria-expanded="false"');
+    expect(markup).toContain('Show details +');
+    expect(markup).not.toContain('1,540 kcal');
+    expect(markup).not.toContain('How comparisons work');
   });
   it('tolerates a cached dashboard from before calorie tracking', () => {
     expect(renderToStaticMarkup(<CardioEnergyCard summaries={undefined} />)).toBe('');

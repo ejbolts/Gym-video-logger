@@ -1,3 +1,4 @@
+import { useActiveWorkoutReminder } from './activeWorkoutReminder';
 import { Fragment, startTransition, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, FormEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
@@ -92,6 +93,7 @@ import { WorkoutHeaderMeta } from './WorkoutRestTimer';
 import {
   clearActiveWorkoutDraft,
   readActiveWorkoutDraft,
+  savedWorkoutMatchesOldDraft,
   writeActiveWorkoutDraft,
 } from './workoutDraft';
 import {
@@ -501,6 +503,18 @@ export function App() {
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
   const [backgroundActivities, setBackgroundActivities] = useState<BackgroundActivity[]>([]);
+  useActiveWorkoutReminder(activeWorkoutStartedAt);
+  useEffect(() => {
+    if (loading || activeWorkoutStartedAt === null) return;
+    const draft = readActiveWorkoutDraft();
+    if (!draft || !workouts.some((workout) => savedWorkoutMatchesOldDraft(draft, workout))) return;
+    clearActiveWorkoutDraft();
+    setActiveWorkoutStartedAt(null);
+    if (tab === 'log') {
+      navigationActionRef.current = 'replace';
+      setTabState('dashboard');
+    }
+  }, [activeWorkoutStartedAt, loading, tab, workouts]);
   const activeWorkoutDate =
     activeWorkoutStartedAt === null
       ? null
@@ -853,7 +867,7 @@ export function App() {
         ? historySection === 'progress'
           ? { title: 'Exercise progress', subtitle: 'Strength trends • personal bests' }
           : historySection === 'cardio'
-            ? { title: 'Cardio', subtitle: 'Sessions • Zone 2 • weekly targets' }
+            ? { title: 'Cardio', subtitle: 'Sessions • total time • progress' }
             : { title: 'Workouts', subtitle: 'History • exercise progress • cardio' }
         : tab === 'settings'
           ? { title: 'Settings', subtitle: 'Timers • notifications • data' }
@@ -1947,6 +1961,9 @@ function WorkoutLogger({
     initialWorkout?.category ?? restoredDraft?.category ?? recommendation?.category ?? 'push',
   );
   const [notes, setNotes] = useState(initialWorkout?.notes ?? restoredDraft?.notes ?? '');
+  const [durationOverrideMinutes, setDurationOverrideMinutes] = useState<number | null>(
+    restoredDraft?.durationOverrideMinutes ?? null,
+  );
   const [editedDurationMinutes, setEditedDurationMinutes] = useState(
     initialWorkout?.duration_minutes ?? 0,
   );
@@ -2043,6 +2060,7 @@ function WorkoutLogger({
         version: 1,
         startedAt,
         updatedAt: Date.now(),
+        durationOverrideMinutes,
         name,
         workoutDate,
         category,
@@ -2068,7 +2086,16 @@ function WorkoutLogger({
       window.removeEventListener('pagehide', persistDraft);
       document.removeEventListener('visibilitychange', persistWhenHidden);
     };
-  }, [category, initialWorkout, movements, name, notes, startedAt, workoutDate]);
+  }, [
+    category,
+    initialWorkout,
+    movements,
+    name,
+    notes,
+    startedAt,
+    workoutDate,
+    durationOverrideMinutes,
+  ]);
 
   useEffect(() => {
     if (!pushNotificationsSupported()) return;
@@ -2428,6 +2455,12 @@ function WorkoutLogger({
       setError('Enter both a workout start time and end time, or leave both blank.');
       return;
     }
+    if (!initialWorkout && durationOverrideMinutes === null && elapsed > 1440 * 60) {
+      setError(
+        'This workout was left running for more than 24 hours. Enter its actual duration below before saving.',
+      );
+      return;
+    }
     setSaving(true);
     setError(null);
     const completedIdentity = finalizeWorkoutIdentity(
@@ -2445,7 +2478,7 @@ function WorkoutLogger({
         notes: notes.trim() || null,
         duration_minutes: initialWorkout
           ? editedDurationMinutes
-          : Math.max(1, Math.round(elapsed / 60)),
+          : (durationOverrideMinutes ?? Math.max(1, Math.round(elapsed / 60))),
         start_time: initialWorkout && startTime && endTime ? startTime : null,
         end_time: initialWorkout && startTime && endTime ? endTime : null,
         movements: movements.map((movement) => ({
@@ -2496,7 +2529,11 @@ function WorkoutLogger({
     (total, item) => total + (item.weight_kg ?? 0) * (item.reps ?? 0),
     0,
   );
-  const displayedDurationSeconds = initialWorkout ? editedDurationMinutes * 60 : elapsed;
+  const displayedDurationSeconds = initialWorkout
+    ? editedDurationMinutes * 60
+    : durationOverrideMinutes !== null
+      ? durationOverrideMinutes * 60
+      : elapsed;
   const openNameEditor = () => {
     setNameDraft(name);
     setNameEditorOpen(true);
@@ -2683,6 +2720,29 @@ function WorkoutLogger({
             </fieldset>
           )}
         </div>
+        {!initialWorkout && (
+          <label>
+            Actual duration (minutes)
+            <input
+              type="number"
+              min="1"
+              max="1440"
+              step="1"
+              value={durationOverrideMinutes ?? ''}
+              placeholder="Use live timer"
+              onChange={(event) =>
+                setDurationOverrideMinutes(
+                  event.target.value === ''
+                    ? null
+                    : Math.min(1440, Math.max(1, Math.round(Number(event.target.value) || 1))),
+                )
+              }
+            />
+            <small>
+              Left the timer running? Enter the duration to save, or leave blank to use the timer.
+            </small>
+          </label>
+        )}
         <div className="workout-summary-metrics" aria-label="Workout totals">
           <span>
             <small>Time</small>
@@ -6433,12 +6493,12 @@ function SettingsScreen({
             <strong>Phone alerts</strong>
             <small>
               {notificationStatus === 'enabled'
-                ? 'Rest timer and completed-video alerts are enabled'
+                ? 'Rest timers, 2-hour workout reminders, and completed-video alerts are enabled'
                 : notificationStatus === 'unsupported'
                   ? 'Install the PWA to enable notifications'
                   : notificationStatus === 'blocked'
                     ? 'Blocked in phone settings'
-                    : 'Rest timer and completed-video alerts are disabled'}
+                    : 'Rest timers, 2-hour workout reminders, and completed-video alerts are disabled'}
             </small>
           </div>
           <button
@@ -7693,7 +7753,12 @@ function CardioScreen({
   onOpenWorkout: (workoutId: string) => void;
 }) {
   const cardioExercises = exercises.filter((exercise) => exercise.kind === 'cardio');
-  const defaultExercise = cardioExercises[0] ?? null;
+  const defaultExercise =
+    cardioExercises.find(
+      (exercise) => exercise.name.toLocaleLowerCase() === 'incline treadmill walking',
+    ) ??
+    cardioExercises[0] ??
+    null;
   const empty: CardioSessionInput = {
     session_date: localDate(),
     exercise_id: defaultExercise?.id ?? null,
@@ -7762,6 +7827,27 @@ function CardioScreen({
   }
   if (!overview) return <LoadingState />;
   const week = overview.current_week;
+  const today = localDate();
+  const currentWeekSessions = overview.sessions.filter(
+    (session) =>
+      week.week_start <= session.session_date &&
+      session.session_date <= week.week_end &&
+      session.session_date <= today,
+  );
+  const currentWeekMinutes = currentWeekSessions.reduce(
+    (total, session) => total + session.duration_minutes,
+    0,
+  );
+  const previousWeekTotals = overview.previous_weeks.map((item) => ({
+    ...item,
+    completed_minutes: overview.sessions.reduce(
+      (total, session) =>
+        item.week_start <= session.session_date && session.session_date <= item.week_end
+          ? total + session.duration_minutes
+          : total,
+      0,
+    ),
+  }));
   return (
     <div className="cardio-screen">
       {error && <p className="inline-error">{error}</p>}
@@ -7778,86 +7864,6 @@ function CardioScreen({
           }}
         />
       )}
-      <section className={`panel zone2-card ${week.complete ? 'complete' : ''}`}>
-        <div className="panel-heading">
-          <div>
-            <p className="section-kicker">THIS WEEK</p>
-            <h2>Zone 2 cardio</h2>
-          </div>
-          <strong>
-            {week.completed_minutes} / {week.goal_minutes} min
-          </strong>
-        </div>
-        <div className="zone2-track">
-          <i style={{ width: `${week.percentage}%` }} />
-        </div>
-        <p>
-          {week.complete ? 'Weekly goal complete.' : `${week.remaining_minutes} minutes remaining.`}
-        </p>
-        <div className="training-preferences-grid">
-          <label>
-            Weekly Zone 2 goal
-            <input
-              type="number"
-              min="1"
-              value={overview.preferences.zone2_goal_minutes}
-              onChange={(event) =>
-                setOverview({
-                  ...overview,
-                  preferences: {
-                    ...overview.preferences,
-                    zone2_goal_minutes: Number(event.target.value),
-                  },
-                })
-              }
-            />
-          </label>
-          <label>
-            Weight unit
-            <select
-              value={overview.preferences.preferred_weight_unit}
-              onChange={(event) =>
-                setOverview({
-                  ...overview,
-                  preferences: {
-                    ...overview.preferences,
-                    preferred_weight_unit: event.target.value as 'kg' | 'lb',
-                  },
-                })
-              }
-            >
-              <option value="kg">Kilograms</option>
-              <option value="lb">Pounds</option>
-            </select>
-          </label>
-          <label>
-            Week starts
-            <select
-              value={overview.preferences.week_start}
-              onChange={(event) =>
-                setOverview({
-                  ...overview,
-                  preferences: {
-                    ...overview.preferences,
-                    week_start: event.target.value as 'monday' | 'sunday' | 'saturday',
-                  },
-                })
-              }
-            >
-              <option value="monday">Monday</option>
-              <option value="sunday">Sunday</option>
-              <option value="saturday">Saturday</option>
-            </select>
-          </label>
-          <button
-            onClick={() =>
-              void api.updateTrainingPreferences(overview.preferences).then(load).then(onDataChange)
-            }
-          >
-            Save preferences
-          </button>
-        </div>
-      </section>
       <section className="panel cardio-form">
         <h2>{editingId ? 'Edit cardio session' : 'Log cardio session'}</h2>
         <div className="cardio-fields">
@@ -8022,6 +8028,67 @@ function CardioScreen({
           </button>
         )}
       </section>
+      <section className="panel total-cardio-card">
+        <div className="panel-heading">
+          <div>
+            <h2>Total cardio time</h2>
+            <small>
+              {prettyDate(week.week_start)} – {prettyDate(week.week_end)}
+            </small>
+          </div>
+          <strong>{currentWeekMinutes} min</strong>
+        </div>
+        <p>
+          {currentWeekSessions.length} {currentWeekSessions.length === 1 ? 'session' : 'sessions'}{' '}
+          logged.
+        </p>
+        <div className="training-preferences-grid">
+          <label>
+            Weight unit
+            <select
+              value={overview.preferences.preferred_weight_unit}
+              onChange={(event) =>
+                setOverview({
+                  ...overview,
+                  preferences: {
+                    ...overview.preferences,
+                    preferred_weight_unit: event.target.value as 'kg' | 'lb',
+                  },
+                })
+              }
+            >
+              <option value="kg">Kilograms</option>
+              <option value="lb">Pounds</option>
+            </select>
+          </label>
+          <label>
+            Week starts
+            <select
+              value={overview.preferences.week_start}
+              onChange={(event) =>
+                setOverview({
+                  ...overview,
+                  preferences: {
+                    ...overview.preferences,
+                    week_start: event.target.value as 'monday' | 'sunday' | 'saturday',
+                  },
+                })
+              }
+            >
+              <option value="monday">Monday</option>
+              <option value="sunday">Sunday</option>
+              <option value="saturday">Saturday</option>
+            </select>
+          </label>
+          <button
+            onClick={() =>
+              void api.updateTrainingPreferences(overview.preferences).then(load).then(onDataChange)
+            }
+          >
+            Save preferences
+          </button>
+        </div>
+      </section>
       <section className="panel cardio-history">
         <h2>Cardio history</h2>
         {overview.sessions.map((session) => (
@@ -8108,7 +8175,7 @@ function CardioScreen({
       </section>
       <section className="panel previous-zone2">
         <h2>Previous weeks</h2>
-        {overview.previous_weeks.map((item) => (
+        {previousWeekTotals.map((item) => (
           <div key={item.week_start}>
             <span>{prettyDate(item.week_start)}</span>
             <strong>{item.completed_minutes} min</strong>

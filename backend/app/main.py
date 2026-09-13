@@ -18,6 +18,7 @@ from .database import Base, SessionLocal, engine, get_db
 from .frontend import FrontendFiles
 from .models import Clip, ClipUploadStatus, PushSubscription, SessionStatus, WorkoutSession
 from .notifications import (
+    ActiveWorkoutReminderScheduler,
     RestTimerNotificationScheduler,
     push_available,
     send_push_notification,
@@ -25,6 +26,7 @@ from .notifications import (
 )
 from .processing import ProcessingValidationError, SessionProcessor, validate_batch_ready
 from .schemas import (
+    ActiveWorkoutReminderCreate,
     ClipPatch,
     ClipRead,
     HealthRead,
@@ -104,12 +106,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             logger.info("Removed abandoned partial uploads", extra={"count": removed})
         processor = SessionProcessor(SessionLocal, settings)
         rest_timer_notifications = RestTimerNotificationScheduler(SessionLocal, settings)
+        workout_reminders = ActiveWorkoutReminderScheduler(SessionLocal, settings)
+        app.state.workout_reminders = workout_reminders
+        workout_reminders.start()
         app.state.processor = processor
         app.state.rest_timer_notifications = rest_timer_notifications
         await processor.start()
         try:
             yield
         finally:
+            await workout_reminders.stop()
             await rest_timer_notifications.stop()
             await processor.stop()
 
@@ -180,6 +186,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             db.delete(subscription)
             db.commit()
         request.app.state.rest_timer_notifications.cancel_endpoint(payload.endpoint)
+        request.app.state.workout_reminders.cancel(endpoint=payload.endpoint)
 
     @app.post("/api/notifications/push/test", status_code=204)
     def send_test_push_notification() -> None:
@@ -209,6 +216,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request: Request,
     ) -> None:
         request.app.state.rest_timer_notifications.cancel(**payload.model_dump())
+
+    @app.put("/api/notifications/push/active-workout", status_code=204)
+    def schedule_workout_reminder(
+        payload: ActiveWorkoutReminderCreate,
+        request: Request,
+        db: Session = Depends(get_db),
+    ) -> None:
+        if (
+            db.scalar(
+                select(PushSubscription.id).where(PushSubscription.endpoint == payload.endpoint)
+            )
+            is None
+        ):
+            raise api_error(404, "push_subscription_not_found", "This phone is not subscribed.")
+        request.app.state.workout_reminders.schedule(**payload.model_dump())
+
+    @app.post("/api/notifications/push/active-workout/cancel", status_code=204)
+    def cancel_workout_reminder(
+        payload: RestTimerNotificationCancel,
+        request: Request,
+    ) -> None:
+        request.app.state.workout_reminders.cancel(**payload.model_dump())
 
     @app.post("/api/sessions", response_model=SessionRead, status_code=201)
     def create_session(payload: SessionCreate, db: Session = Depends(get_db)) -> WorkoutSession:

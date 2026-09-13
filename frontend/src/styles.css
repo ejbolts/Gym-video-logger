@@ -6849,28 +6849,21 @@ body,
   display: grid;
   gap: 0.8rem;
 }
-.zone2-card,
+.total-cardio-card,
 .cardio-form,
 .cardio-history,
 .previous-zone2,
 .body-goal-panel {
   padding: 1rem;
 }
-.zone2-card > p {
+.total-cardio-card > p,
+.total-cardio-card small {
   color: var(--muted-ink);
-}
-.zone2-card > label {
-  display: grid;
-  grid-template-columns: 1fr 6rem auto;
-  align-items: center;
-  gap: 0.5rem;
-  margin-top: 0.8rem;
-  font-size: 0.7rem;
 }
 
 .training-preferences-grid {
   display: grid;
-  grid-template-columns: 1.2fr 1fr 1fr auto;
+  grid-template-columns: 1fr 1fr auto;
   align-items: end;
   gap: 0.5rem;
   margin-top: 0.8rem;
@@ -6893,8 +6886,8 @@ body,
   background: #0f1412;
   color: var(--ink);
 }
-.zone2-card input,
-.zone2-card button,
+.total-cardio-card select,
+.total-cardio-card button,
 .cardio-fields input,
 .cardio-fields select,
 .cardio-form textarea,
@@ -7116,12 +7109,6 @@ body,
   }
   .set-order-actions button {
     flex: 1;
-  }
-  .zone2-card > label {
-    grid-template-columns: 1fr 5rem;
-  }
-  .zone2-card > label button {
-    grid-column: 1 / -1;
   }
   .training-preferences-grid {
     grid-template-columns: 1fr 1fr;
@@ -11426,11 +11413,22 @@ html {
   border-radius: 12px;
   background: linear-gradient(135deg, #102b39, #172024 70%);
 }
-.cardio-energy-card > header {
+.cardio-progress-toggle {
+  width: 100%;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 0.6rem;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.cardio-progress-toggle:focus-visible {
+  outline: 2px solid #9bddff;
+  outline-offset: 0.35rem;
 }
 .cardio-energy-card h2 {
   margin: 0;

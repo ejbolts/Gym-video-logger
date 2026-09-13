@@ -214,6 +214,16 @@ class AppSetting(Base):
     value: Mapped[str] = mapped_column(Text)
 
 
+class ActiveWorkoutReminder(Base):
+    __tablename__ = "active_workout_reminders"
+
+    endpoint: Mapped[str] = mapped_column(String(2000), primary_key=True)
+    timer_id: Mapped[str] = mapped_column(String(100))
+    due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    delivered: Mapped[bool] = mapped_column(Boolean, default=False)
+    cancelled: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
 class TrainingPhase(Base):
     __tablename__ = "training_phases"
 

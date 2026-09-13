@@ -110,3 +110,7 @@ class RestTimerNotificationCreate(BaseModel):
 class RestTimerNotificationCancel(BaseModel):
     endpoint: str = Field(min_length=1, max_length=2_000)
     timer_id: str = Field(min_length=1, max_length=100)
+
+
+class ActiveWorkoutReminderCreate(RestTimerNotificationCancel):
+    started_at: float = Field(gt=0, le=253402293599)
