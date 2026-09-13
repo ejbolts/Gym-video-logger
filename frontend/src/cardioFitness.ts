@@ -106,7 +106,7 @@ export function cardioWorkoutContext(session: CardioSession): CardioWorkoutConte
 }
 
 function contextLabel(context: CardioWorkoutContext): string {
-  return context === 'workout_plus_cardio' ? 'Workout + cardio' : 'Pure cardio';
+  return context === 'workout_plus_cardio' ? 'After workout' : 'Cardio only';
 }
 
 function activityFamily(

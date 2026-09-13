@@ -7003,7 +7003,12 @@ body,
   margin-bottom: 0.45rem;
 }
 .cardio-history-header h2 {
-  margin-bottom: 0.2rem;
+  margin: 0;
+}
+.cardio-history-title {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
 }
 .cardio-history-filters {
   display: grid;
@@ -7043,7 +7048,6 @@ body,
 .cardio-context-badge {
   display: inline-flex;
   width: fit-content;
-  margin-bottom: 0.35rem;
   border: 1px solid #3c5764;
   border-radius: 999px;
   padding: 0.16rem 0.42rem;
@@ -7057,6 +7061,16 @@ body,
   background: rgb(245 158 11 / 8%);
   color: #f4c36b;
 }
+.cardio-session-title-row {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+}
+.cardio-session-title-row > strong,
+.cardio-session-title-row > .cardio-history-workout-link {
+  min-width: 0;
+}
 .cardio-history strong,
 .cardio-history small {
   display: block;
@@ -7064,6 +7078,14 @@ body,
 .cardio-history small {
   margin-top: 0.15rem;
   color: var(--muted-ink);
+}
+.cardio-history .cardio-session-date {
+  margin-top: 0.42rem;
+  color: #aeb9be;
+  font-weight: 750;
+}
+.cardio-history .cardio-session-summary {
+  margin-top: 0.08rem;
 }
 .cardio-history button,
 .previous-zone2 button {
@@ -7090,11 +7112,6 @@ body,
   outline: 1px solid currentColor;
   outline-offset: 3px;
 }
-.cardio-history .cardio-session-context-note {
-  margin-top: 0.35rem;
-  color: #f0c36f;
-  line-height: 1.45;
-}
 .cardio-history .cardio-session-fitness {
   width: fit-content;
   margin-top: 0.38rem;
@@ -7107,6 +7124,64 @@ body,
   border-left-color: #53656e;
   color: #83939b;
   font-weight: 650;
+}
+.info-popover {
+  position: relative;
+  display: inline-flex;
+  margin-left: 0.28rem;
+  vertical-align: middle;
+}
+.cardio-history-title > .info-popover {
+  margin-left: 0;
+}
+.cardio-history .info-popover > button {
+  width: 1.15rem;
+  height: 1.15rem;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid #52636c;
+  border-radius: 50%;
+  padding: 0;
+  background: #111a1e;
+  color: #aebdc4;
+  font-family: ui-serif, Georgia, serif;
+  font-size: 0.63rem;
+  font-weight: 900;
+  line-height: 1;
+  cursor: help;
+}
+.cardio-history .info-popover > button[aria-expanded='true'],
+.cardio-history .info-popover > button:hover,
+.cardio-history .info-popover > button:focus-visible {
+  border-color: #34b8f4;
+  color: #70d5ff;
+  outline: none;
+}
+.info-popover-content {
+  position: absolute;
+  z-index: 20;
+  bottom: calc(100% + 0.45rem);
+  left: 50%;
+  width: max-content;
+  max-width: min(17rem, calc(100vw - 2rem));
+  display: none;
+  transform: translateX(-50%);
+  border: 1px solid #42545d;
+  border-radius: 7px;
+  padding: 0.55rem 0.65rem;
+  background: #0d1518;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 42%);
+  color: #c3cdd1;
+  font-size: 0.62rem;
+  font-weight: 550;
+  line-height: 1.45;
+  text-align: left;
+  white-space: normal;
+}
+.info-popover.open > .info-popover-content,
+.info-popover:hover > .info-popover-content,
+.info-popover:focus-within > .info-popover-content {
+  display: block;
 }
 @media (max-width: 680px) {
   .cardio-history-header {

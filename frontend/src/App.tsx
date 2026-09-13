@@ -1,5 +1,5 @@
 import { useActiveWorkoutReminder } from './activeWorkoutReminder';
-import { Fragment, startTransition, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, startTransition, useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, FormEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from './api';
@@ -19,6 +19,7 @@ import type {
   TrackedWorkout,
   TrainingMode,
   TrainingPhase,
+  TrainingPreferences,
   WorkoutCategory,
   WorkoutInput,
   WorkoutRecommendation,
@@ -6294,6 +6295,31 @@ function ExportTimeFrame({
   );
 }
 
+function InfoPopover({ label, children }: { label: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const tooltipId = useId();
+
+  return (
+    <span className={`info-popover${open ? ' open' : ''}`} onMouseLeave={() => setOpen(false)}>
+      <button
+        type="button"
+        aria-label={label}
+        aria-expanded={open}
+        aria-describedby={open ? tooltipId : undefined}
+        onClick={() => setOpen((current) => !current)}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') setOpen(false);
+        }}
+      >
+        i
+      </button>
+      <span id={tooltipId} className="info-popover-content" role="tooltip">
+        {children}
+      </span>
+    </span>
+  );
+}
+
 function SettingsScreen({
   workouts,
   measurements,
@@ -6332,6 +6358,21 @@ function SettingsScreen({
   );
   const [notificationMessage, setNotificationMessage] = useState<string | null>(null);
   const [notificationError, setNotificationError] = useState<string | null>(null);
+  const [trainingPreferences, setTrainingPreferences] = useState<TrainingPreferences | null>(null);
+  const [trainingPreferencesStatus, setTrainingPreferencesStatus] = useState<string | null>(null);
+  const [trainingPreferencesError, setTrainingPreferencesError] = useState<string | null>(null);
+  const [savingTrainingPreferences, setSavingTrainingPreferences] = useState(false);
+
+  useEffect(() => {
+    void api
+      .getTrainingPreferences()
+      .then(setTrainingPreferences)
+      .catch((reason) =>
+        setTrainingPreferencesError(
+          reason instanceof Error ? reason.message : 'Could not load training preferences.',
+        ),
+      );
+  }, []);
 
   useEffect(() => {
     if (!pushNotificationsSupported()) return;
@@ -6382,6 +6423,26 @@ function SettingsScreen({
       setNotificationError(
         reason instanceof Error ? reason.message : 'Could not enable phone notifications.',
       );
+    }
+  }
+
+  async function saveTrainingPreferences() {
+    if (!trainingPreferences || savingTrainingPreferences) return;
+    setSavingTrainingPreferences(true);
+    setTrainingPreferencesStatus(null);
+    setTrainingPreferencesError(null);
+    try {
+      const saved = await api.updateTrainingPreferences(trainingPreferences);
+      setTrainingPreferences(saved);
+      await onDataChange();
+      window.dispatchEvent(new Event('training-preferences-updated'));
+      setTrainingPreferencesStatus('Training preferences saved.');
+    } catch (reason) {
+      setTrainingPreferencesError(
+        reason instanceof Error ? reason.message : 'Could not save training preferences.',
+      );
+    } finally {
+      setSavingTrainingPreferences(false);
     }
   }
 
@@ -6456,7 +6517,7 @@ function SettingsScreen({
         <div>
           <p className="section-kicker">APP SETTINGS</p>
           <h1>Settings</h1>
-          <p>Manage notifications, imports, exports, and sample data in one place.</p>
+          <p>Manage training preferences, notifications, imports, exports, and sample data.</p>
         </div>
       </div>
 
@@ -6526,6 +6587,70 @@ function SettingsScreen({
         {notificationError && (
           <p className="inline-error" role="alert">
             {notificationError}
+          </p>
+        )}
+      </section>
+
+      <section className="settings-panel panel" aria-labelledby="training-preferences-title">
+        <header>
+          <div>
+            <p className="section-kicker">TRAINING</p>
+            <h2 id="training-preferences-title">Training preferences</h2>
+          </div>
+        </header>
+        <p>Choose the units and weekly schedule used throughout the app.</p>
+        {trainingPreferences && (
+          <div className="training-preferences-grid">
+            <label>
+              Weight unit
+              <select
+                value={trainingPreferences.preferred_weight_unit}
+                onChange={(event) => {
+                  setTrainingPreferences({
+                    ...trainingPreferences,
+                    preferred_weight_unit: event.target.value as 'kg' | 'lb',
+                  });
+                  setTrainingPreferencesStatus(null);
+                }}
+              >
+                <option value="kg">Kilograms</option>
+                <option value="lb">Pounds</option>
+              </select>
+            </label>
+            <label>
+              Week starts
+              <select
+                value={trainingPreferences.week_start}
+                onChange={(event) => {
+                  setTrainingPreferences({
+                    ...trainingPreferences,
+                    week_start: event.target.value as 'monday' | 'sunday' | 'saturday',
+                  });
+                  setTrainingPreferencesStatus(null);
+                }}
+              >
+                <option value="monday">Monday</option>
+                <option value="sunday">Sunday</option>
+                <option value="saturday">Saturday</option>
+              </select>
+            </label>
+            <button
+              type="button"
+              disabled={savingTrainingPreferences}
+              onClick={() => void saveTrainingPreferences()}
+            >
+              {savingTrainingPreferences ? 'Saving…' : 'Save preferences'}
+            </button>
+          </div>
+        )}
+        {trainingPreferencesStatus && (
+          <p className="training-preference-status" role="status">
+            {trainingPreferencesStatus}
+          </p>
+        )}
+        {trainingPreferencesError && (
+          <p className="inline-error" role="alert">
+            {trainingPreferencesError}
           </p>
         )}
       </section>
@@ -7796,6 +7921,9 @@ function CardioScreen({
       );
   useEffect(() => {
     void load();
+    const reloadPreferences = () => void load();
+    window.addEventListener('training-preferences-updated', reloadPreferences);
+    return () => window.removeEventListener('training-preferences-updated', reloadPreferences);
   }, []);
   async function importScreenshot(file: File) {
     if (scanning) return;
@@ -8142,64 +8270,21 @@ function CardioScreen({
           {currentWeekSessions.length} {currentWeekSessions.length === 1 ? 'session' : 'sessions'}{' '}
           logged.
         </p>
-        <div className="training-preferences-grid">
-          <label>
-            Weight unit
-            <select
-              value={overview.preferences.preferred_weight_unit}
-              onChange={(event) =>
-                setOverview({
-                  ...overview,
-                  preferences: {
-                    ...overview.preferences,
-                    preferred_weight_unit: event.target.value as 'kg' | 'lb',
-                  },
-                })
-              }
-            >
-              <option value="kg">Kilograms</option>
-              <option value="lb">Pounds</option>
-            </select>
-          </label>
-          <label>
-            Week starts
-            <select
-              value={overview.preferences.week_start}
-              onChange={(event) =>
-                setOverview({
-                  ...overview,
-                  preferences: {
-                    ...overview.preferences,
-                    week_start: event.target.value as 'monday' | 'sunday' | 'saturday',
-                  },
-                })
-              }
-            >
-              <option value="monday">Monday</option>
-              <option value="sunday">Sunday</option>
-              <option value="saturday">Saturday</option>
-            </select>
-          </label>
-          <button
-            onClick={() =>
-              void api.updateTrainingPreferences(overview.preferences).then(load).then(onDataChange)
-            }
-          >
-            Save preferences
-          </button>
-        </div>
       </section>
       <section className="panel cardio-history">
         <div className="cardio-history-header">
-          <div>
+          <div className="cardio-history-title">
             <h2>Cardio history</h2>
-            <small>Fitness scores use separate baselines for fresh and post-workout cardio.</small>
+            <InfoPopover label="How cardio fitness baselines work">
+              Fitness scores use separate baselines for cardio-only sessions and sessions performed
+              after a strength workout.
+            </InfoPopover>
           </div>
           <div className="cardio-history-filters" role="group" aria-label="Filter cardio history">
             {[
               ['all', 'All'],
-              ['pure_cardio', 'Pure cardio'],
-              ['workout_plus_cardio', 'Workout + cardio'],
+              ['pure_cardio', 'Cardio only'],
+              ['workout_plus_cardio', 'After workout'],
             ].map(([value, label]) => (
               <button
                 key={value}
@@ -8225,28 +8310,34 @@ function CardioScreen({
             normalizedActivity.includes('cycl') ||
             normalizedActivity.includes('bike') ||
             (normalizedActivity.includes('walk') && normalizedActivity.includes('treadmill'));
+          const workoutName = session.source_workout_name?.replace(/\s+workout$/i, '');
+          const pendingScoreExplanation = `Needs a three-session ${
+            workoutContext === 'workout_plus_cardio' ? 'after-workout' : 'cardio-only'
+          } baseline and complete workload and heart-rate metrics.`;
           return (
             <article key={session.id}>
               <div>
-                <span className={`cardio-context-badge ${workoutContext.replaceAll('_', '-')}`}>
-                  {workoutContext === 'workout_plus_cardio' ? 'Workout + cardio' : 'Pure cardio'}
-                </span>
-                {session.source_workout_id ? (
-                  <button
-                    type="button"
-                    className="cardio-history-workout-link"
-                    onClick={() => onOpenWorkout(session.source_workout_id!)}
-                  >
+                <div className="cardio-session-title-row">
+                  {workoutContext === 'workout_plus_cardio' && (
+                    <span className="cardio-context-badge workout-plus-cardio">After workout</span>
+                  )}
+                  {session.source_workout_id ? (
+                    <button
+                      type="button"
+                      className="cardio-history-workout-link"
+                      onClick={() => onOpenWorkout(session.source_workout_id!)}
+                    >
+                      <strong>{session.activity_type}</strong>
+                    </button>
+                  ) : (
                     <strong>{session.activity_type}</strong>
-                  </button>
-                ) : (
-                  <strong>{session.activity_type}</strong>
-                )}
-                <small>
-                  {prettyDate(session.session_date)} · {session.duration_minutes} min ·{' '}
+                  )}
+                </div>
+                <small className="cardio-session-date">{prettyDate(session.session_date)}</small>
+                <small className="cardio-session-summary">
+                  {session.duration_minutes} min ·{' '}
                   {session.zone ?? session.intensity ?? 'Unspecified'}
-                  {session.qualifies_zone2 ? ' ✓' : ''}
-                  {session.source_workout_name ? ` · ${session.source_workout_name}` : ''}
+                  {workoutName ? ` · ${workoutName}` : ''}
                 </small>
                 <small className="cardio-session-energy">
                   {session.calories_kcal == null
@@ -8272,15 +8363,16 @@ function CardioScreen({
                 </small>
                 {fitnessScore && (
                   <small className="cardio-session-fitness">
-                    Fitness {fitnessScore.score}/100 · {fitnessScore.contextLabel} baseline
+                    Fitness {fitnessScore.score}/100
                     {fitnessScore.isBaselineSession ? ' · Baseline reference' : ''}
                   </small>
                 )}
                 {!fitnessScore && supportsFitnessScore && (
                   <small className="cardio-session-fitness unavailable">
-                    Fitness score pending · needs a three-session{' '}
-                    {workoutContext === 'workout_plus_cardio' ? 'workout + cardio' : 'pure cardio'}{' '}
-                    baseline and complete workload + heart-rate metrics.
+                    Fitness score pending.
+                    <InfoPopover label="Why the fitness score is pending">
+                      {pendingScoreExplanation}
+                    </InfoPopover>
                   </small>
                 )}
               </div>
