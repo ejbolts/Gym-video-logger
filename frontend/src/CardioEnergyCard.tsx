@@ -199,7 +199,7 @@ export function CardioEnergyCard({
               </small>
             </article>
             <article>
-              <span>Fat-energy equivalent</span>
+              <span>Fat burnt</span>
               <strong>
                 {caloriesRecorded ? `≈ ${fatEnergyEquivalent(summary.calories_kcal)}` : '—'}
               </strong>
