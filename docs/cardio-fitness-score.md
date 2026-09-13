@@ -42,7 +42,7 @@ If more than one activity has enough data, calculate each activity score indepen
 
 ## Workout context
 
-The app also builds separate baselines for **pure cardio** and **workout + cardio**. A linked workout is classified as workout + cardio when it contains at least one strength movement. If the cardio movement appears after a strength movement, its history entry says “After weights.” Cardio that appears before the strength portion remains in the workout + cardio group, but does not receive the “After weights” note.
+The app also builds separate baselines for **pure cardio** and **workout + cardio**. A linked workout is classified as workout + cardio when it contains at least one strength movement.
 
 This separation avoids treating the cardiovascular cost of a fresh cardio session as directly interchangeable with cardio performed under residual lifting fatigue. Prior resistance exercise can change the metabolic demand of subsequent aerobic work, and resistance exercise can keep heart rate elevated into recovery. These effects vary by workout and person, so the draft does not apply a fixed correction factor; it compares like with like instead.
 

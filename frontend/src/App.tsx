@@ -8248,12 +8248,6 @@ function CardioScreen({
                   {session.qualifies_zone2 ? ' ✓' : ''}
                   {session.source_workout_name ? ` · ${session.source_workout_name}` : ''}
                 </small>
-                {session.performed_after_strength && (
-                  <small className="cardio-session-context-note">
-                    After weights · scored against other post-workout cardio because earlier lifting
-                    can raise fatigue and heart rate.
-                  </small>
-                )}
                 <small className="cardio-session-energy">
                   {session.calories_kcal == null
                     ? 'Calories not logged'
