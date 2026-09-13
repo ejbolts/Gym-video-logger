@@ -159,16 +159,14 @@ try {
   }
   Invoke-Alembic @('upgrade', 'head')
 
-  if (-not $Dev) {
-    Write-Host 'Building the current app for PC and phone...' -ForegroundColor Cyan
-    Push-Location $frontendRoot
-    try {
-      & $npm run build
-      if ($LASTEXITCODE -ne 0) { throw 'Could not build the current app.' }
-    }
-    finally {
-      Pop-Location
-    }
+  Write-Host 'Building the current app for PC and phone...' -ForegroundColor Cyan
+  Push-Location $frontendRoot
+  try {
+    & $npm run build
+    if ($LASTEXITCODE -ne 0) { throw 'Could not build the current app.' }
+  }
+  finally {
+    Pop-Location
   }
 
   Write-Host 'Starting FORM...' -ForegroundColor Cyan

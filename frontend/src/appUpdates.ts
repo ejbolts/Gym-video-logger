@@ -1,10 +1,22 @@
-// Activate fresh assets in the background, but never reload an open workout or upload.
-// The next navigation/reload uses the updated app shell.
+const updateSensitiveScreens = new Set(['#log', '#videos']);
+
+function canReloadForUpdate(): boolean {
+  return !updateSensitiveScreens.has(window.location.hash);
+}
+
+// Activate fresh assets in the background. Reload ordinary screens as soon as the
+// new worker takes control, while leaving workout and upload screens uninterrupted.
 export function registerAppUpdates() {
   if (!import.meta.env.PROD || !('serviceWorker' in navigator)) return;
 
   const register = async () => {
     try {
+      let reloading = false;
+      navigator.serviceWorker.addEventListener?.('controllerchange', () => {
+        if (reloading || !canReloadForUpdate()) return;
+        reloading = true;
+        window.location.reload();
+      });
       const registration = await navigator.serviceWorker.register('/sw.js', {
         updateViaCache: 'none',
       });
