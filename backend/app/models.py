@@ -580,6 +580,7 @@ class CardioSession(Base):
     distance_km: Mapped[float | None] = mapped_column(Float, nullable=True)
     average_speed_kph: Mapped[float | None] = mapped_column(Float, nullable=True)
     incline_percent: Mapped[float | None] = mapped_column(Float, nullable=True)
+    average_power_watts: Mapped[int | None] = mapped_column(Integer, nullable=True)
     source_exercise_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     intensity: Mapped[str | None] = mapped_column(String(100), nullable=True)
     zone: Mapped[str | None] = mapped_column(String(30), nullable=True)
@@ -595,6 +596,32 @@ class CardioSession(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, server_default=func.now(), onupdate=func.now()
     )
+
+    source_workout: Mapped[TrainingWorkout | None] = relationship()
+
+    @property
+    def workout_context(self) -> str:
+        if not self.source_workout:
+            return "pure_cardio"
+        has_strength_movement = any(
+            movement.exercise.kind != ExerciseKind.CARDIO
+            for movement in self.source_workout.movements
+        )
+        return "workout_plus_cardio" if has_strength_movement else "pure_cardio"
+
+    @property
+    def performed_after_strength(self) -> bool:
+        if not self.source_workout or self.source_movement_index is None:
+            return False
+        return any(
+            movement.order_index < self.source_movement_index
+            and movement.exercise.kind != ExerciseKind.CARDIO
+            for movement in self.source_workout.movements
+        )
+
+    @property
+    def source_workout_name(self) -> str | None:
+        return self.source_workout.name if self.source_workout else None
 
     __table_args__ = (
         CheckConstraint(
@@ -617,6 +644,11 @@ class CardioSession(Base):
         CheckConstraint(
             "incline_percent IS NULL OR (incline_percent >= 0 AND incline_percent <= 100)",
             name="cardio_incline_range",
+        ),
+        CheckConstraint(
+            "average_power_watts IS NULL OR "
+            "(average_power_watts >= 1 AND average_power_watts <= 3000)",
+            name="cardio_average_power_range",
         ),
         CheckConstraint(
             "duration_minutes > 0 AND duration_minutes <= 1440", name="cardio_duration_range"

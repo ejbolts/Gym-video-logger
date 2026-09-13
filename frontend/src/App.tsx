@@ -49,6 +49,7 @@ import { BackgroundActivityBar } from './BackgroundActivityBar';
 import { CardioEnergyCard } from './CardioEnergyCard';
 import { CardioMetricsEditor } from './CardioMetricsEditor';
 import { fatEnergyEquivalent } from './cardioEnergy';
+import { cardioSessionScores, cardioWorkoutContext } from './cardioFitness';
 import { CachedTabPanel } from './CachedTabPanel';
 import { ConfettiBurst } from './ConfettiBurst';
 import { EdgeSwipeBack } from './EdgeSwipeBack';
@@ -7769,6 +7770,7 @@ function CardioScreen({
     distance_km: null,
     average_speed_kph: null,
     incline_percent: null,
+    average_power_watts: null,
     intensity: null,
     zone: 'Zone 2',
     qualifies_zone2: true,
@@ -7781,6 +7783,9 @@ function CardioScreen({
   const [scanning, setScanning] = useState(false);
   const [scanStatus, setScanStatus] = useState<{ message: string; warning: boolean } | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [historyFilter, setHistoryFilter] = useState<'all' | 'pure_cardio' | 'workout_plus_cardio'>(
+    'all',
+  );
   const [error, setError] = useState<string | null>(null);
   const load = () =>
     api
@@ -7816,6 +7821,7 @@ function CardioScreen({
         distance_km: scan.distance_km,
         average_speed_kph: scan.average_speed_kph,
         incline_percent: null,
+        average_power_watts: null,
       }));
       const scanned = scan.fields_found.join(', ');
       const activityWarning =
@@ -7891,10 +7897,14 @@ function CardioScreen({
       0,
     ),
   }));
+  const fitnessScores = cardioSessionScores(overview.sessions, today);
+  const filteredSessions = overview.sessions.filter(
+    (session) => historyFilter === 'all' || cardioWorkoutContext(session) === historyFilter,
+  );
   return (
     <div className="cardio-screen">
       {error && <p className="inline-error">{error}</p>}
-      <CardioEnergyCard summaries={overview.energy_periods} />
+      <CardioEnergyCard summaries={overview.energy_periods} sessions={overview.sessions} />
       {metricSession && (
         <CardioMetricsEditor
           key={metricSession.id}
@@ -7933,10 +7943,7 @@ function CardioScreen({
           </label>
         </div>
         {scanStatus && (
-          <p
-            className={`cardio-scan-status${scanStatus.warning ? ' warning' : ''}`}
-            role="status"
-          >
+          <p className={`cardio-scan-status${scanStatus.warning ? ' warning' : ''}`} role="status">
             {scanStatus.message}
           </p>
         )}
@@ -8075,6 +8082,24 @@ function CardioScreen({
               placeholder="Optional"
             />
           </label>
+          {(draft.activity_type.toLocaleLowerCase().includes('cycl') ||
+            draft.activity_type.toLocaleLowerCase().includes('bike')) && (
+            <label>
+              Average power (watts)
+              <input
+                type="number"
+                min="1"
+                max="3000"
+                step="1"
+                inputMode="numeric"
+                value={draft.average_power_watts ?? ''}
+                onChange={(event) =>
+                  setDraft({ ...draft, average_power_watts: numberOrNull(event.target.value) })
+                }
+                placeholder="Optional"
+              />
+            </label>
+          )}
         </div>
         <p className="cardio-calorie-hint">
           Performance metrics are optional. For calories, prefer your watch or machine’s active
@@ -8165,88 +8190,149 @@ function CardioScreen({
         </div>
       </section>
       <section className="panel cardio-history">
-        <h2>Cardio history</h2>
-        {overview.sessions.map((session) => (
-          <article key={session.id}>
-            <div>
-              {session.source_workout_id ? (
+        <div className="cardio-history-header">
+          <div>
+            <h2>Cardio history</h2>
+            <small>Fitness scores use separate baselines for fresh and post-workout cardio.</small>
+          </div>
+          <div className="cardio-history-filters" role="group" aria-label="Filter cardio history">
+            {[
+              ['all', 'All'],
+              ['pure_cardio', 'Pure cardio'],
+              ['workout_plus_cardio', 'Workout + cardio'],
+            ].map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                aria-pressed={historyFilter === value}
+                onClick={() =>
+                  setHistoryFilter(value as 'all' | 'pure_cardio' | 'workout_plus_cardio')
+                }
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+        {filteredSessions.length === 0 && (
+          <p className="cardio-history-empty">No cardio sessions match this filter.</p>
+        )}
+        {filteredSessions.map((session) => {
+          const workoutContext = cardioWorkoutContext(session);
+          const fitnessScore = fitnessScores.get(session.id);
+          const normalizedActivity = session.activity_type.toLocaleLowerCase();
+          const supportsFitnessScore =
+            normalizedActivity.includes('cycl') ||
+            normalizedActivity.includes('bike') ||
+            (normalizedActivity.includes('walk') && normalizedActivity.includes('treadmill'));
+          return (
+            <article key={session.id}>
+              <div>
+                <span className={`cardio-context-badge ${workoutContext.replaceAll('_', '-')}`}>
+                  {workoutContext === 'workout_plus_cardio' ? 'Workout + cardio' : 'Pure cardio'}
+                </span>
+                {session.source_workout_id ? (
+                  <button
+                    type="button"
+                    className="cardio-history-workout-link"
+                    onClick={() => onOpenWorkout(session.source_workout_id!)}
+                  >
+                    <strong>{session.activity_type}</strong>
+                  </button>
+                ) : (
+                  <strong>{session.activity_type}</strong>
+                )}
+                <small>
+                  {prettyDate(session.session_date)} · {session.duration_minutes} min ·{' '}
+                  {session.zone ?? session.intensity ?? 'Unspecified'}
+                  {session.qualifies_zone2 ? ' ✓' : ''}
+                  {session.source_workout_name ? ` · ${session.source_workout_name}` : ''}
+                </small>
+                {session.performed_after_strength && (
+                  <small className="cardio-session-context-note">
+                    After weights · scored against other post-workout cardio because earlier lifting
+                    can raise fatigue and heart rate.
+                  </small>
+                )}
+                <small className="cardio-session-energy">
+                  {session.calories_kcal == null
+                    ? 'Calories not logged'
+                    : `${session.calories_kcal.toLocaleString()} kcal · ≈ ${fatEnergyEquivalent(session.calories_kcal)} fat-energy equivalent`}
+                </small>
+                <small className="cardio-session-performance">
+                  {[
+                    session.average_heart_rate_bpm == null
+                      ? null
+                      : `${session.average_heart_rate_bpm} bpm avg`,
+                    session.distance_km == null ? null : `${session.distance_km} km`,
+                    session.average_speed_kph == null
+                      ? null
+                      : `${session.average_speed_kph} km/h avg`,
+                    session.incline_percent == null ? null : `${session.incline_percent}% incline`,
+                    session.average_power_watts == null
+                      ? null
+                      : `${session.average_power_watts} W avg`,
+                  ]
+                    .filter((value): value is string => value !== null)
+                    .join(' · ') || 'Performance metrics not logged'}
+                </small>
+                {fitnessScore && (
+                  <small className="cardio-session-fitness">
+                    Fitness {fitnessScore.score}/100 · {fitnessScore.contextLabel} baseline
+                    {fitnessScore.isBaselineSession ? ' · Baseline reference' : ''}
+                  </small>
+                )}
+                {!fitnessScore && supportsFitnessScore && (
+                  <small className="cardio-session-fitness unavailable">
+                    Fitness score pending · needs a three-session{' '}
+                    {workoutContext === 'workout_plus_cardio' ? 'workout + cardio' : 'pure cardio'}{' '}
+                    baseline and complete workload + heart-rate metrics.
+                  </small>
+                )}
+              </div>
+              <div className="cardio-session-actions">
                 <button
                   type="button"
-                  className="cardio-history-workout-link"
-                  onClick={() => onOpenWorkout(session.source_workout_id!)}
+                  onClick={() => setMetricSession(session)}
+                  aria-label={`Edit performance metrics for ${session.activity_type} on ${session.session_date}`}
                 >
-                  <strong>{session.activity_type}</strong>
+                  {[
+                    session.calories_kcal,
+                    session.average_heart_rate_bpm,
+                    session.distance_km,
+                    session.average_speed_kph,
+                    session.incline_percent,
+                    session.average_power_watts,
+                  ].some((value) => value != null)
+                    ? 'Edit metrics'
+                    : 'Log metrics'}
                 </button>
-              ) : (
-                <strong>{session.activity_type}</strong>
-              )}
-              <small>
-                {prettyDate(session.session_date)} · {session.duration_minutes} min ·{' '}
-                {session.zone ?? session.intensity ?? 'Unspecified'}
-                {session.qualifies_zone2 ? ' ✓' : ''}
-                {session.source_workout_id ? ' · Linked workout' : ''}
-              </small>
-              <small className="cardio-session-energy">
-                {session.calories_kcal == null
-                  ? 'Calories not logged'
-                  : `${session.calories_kcal.toLocaleString()} kcal · ≈ ${fatEnergyEquivalent(session.calories_kcal)} fat-energy equivalent`}
-              </small>
-              <small className="cardio-session-performance">
-                {[
-                  session.average_heart_rate_bpm == null
-                    ? null
-                    : `${session.average_heart_rate_bpm} bpm avg`,
-                  session.distance_km == null ? null : `${session.distance_km} km`,
-                  session.average_speed_kph == null
-                    ? null
-                    : `${session.average_speed_kph} km/h avg`,
-                  session.incline_percent == null ? null : `${session.incline_percent}% incline`,
-                ]
-                  .filter((value): value is string => value !== null)
-                  .join(' · ') || 'Performance metrics not logged'}
-              </small>
-            </div>
-            <div className="cardio-session-actions">
-              <button
-                type="button"
-                onClick={() => setMetricSession(session)}
-                aria-label={`Edit performance metrics for ${session.activity_type} on ${session.session_date}`}
-              >
-                {[
-                  session.calories_kcal,
-                  session.average_heart_rate_bpm,
-                  session.distance_km,
-                  session.average_speed_kph,
-                  session.incline_percent,
-                ].some((value) => value != null)
-                  ? 'Edit metrics'
-                  : 'Log metrics'}
-              </button>
-              {!session.source_workout_id && (
-                <>
-                  <button
-                    onClick={() => {
-                      setEditingId(session.id);
-                      setDraft({
-                        ...session,
-                        exercise_id:
-                          cardioExercises.find((item) => item.name === session.activity_type)?.id ??
-                          null,
-                      });
-                    }}
-                  >
-                    Edit
-                  </button>
-                  <InlineConfirmButton
-                    label="Delete"
-                    confirmLabel="Delete session"
-                    onConfirm={() => remove(session.id)}
-                  />
-                </>
-              )}
-            </div>
-          </article>
-        ))}
+                {!session.source_workout_id && (
+                  <>
+                    <button
+                      onClick={() => {
+                        setEditingId(session.id);
+                        setDraft({
+                          ...session,
+                          exercise_id:
+                            cardioExercises.find((item) => item.name === session.activity_type)
+                              ?.id ?? null,
+                        });
+                      }}
+                    >
+                      Edit
+                    </button>
+                    <InlineConfirmButton
+                      label="Delete"
+                      confirmLabel="Delete session"
+                      onConfirm={() => remove(session.id)}
+                    />
+                  </>
+                )}
+              </div>
+            </article>
+          );
+        })}
       </section>
       <section className="panel previous-zone2">
         <h2>Previous weeks</h2>

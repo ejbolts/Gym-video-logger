@@ -20,6 +20,7 @@ export function CardioMetricsEditor({
   const [distance, setDistance] = useState(session.distance_km?.toString() ?? '');
   const [speed, setSpeed] = useState(session.average_speed_kph?.toString() ?? '');
   const [incline, setIncline] = useState(session.incline_percent?.toString() ?? '');
+  const [power, setPower] = useState(session.average_power_watts?.toString() ?? '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -38,6 +39,7 @@ export function CardioMetricsEditor({
               distance_km: optionalNumber(distance),
               average_speed_kph: optionalNumber(speed),
               incline_percent: optionalNumber(incline),
+              average_power_watts: optionalNumber(power),
             });
             onClose();
           } catch (reason) {
@@ -111,6 +113,21 @@ export function CardioMetricsEditor({
               onChange={(event) => setIncline(event.target.value)}
             />
           </label>
+          {(session.activity_type.toLocaleLowerCase().includes('cycl') ||
+            session.activity_type.toLocaleLowerCase().includes('bike')) && (
+            <label>
+              Average power (watts)
+              <input
+                type="number"
+                inputMode="numeric"
+                min="1"
+                max="3000"
+                step="1"
+                value={power}
+                onChange={(event) => setPower(event.target.value)}
+              />
+            </label>
+          )}
         </div>
         <p className="cardio-metric-hint">All performance fields are optional.</p>
         {error && <p className="inline-error">{error}</p>}

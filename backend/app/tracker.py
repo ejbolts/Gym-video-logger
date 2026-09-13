@@ -595,6 +595,7 @@ def sync_workout_cardio_sessions(db: Session, workout: TrainingWorkout) -> None:
         session.source_exercise_id: {
             "calories_kcal": session.calories_kcal,
             "average_heart_rate_bpm": session.average_heart_rate_bpm,
+            "average_power_watts": session.average_power_watts,
         }
         for session in existing.values()
     }
@@ -625,6 +626,7 @@ def sync_workout_cardio_sessions(db: Session, workout: TrainingWorkout) -> None:
         manual_metrics = manual_metrics_by_exercise.get(movement.exercise_id, {})
         session.calories_kcal = manual_metrics.get("calories_kcal")
         session.average_heart_rate_bpm = manual_metrics.get("average_heart_rate_bpm")
+        session.average_power_watts = manual_metrics.get("average_power_watts")
         completed_sets = [item for item in movement.sets if item.completed]
         distances = [item.distance_km for item in completed_sets if item.distance_km is not None]
         speed_sets = [item for item in completed_sets if item.speed_kph is not None]
@@ -1018,7 +1020,17 @@ def update_training_preferences(
 @router.get("/cardio", response_model=CardioOverviewRead)
 def cardio_overview(db: DbSession) -> CardioOverviewRead:
     preferences = training_preferences(db)
-    sessions = list(db.scalars(select(CardioSession).order_by(CardioSession.session_date.desc())))
+    sessions = list(
+        db.scalars(
+            select(CardioSession)
+            .options(
+                selectinload(CardioSession.source_workout)
+                .selectinload(TrainingWorkout.movements)
+                .selectinload(WorkoutMovement.exercise)
+            )
+            .order_by(CardioSession.session_date.desc())
+        )
+    )
     current_start = start_of_week(date.today(), preferences.week_start)
     return CardioOverviewRead(
         preferences=preferences,
@@ -1086,6 +1098,7 @@ def create_cardio_session(payload: CardioSessionCreate, db: DbSession) -> Cardio
             distance_km=payload.distance_km,
             average_speed_kph=payload.average_speed_kph,
             incline_percent=payload.incline_percent,
+            average_power_watts=payload.average_power_watts,
             source_exercise_id=exercise.id,
             intensity=None,
             zone=payload.zone,
@@ -1123,6 +1136,7 @@ def update_cardio_session(
         "distance_km",
         "average_speed_kph",
         "incline_percent",
+        "average_power_watts",
     }
     for key, value in payload.model_dump(exclude={"exercise_id"}).items():
         if key in optional_metrics and key not in payload.model_fields_set:

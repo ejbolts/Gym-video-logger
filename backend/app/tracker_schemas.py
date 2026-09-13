@@ -405,6 +405,7 @@ class CardioSessionFields(BaseModel):
     distance_km: float | None = Field(default=None, ge=0, le=10_000)
     average_speed_kph: float | None = Field(default=None, ge=0, le=100)
     incline_percent: float | None = Field(default=None, ge=0, le=100)
+    average_power_watts: int | None = Field(default=None, ge=1, le=3_000)
     intensity: str | None = Field(default=None, max_length=100)
     zone: str | None = Field(default=None, max_length=30)
     qualifies_zone2: bool = False
@@ -446,6 +447,7 @@ class CardioMetricsUpdate(BaseModel):
     distance_km: float | None = Field(default=None, ge=0, le=10_000)
     average_speed_kph: float | None = Field(default=None, ge=0, le=100)
     incline_percent: float | None = Field(default=None, ge=0, le=100)
+    average_power_watts: int | None = Field(default=None, ge=1, le=3_000)
 
 
 class CardioEnergyPeriodRead(BaseModel):
@@ -477,6 +479,9 @@ class CardioSessionRead(CardioSessionFields):
 
     id: str
     source_workout_id: str | None
+    workout_context: Literal["pure_cardio", "workout_plus_cardio"] = "pure_cardio"
+    performed_after_strength: bool = False
+    source_workout_name: str | None = None
     created_at: datetime
     updated_at: datetime
 

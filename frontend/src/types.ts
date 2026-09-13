@@ -360,6 +360,7 @@ export interface CardioSessionInput {
   distance_km?: number | null;
   average_speed_kph?: number | null;
   incline_percent?: number | null;
+  average_power_watts?: number | null;
   intensity: string | null;
   zone: string | null;
   qualifies_zone2: boolean;
@@ -369,6 +370,9 @@ export interface CardioSessionInput {
 export interface CardioSession extends CardioSessionInput {
   id: string;
   source_workout_id: string | null;
+  workout_context?: 'pure_cardio' | 'workout_plus_cardio';
+  performed_after_strength?: boolean;
+  source_workout_name?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -423,6 +427,7 @@ export interface CardioMetricsInput {
   distance_km: number | null;
   average_speed_kph: number | null;
   incline_percent: number | null;
+  average_power_watts?: number | null;
 }
 
 export interface BodyWeightGoalInput {

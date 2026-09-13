@@ -6995,6 +6995,43 @@ body,
     grid-template-columns: 1fr;
   }
 }
+.cardio-history-header {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 0.8rem;
+  margin-bottom: 0.45rem;
+}
+.cardio-history-header h2 {
+  margin-bottom: 0.2rem;
+}
+.cardio-history-filters {
+  display: grid;
+  grid-template-columns: repeat(3, auto);
+  gap: 0.3rem;
+}
+.cardio-history .cardio-history-filters button {
+  min-height: 2rem;
+  border: 1px solid #34464f;
+  border-radius: 999px;
+  padding: 0.35rem 0.55rem;
+  background: #111a1e;
+  color: #aebdc4;
+  font-size: 0.58rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.cardio-history .cardio-history-filters button[aria-pressed='true'] {
+  border-color: #34b8f4;
+  background: rgb(40 172 239 / 16%);
+  color: #70d5ff;
+}
+.cardio-history-empty {
+  border-top: 1px solid var(--line);
+  padding-top: 0.8rem;
+  color: var(--muted-ink);
+  font-size: 0.68rem;
+}
 .cardio-history article {
   display: grid;
   grid-template-columns: 1fr auto auto;
@@ -7002,6 +7039,23 @@ body,
   gap: 0.5rem;
   border-top: 1px solid var(--line);
   padding: 0.7rem 0;
+}
+.cardio-context-badge {
+  display: inline-flex;
+  width: fit-content;
+  margin-bottom: 0.35rem;
+  border: 1px solid #3c5764;
+  border-radius: 999px;
+  padding: 0.16rem 0.42rem;
+  color: #9ec5d7;
+  font-size: 0.52rem;
+  font-weight: 850;
+  letter-spacing: 0.02em;
+}
+.cardio-context-badge.workout-plus-cardio {
+  border-color: rgb(245 158 11 / 52%);
+  background: rgb(245 158 11 / 8%);
+  color: #f4c36b;
 }
 .cardio-history strong,
 .cardio-history small {
@@ -7035,6 +7089,33 @@ body,
   color: #63c9f7;
   outline: 1px solid currentColor;
   outline-offset: 3px;
+}
+.cardio-history .cardio-session-context-note {
+  margin-top: 0.35rem;
+  color: #f0c36f;
+  line-height: 1.45;
+}
+.cardio-history .cardio-session-fitness {
+  width: fit-content;
+  margin-top: 0.38rem;
+  border-left: 2px solid #28acef;
+  padding-left: 0.45rem;
+  color: #8ed8fa;
+  font-weight: 750;
+}
+.cardio-history .cardio-session-fitness.unavailable {
+  border-left-color: #53656e;
+  color: #83939b;
+  font-weight: 650;
+}
+@media (max-width: 680px) {
+  .cardio-history-header {
+    display: grid;
+    align-items: stretch;
+  }
+  .cardio-history-filters {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 .previous-zone2 div {
   display: flex;
@@ -11513,6 +11594,26 @@ html {
   font-size: 1.1rem;
   color: var(--ink);
 }
+.cardio-fitness-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 0.55rem;
+  margin-top: 0.38rem;
+}
+.cardio-fitness-summary strong {
+  color: #70d5ff;
+  font-size: 1.35rem;
+  font-variant-numeric: tabular-nums;
+}
+.cardio-fitness-summary strong small {
+  color: #9ab7c5;
+  font-size: 0.7rem;
+}
+.cardio-fitness-summary span {
+  color: #a5b5be;
+  font-size: 0.66rem;
+}
 .cardio-energy-estimate {
   padding: 0.25rem 0.5rem;
   border: 1px solid #3f6173;
@@ -11520,11 +11621,112 @@ html {
   color: #a5cbde;
   font-size: 0.65rem;
 }
+.cardio-fitness-details {
+  margin-top: 1rem;
+  border: 1px solid #304b58;
+  border-radius: 9px;
+  padding: 0.75rem;
+  background: rgb(7 18 23 / 38%);
+}
+.cardio-fitness-heading {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 0.8fr);
+  gap: 0.6rem;
+}
+.cardio-fitness-heading span,
+.cardio-fitness-heading strong {
+  display: block;
+}
+.cardio-fitness-heading span {
+  color: #9caab1;
+  font-size: 0.63rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.cardio-fitness-heading strong {
+  margin-top: 0.18rem;
+  color: #eff3f3;
+  font-size: 0.9rem;
+}
+.cardio-fitness-heading > small,
+.cardio-fitness-method {
+  color: #93a4ac;
+  font-size: 0.65rem;
+  line-height: 1.45;
+}
+.cardio-fitness-components {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.45rem;
+  margin-top: 0.7rem;
+}
+.cardio-fitness-components article {
+  min-width: 0;
+  display: grid;
+  gap: 0.18rem;
+  border-top: 1px solid #315363;
+  padding-top: 0.55rem;
+}
+.cardio-fitness-components span,
+.cardio-fitness-components small {
+  color: #95a8b1;
+  font-size: 0.58rem;
+}
+.cardio-fitness-components strong {
+  color: #70d5ff;
+  font-size: 1.15rem;
+  font-variant-numeric: tabular-nums;
+}
+.cardio-fitness-method {
+  margin: 0.75rem 0 0;
+}
+.cardio-fitness-context-scores {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.4rem;
+  margin-top: 0.7rem;
+}
+.cardio-fitness-context-scores article {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.15rem 0.5rem;
+  border: 1px solid #304b58;
+  border-radius: 7px;
+  padding: 0.5rem;
+}
+.cardio-fitness-context-scores span,
+.cardio-fitness-context-scores small {
+  overflow: hidden;
+  color: #93a4ac;
+  font-size: 0.57rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cardio-fitness-context-scores strong {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: center;
+  color: #70d5ff;
+  font-size: 0.8rem;
+}
+.cardio-progress-subheading {
+  margin: 1rem 0 0;
+  color: #dfe8eb;
+  font-size: 0.8rem;
+}
 .cardio-energy-periods {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.35rem;
   margin: 1rem 0;
+}
+@media (max-width: 560px) {
+  .cardio-fitness-heading {
+    grid-template-columns: 1fr;
+  }
+  .cardio-fitness-components {
+    grid-template-columns: 1fr;
+  }
 }
 .cardio-energy-periods button {
   min-height: 2.5rem;
