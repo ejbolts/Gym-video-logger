@@ -4,6 +4,7 @@ import type {
   BodyWeightGoal,
   BodyWeightGoalInput,
   CardioOverview,
+  CardioScreenshotScan,
   CardioSession,
   CardioSessionInput,
   CardioMetricsInput,
@@ -219,6 +220,14 @@ export const api = {
     return request<MuscleVolume[]>(`/api/muscle-volume${query.size ? `?${query}` : ''}`);
   },
   cardioOverview: () => request<CardioOverview>('/api/cardio'),
+  scanCardioScreenshot: (file: File) => {
+    const form = new FormData();
+    form.append('file', file, file.name);
+    return request<CardioScreenshotScan>('/api/cardio/scan', {
+      method: 'POST',
+      body: form,
+    });
+  },
   createCardio: (payload: CardioSessionInput) =>
     request<CardioSession>('/api/cardio', {
       method: 'POST',

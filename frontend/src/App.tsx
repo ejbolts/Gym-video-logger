@@ -7778,6 +7778,8 @@ function CardioScreen({
   const [draft, setDraft] = useState<CardioSessionInput>(empty);
   const [metricSession, setMetricSession] = useState<CardioSession | null>(null);
   const [saving, setSaving] = useState(false);
+  const [scanning, setScanning] = useState(false);
+  const [scanStatus, setScanStatus] = useState<{ message: string; warning: boolean } | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const load = () =>
@@ -7790,6 +7792,46 @@ function CardioScreen({
   useEffect(() => {
     void load();
   }, []);
+  async function importScreenshot(file: File) {
+    if (scanning) return;
+    setError(null);
+    setScanStatus(null);
+    setScanning(true);
+    try {
+      const scan = await api.scanCardioScreenshot(file);
+      const scannedExercise = scan.activity_type
+        ? cardioExercises.find(
+            (exercise) =>
+              exercise.name.toLocaleLowerCase() === scan.activity_type?.toLocaleLowerCase(),
+          )
+        : null;
+      setDraft((current) => ({
+        ...current,
+        session_date: scan.session_date ?? current.session_date,
+        exercise_id: scannedExercise?.id ?? current.exercise_id,
+        activity_type: scannedExercise?.name ?? current.activity_type,
+        duration_minutes: scan.duration_minutes ?? current.duration_minutes,
+        calories_kcal: scan.calories_kcal,
+        average_heart_rate_bpm: scan.average_heart_rate_bpm,
+        distance_km: scan.distance_km,
+        average_speed_kph: scan.average_speed_kph,
+        incline_percent: null,
+      }));
+      const scanned = scan.fields_found.join(', ');
+      const activityWarning =
+        scan.activity_type && !scannedExercise
+          ? ` ${scan.activity_type} is not in the activity list, so the current activity was kept.`
+          : '';
+      setScanStatus({
+        message: `Scanned ${scanned}.${activityWarning}${scan.warning ? ` ${scan.warning}` : ''} Review the fields below, then add the session.`,
+        warning: Boolean(scan.warning || activityWarning),
+      });
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Could not scan that screenshot.');
+    } finally {
+      setScanning(false);
+    }
+  }
   async function save() {
     if (saving) return;
     setError(null);
@@ -7807,6 +7849,7 @@ function CardioScreen({
       if (editingId) await api.updateCardio(editingId, payload);
       else await api.createCardio(payload);
       setDraft(empty);
+      setScanStatus(null);
       setEditingId(null);
       await onDataChange();
       await load();
@@ -7866,6 +7909,37 @@ function CardioScreen({
       )}
       <section className="panel cardio-form">
         <h2>{editingId ? 'Edit cardio session' : 'Log cardio session'}</h2>
+        <div className="cardio-screenshot-import">
+          <div className="cardio-screenshot-copy">
+            <strong>Import workout screenshot</strong>
+            <small>
+              OCR fills the form for review. Calories always come from Active Calories; Total
+              Calories are ignored.
+            </small>
+          </div>
+          <label className={scanning ? 'disabled' : ''}>
+            {scanning ? 'Scanning…' : 'Choose screenshot'}
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
+              disabled={scanning}
+              aria-label="Upload workout screenshot"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                event.target.value = '';
+                if (file) void importScreenshot(file);
+              }}
+            />
+          </label>
+        </div>
+        {scanStatus && (
+          <p
+            className={`cardio-scan-status${scanStatus.warning ? ' warning' : ''}`}
+            role="status"
+          >
+            {scanStatus.message}
+          </p>
+        )}
         <div className="cardio-fields">
           <label>
             Date
@@ -8022,6 +8096,7 @@ function CardioScreen({
               setEditingId(null);
               setDraft(empty);
               setError(null);
+              setScanStatus(null);
             }}
           >
             Cancel edit

@@ -420,6 +420,18 @@ class CardioSessionCreate(CardioSessionFields):
     exercise_id: str | None = Field(default=None, min_length=1, max_length=36)
 
 
+class CardioScreenshotRead(BaseModel):
+    session_date: date | None
+    activity_type: str | None
+    duration_minutes: int | None
+    calories_kcal: int | None
+    average_heart_rate_bpm: int | None
+    distance_km: float | None
+    average_speed_kph: float | None
+    fields_found: list[str]
+    warning: str | None
+
+
 class CardioCaloriesUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

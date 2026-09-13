@@ -373,6 +373,18 @@ export interface CardioSession extends CardioSessionInput {
   updated_at: string;
 }
 
+export interface CardioScreenshotScan {
+  session_date: string | null;
+  activity_type: string | null;
+  duration_minutes: number | null;
+  calories_kcal: number | null;
+  average_heart_rate_bpm: number | null;
+  distance_km: number | null;
+  average_speed_kph: number | null;
+  fields_found: string[];
+  warning: string | null;
+}
+
 export interface CardioOverview {
   preferences: TrainingPreferences;
   current_week: Zone2Week;

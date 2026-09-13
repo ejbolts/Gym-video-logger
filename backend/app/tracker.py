@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from .body_measurement_csv import export_body_measurements, import_body_measurements
 from .cardio_energy import cardio_energy_periods
+from .cardio_ocr import CardioScreenshotError, scan_cardio_screenshot
 from .config import Settings, get_settings
 from .database import get_db
 from .models import (
@@ -51,6 +52,7 @@ from .tracker_schemas import (
     CardioCaloriesUpdate,
     CardioMetricsUpdate,
     CardioOverviewRead,
+    CardioScreenshotRead,
     CardioSessionCreate,
     CardioSessionRead,
     CsvImportRead,
@@ -1032,6 +1034,17 @@ def cardio_overview(db: DbSession) -> CardioOverviewRead:
         sessions=sessions,
         energy_periods=cardio_energy_periods(sessions, date.today(), preferences.week_start),
     )
+
+
+@router.post("/cardio/scan", response_model=CardioScreenshotRead)
+async def scan_cardio_workout_screenshot(
+    file: Annotated[UploadFile, File(...)],
+) -> CardioScreenshotRead:
+    try:
+        parsed = await scan_cardio_screenshot(file)
+    except CardioScreenshotError as error:
+        raise HTTPException(status_code=error.status_code, detail=error.message) from error
+    return CardioScreenshotRead(**parsed)
 
 
 @router.post("/cardio", response_model=CardioSessionRead, status_code=201)
