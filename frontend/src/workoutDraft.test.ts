@@ -29,6 +29,7 @@ const draft: ActiveWorkoutDraft = {
   version: 1,
   startedAt: Date.UTC(2026, 7, 1, 9),
   updatedAt: Date.UTC(2026, 7, 1, 9, 30),
+  lastActiveAt: Date.UTC(2026, 7, 1, 9, 25),
   name: 'Push workout',
   workoutDate: '2026-08-01',
   category: 'push',
@@ -159,6 +160,21 @@ describe('active workout draft persistence', () => {
     expect(readActiveWorkoutDraft(storage)).toEqual(draft);
 
     clearActiveWorkoutDraft(storage);
+    expect(readActiveWorkoutDraft(storage)).toBeNull();
+  });
+
+  it('keeps older drafts compatible and rejects activity before the workout began', () => {
+    const storage = new MemoryStorage();
+    const olderDraft = { ...draft };
+    delete olderDraft.lastActiveAt;
+
+    writeActiveWorkoutDraft(olderDraft, storage);
+    expect(readActiveWorkoutDraft(storage)).toEqual(olderDraft);
+
+    storage.setItem(
+      ACTIVE_WORKOUT_DRAFT_KEY,
+      JSON.stringify({ ...draft, lastActiveAt: draft.startedAt - 1 }),
+    );
     expect(readActiveWorkoutDraft(storage)).toBeNull();
   });
 

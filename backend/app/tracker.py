@@ -623,11 +623,37 @@ def sync_workout_cardio_sessions(db: Session, workout: TrainingWorkout) -> None:
         session.activity_type = movement.exercise.name
         session.duration_minutes = duration_minutes
         session.source_exercise_id = movement.exercise_id
-        manual_metrics = manual_metrics_by_exercise.get(movement.exercise_id, {})
-        session.calories_kcal = manual_metrics.get("calories_kcal")
-        session.average_heart_rate_bpm = manual_metrics.get("average_heart_rate_bpm")
-        session.average_power_watts = manual_metrics.get("average_power_watts")
         completed_sets = [item for item in movement.sets if item.completed]
+        manual_metrics = manual_metrics_by_exercise.get(movement.exercise_id, {})
+        calorie_sets = [item for item in completed_sets if item.calories_kcal is not None]
+        heart_rate_sets = [
+            item for item in completed_sets if item.average_heart_rate_bpm is not None
+        ]
+        heart_rate_duration = sum(item.duration_seconds or 0 for item in heart_rate_sets)
+        session.calories_kcal = (
+            sum(item.calories_kcal for item in calorie_sets)
+            if calorie_sets
+            else manual_metrics.get("calories_kcal")
+        )
+        session.average_heart_rate_bpm = (
+            round(
+                sum(
+                    item.average_heart_rate_bpm * (item.duration_seconds or 0)
+                    for item in heart_rate_sets
+                )
+                / heart_rate_duration
+            )
+            if heart_rate_duration > 0
+            else (
+                round(
+                    sum(item.average_heart_rate_bpm for item in heart_rate_sets)
+                    / len(heart_rate_sets)
+                )
+                if heart_rate_sets
+                else manual_metrics.get("average_heart_rate_bpm")
+            )
+        )
+        session.average_power_watts = manual_metrics.get("average_power_watts")
         distances = [item.distance_km for item in completed_sets if item.distance_km is not None]
         speed_sets = [item for item in completed_sets if item.speed_kph is not None]
         incline_sets = [item for item in completed_sets if item.incline_percent is not None]
@@ -1081,6 +1107,8 @@ def create_cardio_session(payload: CardioSessionCreate, db: DbSession) -> Cardio
                 order_index=0,
                 duration_seconds=payload.duration_minutes * 60,
                 distance_km=payload.distance_km,
+                calories_kcal=payload.calories_kcal,
+                average_heart_rate_bpm=payload.average_heart_rate_bpm,
                 speed_kph=payload.average_speed_kph,
                 incline_percent=payload.incline_percent,
                 completed=True,
@@ -1155,9 +1183,80 @@ def update_cardio_calories(
     if not session:
         raise HTTPException(status_code=404, detail="Cardio session was not found.")
     session.calories_kcal = payload.calories_kcal
+    if sync_cardio_session_metrics_to_workout_sets(db, session, {"calories_kcal"}):
+        rebuild_personal_records(db)
+        bump_workout_cache_revision(db)
     db.commit()
     db.refresh(session)
     return session
+
+
+def sync_cardio_session_metrics_to_workout_sets(
+    db: Session, session: CardioSession, fields: set[str]
+) -> bool:
+    workout_set_fields = {
+        "calories_kcal",
+        "average_heart_rate_bpm",
+        "distance_km",
+        "average_speed_kph",
+        "incline_percent",
+    }
+    if not workout_set_fields.intersection(fields):
+        return False
+    if not session.source_workout_id:
+        return False
+    workout = load_workout(db, session.source_workout_id)
+    movement = next(
+        (item for item in workout.movements if item.order_index == session.source_movement_index),
+        None,
+    )
+    if not movement:
+        return False
+    completed_sets = [item for item in movement.sets if item.completed]
+    if not completed_sets:
+        return False
+    if "calories_kcal" in fields:
+        total_duration = sum(item.duration_seconds or 0 for item in completed_sets)
+        distributed_calories = 0
+        for index, workout_set in enumerate(completed_sets):
+            if session.calories_kcal is None:
+                workout_set.calories_kcal = None
+            elif index == len(completed_sets) - 1:
+                workout_set.calories_kcal = session.calories_kcal - distributed_calories
+            else:
+                share = (
+                    (workout_set.duration_seconds or 0) / total_duration
+                    if total_duration
+                    else 1 / len(completed_sets)
+                )
+                workout_set.calories_kcal = round(session.calories_kcal * share)
+                distributed_calories += workout_set.calories_kcal
+    if "average_heart_rate_bpm" in fields:
+        for workout_set in completed_sets:
+            workout_set.average_heart_rate_bpm = session.average_heart_rate_bpm
+    if "distance_km" in fields:
+        total_duration = sum(item.duration_seconds or 0 for item in completed_sets)
+        distributed_distance = 0.0
+        for index, workout_set in enumerate(completed_sets):
+            if session.distance_km is None:
+                workout_set.distance_km = None
+            elif index == len(completed_sets) - 1:
+                workout_set.distance_km = round(session.distance_km - distributed_distance, 3)
+            else:
+                share = (
+                    (workout_set.duration_seconds or 0) / total_duration
+                    if total_duration
+                    else 1 / len(completed_sets)
+                )
+                workout_set.distance_km = round(session.distance_km * share, 3)
+                distributed_distance += workout_set.distance_km
+    if "average_speed_kph" in fields:
+        for workout_set in completed_sets:
+            workout_set.speed_kph = session.average_speed_kph
+    if "incline_percent" in fields:
+        for workout_set in completed_sets:
+            workout_set.incline_percent = session.incline_percent
+    return True
 
 
 @router.patch("/cardio/{session_id}/metrics", response_model=CardioSessionRead)
@@ -1169,50 +1268,9 @@ def update_cardio_metrics(
         raise HTTPException(status_code=404, detail="Cardio session was not found.")
     for key in payload.model_fields_set:
         setattr(session, key, getattr(payload, key))
-    if session.source_workout_id and {
-        "distance_km",
-        "average_speed_kph",
-        "incline_percent",
-    }.intersection(payload.model_fields_set):
-        workout = load_workout(db, session.source_workout_id)
-        movement = next(
-            (
-                item
-                for item in workout.movements
-                if item.order_index == session.source_movement_index
-            ),
-            None,
-        )
-        if movement:
-            completed_sets = [item for item in movement.sets if item.completed]
-            if "distance_km" in payload.model_fields_set and completed_sets:
-                total_duration = sum(
-                    workout_set.duration_seconds or 0 for workout_set in completed_sets
-                )
-                distributed_distance = 0.0
-                for index, workout_set in enumerate(completed_sets):
-                    if session.distance_km is None:
-                        workout_set.distance_km = None
-                    elif index == len(completed_sets) - 1:
-                        workout_set.distance_km = round(
-                            session.distance_km - distributed_distance, 3
-                        )
-                    else:
-                        share = (
-                            (workout_set.duration_seconds or 0) / total_duration
-                            if total_duration
-                            else 1 / len(completed_sets)
-                        )
-                        workout_set.distance_km = round(session.distance_km * share, 3)
-                        distributed_distance += workout_set.distance_km
-            if "average_speed_kph" in payload.model_fields_set:
-                for workout_set in completed_sets:
-                    workout_set.speed_kph = session.average_speed_kph
-            if "incline_percent" in payload.model_fields_set:
-                for workout_set in completed_sets:
-                    workout_set.incline_percent = session.incline_percent
-            rebuild_personal_records(db)
-            bump_workout_cache_revision(db)
+    if sync_cardio_session_metrics_to_workout_sets(db, session, payload.model_fields_set):
+        rebuild_personal_records(db)
+        bump_workout_cache_revision(db)
     db.commit()
     db.refresh(session)
     return session

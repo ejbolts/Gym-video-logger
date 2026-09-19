@@ -124,6 +124,8 @@ export interface TrackedSet {
   rest_seconds: number | null;
   duration_seconds: number | null;
   distance_km: number | null;
+  calories_kcal?: number | null;
+  average_heart_rate_bpm?: number | null;
   incline_percent: number | null;
   speed_kph: number | null;
   bodyweight_kg: number | null;
@@ -177,6 +179,8 @@ export interface WorkoutSetInput {
   rest_seconds: number | null;
   duration_seconds: number | null;
   distance_km: number | null;
+  calories_kcal?: number | null;
+  average_heart_rate_bpm?: number | null;
   incline_percent?: number | null;
   speed_kph?: number | null;
   bodyweight_kg?: number | null;

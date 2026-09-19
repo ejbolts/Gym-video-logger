@@ -83,6 +83,8 @@ class WorkoutSetCreate(BaseModel):
     rest_seconds: int | None = Field(default=None, ge=0, le=7_200)
     duration_seconds: int | None = Field(default=None, ge=0, le=172_800)
     distance_km: float | None = Field(default=None, ge=0, le=10_000)
+    calories_kcal: int | None = Field(default=None, ge=0, le=100_000)
+    average_heart_rate_bpm: int | None = Field(default=None, ge=20, le=250)
     incline_percent: float | None = Field(default=None, ge=0, le=100)
     speed_kph: float | None = Field(default=None, ge=0, le=100)
     bodyweight_kg: float | None = Field(default=None, ge=0, le=1_000)
@@ -176,6 +178,8 @@ class WorkoutSetRead(BaseModel):
     rest_seconds: int | None
     duration_seconds: int | None
     distance_km: float | None
+    calories_kcal: int | None
+    average_heart_rate_bpm: int | None
     incline_percent: float | None
     speed_kph: float | None
     bodyweight_kg: float | None

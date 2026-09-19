@@ -15,10 +15,11 @@ export function createWorkoutSet(
     reps: kind === 'strength' ? (previous?.reps ?? null) : null,
     weight_kg: kind === 'strength' ? (previous?.weight_kg ?? null) : null,
     rpe: previous?.rpe ?? null,
-    rest_seconds:
-      kind === 'strength' ? (previous?.rest_seconds ?? DEFAULT_REST_SECONDS) : null,
+    rest_seconds: kind === 'strength' ? (previous?.rest_seconds ?? DEFAULT_REST_SECONDS) : null,
     duration_seconds: kind === 'cardio' ? (previous?.duration_seconds ?? null) : null,
     distance_km: kind === 'cardio' ? (previous?.distance_km ?? null) : null,
+    calories_kcal: kind === 'cardio' ? (previous?.calories_kcal ?? null) : null,
+    average_heart_rate_bpm: kind === 'cardio' ? (previous?.average_heart_rate_bpm ?? null) : null,
     incline_percent: kind === 'cardio' ? (previous?.incline_percent ?? null) : null,
     speed_kph: kind === 'cardio' ? (previous?.speed_kph ?? null) : null,
     notes: null,

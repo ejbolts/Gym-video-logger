@@ -1,4 +1,5 @@
 import { useActiveWorkoutReminder } from './activeWorkoutReminder';
+import { inactiveWorkoutFinishAt, shouldAutoFinishWorkout } from './activeWorkoutTimeout';
 import { Fragment, startTransition, useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, FormEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
@@ -7,6 +8,7 @@ import type {
   BodyMeasurement,
   BodyWeightGoal,
   CardioOverview,
+  CardioScreenshotScan,
   CardioSession,
   CardioSessionInput,
   DashboardData,
@@ -51,6 +53,7 @@ import { CardioEnergyCard } from './CardioEnergyCard';
 import { CardioMetricsEditor } from './CardioMetricsEditor';
 import { fatEnergyEquivalent } from './cardioEnergy';
 import { cardioSessionScores, cardioWorkoutContext } from './cardioFitness';
+import { cardioSetUpdateFromScan } from './cardioScreenshot';
 import { CachedTabPanel } from './CachedTabPanel';
 import { ConfettiBurst } from './ConfettiBurst';
 import { EdgeSwipeBack } from './EdgeSwipeBack';
@@ -1991,6 +1994,8 @@ function WorkoutLogger({
             rest_seconds: item.rest_seconds,
             duration_seconds: item.duration_seconds,
             distance_km: item.distance_km,
+            calories_kcal: item.calories_kcal,
+            average_heart_rate_bpm: item.average_heart_rate_bpm,
             incline_percent: item.incline_percent,
             speed_kph: item.speed_kph,
             bodyweight_kg: item.bodyweight_kg,
@@ -2032,6 +2037,11 @@ function WorkoutLogger({
   const deleteButtonRef = useRef<HTMLButtonElement>(null);
   const supersetButtonRef = useRef<HTMLButtonElement>(null);
   const startedAt = useState(() => restoredDraft?.startedAt ?? activeStartedAt ?? Date.now())[0];
+  const lastActiveAtRef = useRef(
+    Math.max(startedAt, restoredDraft?.lastActiveAt ?? restoredDraft?.updatedAt ?? Date.now()),
+  );
+  const savingRef = useRef(false);
+  const finishWorkoutRef = useRef<(automaticEndAt?: number) => Promise<void>>(async () => {});
   const [elapsed, setElapsed] = useState(
     initialWorkout
       ? (initialWorkout.duration_minutes ?? 0) * 60
@@ -2057,11 +2067,13 @@ function WorkoutLogger({
 
   useEffect(() => {
     if (initialWorkout) return;
+    let lastActivityWriteAt = 0;
     const persistDraft = () => {
       writeActiveWorkoutDraft({
         version: 1,
         startedAt,
         updatedAt: Date.now(),
+        lastActiveAt: lastActiveAtRef.current,
         durationOverrideMinutes,
         name,
         workoutDate,
@@ -2078,14 +2090,31 @@ function WorkoutLogger({
         })),
       });
     };
+    const recordActivity = () => {
+      const now = Date.now();
+      lastActiveAtRef.current = now;
+      if (now - lastActivityWriteAt >= 15_000) {
+        lastActivityWriteAt = now;
+        persistDraft();
+      }
+    };
     const persistWhenHidden = () => {
-      if (document.visibilityState === 'hidden') persistDraft();
+      if (document.visibilityState === 'hidden') {
+        lastActiveAtRef.current = Date.now();
+        persistDraft();
+      }
     };
     persistDraft();
     window.addEventListener('pagehide', persistDraft);
+    window.addEventListener('pointerdown', recordActivity, { capture: true, passive: true });
+    window.addEventListener('keydown', recordActivity, true);
+    window.addEventListener('scroll', recordActivity, { capture: true, passive: true });
     document.addEventListener('visibilitychange', persistWhenHidden);
     return () => {
       window.removeEventListener('pagehide', persistDraft);
+      window.removeEventListener('pointerdown', recordActivity, true);
+      window.removeEventListener('keydown', recordActivity, true);
+      window.removeEventListener('scroll', recordActivity, true);
       document.removeEventListener('visibilitychange', persistWhenHidden);
     };
   }, [
@@ -2445,7 +2474,8 @@ function WorkoutLogger({
     setPickerOpen(true);
   }
 
-  async function finishWorkout() {
+  async function finishWorkout(automaticEndAt?: number) {
+    if (savingRef.current) return;
     const completed = movements
       .flatMap((movement) => movement.sets)
       .filter((item) => item.completed);
@@ -2457,14 +2487,24 @@ function WorkoutLogger({
       setError('Enter both a workout start time and end time, or leave both blank.');
       return;
     }
-    if (!initialWorkout && durationOverrideMinutes === null && elapsed > 1440 * 60) {
+    if (
+      !initialWorkout &&
+      automaticEndAt === undefined &&
+      durationOverrideMinutes === null &&
+      elapsed > 1440 * 60
+    ) {
       setError(
         'This workout was left running for more than 24 hours. Enter its actual duration below before saving.',
       );
       return;
     }
+    savingRef.current = true;
     setSaving(true);
     setError(null);
+    const liveElapsed = Math.max(
+      0,
+      Math.floor(((automaticEndAt ?? Date.now()) - startedAt) / 1000),
+    );
     const completedIdentity = finalizeWorkoutIdentity(
       movements.map((movement) => movement.exercise),
       category,
@@ -2480,7 +2520,7 @@ function WorkoutLogger({
         notes: notes.trim() || null,
         duration_minutes: initialWorkout
           ? editedDurationMinutes
-          : (durationOverrideMinutes ?? Math.max(1, Math.round(elapsed / 60))),
+          : (durationOverrideMinutes ?? Math.max(1, Math.round(liveElapsed / 60))),
         start_time: initialWorkout && startTime && endTime ? startTime : null,
         end_time: initialWorkout && startTime && endTime ? endTime : null,
         movements: movements.map((movement) => ({
@@ -2494,6 +2534,8 @@ function WorkoutLogger({
             rest_seconds: item.rest_seconds,
             duration_seconds: item.duration_seconds,
             distance_km: item.distance_km,
+            calories_kcal: item.calories_kcal,
+            average_heart_rate_bpm: item.average_heart_rate_bpm,
             incline_percent: item.incline_percent ?? null,
             speed_kph: item.speed_kph ?? null,
             bodyweight_kg: item.bodyweight_kg,
@@ -2509,13 +2551,54 @@ function WorkoutLogger({
         })),
       });
     } catch (saveError) {
+      savingRef.current = false;
       setError(saveError instanceof Error ? saveError.message : 'Could not save the workout.');
       setSaving(false);
     }
   }
 
+  finishWorkoutRef.current = finishWorkout;
+
+  useEffect(() => {
+    if (initialWorkout) return;
+    const hasCompletedSet = movements.some((movement) =>
+      movement.sets.some((item) => item.completed),
+    );
+    const checkForInactiveWorkout = () => {
+      if (!hasCompletedSet || savingRef.current) return;
+      const lastActiveAt = Math.max(startedAt, lastActiveAtRef.current);
+      const now = Date.now();
+      if (!shouldAutoFinishWorkout(startedAt, lastActiveAt, now)) return;
+      void finishWorkoutRef.current(inactiveWorkoutFinishAt(startedAt, lastActiveAt));
+    };
+    checkForInactiveWorkout();
+    const interval = window.setInterval(checkForInactiveWorkout, 30_000);
+    window.addEventListener('focus', checkForInactiveWorkout);
+    window.addEventListener('online', checkForInactiveWorkout);
+    document.addEventListener('visibilitychange', checkForInactiveWorkout);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('focus', checkForInactiveWorkout);
+      window.removeEventListener('online', checkForInactiveWorkout);
+      document.removeEventListener('visibilitychange', checkForInactiveWorkout);
+    };
+  }, [initialWorkout, movements, startedAt]);
+
   const editedDurationHours = Math.floor(editedDurationMinutes / 60);
   const editedDurationRemainder = editedDurationMinutes % 60;
+  const overrideDurationHours =
+    durationOverrideMinutes === null ? '' : Math.floor(durationOverrideMinutes / 60);
+  const overrideDurationRemainder =
+    durationOverrideMinutes === null ? '' : durationOverrideMinutes % 60 || '';
+  const updateDurationOverride = (hoursValue: string, minutesValue: string) => {
+    if (hoursValue === '' && minutesValue === '') {
+      setDurationOverrideMinutes(null);
+      return;
+    }
+    const hours = Math.min(24, Math.max(0, Math.floor(Number(hoursValue) || 0)));
+    const minutes = Math.min(59, Math.max(0, Math.floor(Number(minutesValue) || 0)));
+    setDurationOverrideMinutes(Math.min(1440, Math.max(1, hours * 60 + minutes)));
+  };
   const hasCompleteTimeRange = Boolean(startTime && endTime);
   const updateWorkoutTimes = (nextStart: string, nextEnd: string) => {
     setStartTime(nextStart);
@@ -2648,103 +2731,95 @@ function WorkoutLogger({
               ))}
             </select>
           </label>
-          {initialWorkout && (
-            <fieldset className="workout-duration-editor">
-              <legend>Workout timing</legend>
-              <label>
-                Start time
-                <input
-                  type="time"
-                  value={startTime}
-                  onChange={(event) => updateWorkoutTimes(event.target.value, endTime)}
-                  aria-label="Workout start time"
-                />
-              </label>
-              <label>
-                End time
-                <input
-                  type="time"
-                  value={endTime}
-                  onChange={(event) => updateWorkoutTimes(startTime, event.target.value)}
-                  aria-label="Workout end time"
-                />
-              </label>
-              <label>
-                Duration hours
-                <input
-                  type="number"
-                  min="0"
-                  max="24"
-                  inputMode="numeric"
-                  disabled={hasCompleteTimeRange}
-                  value={editedDurationHours || ''}
-                  placeholder="0"
-                  onChange={(event) => {
-                    const hours = Number.isNaN(event.target.valueAsNumber)
-                      ? 0
-                      : event.target.valueAsNumber;
-                    setEditedDurationMinutes(
-                      Math.min(1440, Math.max(0, Math.floor(hours)) * 60 + editedDurationRemainder),
-                    );
-                  }}
-                  aria-label="Workout duration hours"
-                />
-              </label>
-              <label>
-                Duration minutes
-                <input
-                  type="number"
-                  min="0"
-                  max="59"
-                  inputMode="numeric"
-                  disabled={hasCompleteTimeRange}
-                  value={editedDurationRemainder || ''}
-                  placeholder="0"
-                  onChange={(event) => {
-                    const minutes = Number.isNaN(event.target.valueAsNumber)
-                      ? 0
-                      : event.target.valueAsNumber;
-                    setEditedDurationMinutes(
-                      Math.min(
-                        1440,
-                        editedDurationHours * 60 + Math.min(59, Math.max(0, Math.floor(minutes))),
-                      ),
-                    );
-                  }}
-                  aria-label="Workout duration minutes"
-                />
-              </label>
-              <small className="workout-timing-help">
-                {hasCompleteTimeRange
+          <fieldset
+            className={`workout-duration-editor${initialWorkout ? '' : ' live-workout-duration-editor'}`}
+            aria-label={initialWorkout ? undefined : 'Workout duration'}
+          >
+            {initialWorkout && <legend>Workout timing</legend>}
+            {initialWorkout && (
+              <>
+                <label>
+                  Start time
+                  <input
+                    type="time"
+                    value={startTime}
+                    onChange={(event) => updateWorkoutTimes(event.target.value, endTime)}
+                    aria-label="Workout start time"
+                  />
+                </label>
+                <label>
+                  End time
+                  <input
+                    type="time"
+                    value={endTime}
+                    onChange={(event) => updateWorkoutTimes(startTime, event.target.value)}
+                    aria-label="Workout end time"
+                  />
+                </label>
+              </>
+            )}
+            <label>
+              Duration hours
+              <input
+                type="number"
+                min="0"
+                max="24"
+                inputMode="numeric"
+                disabled={Boolean(initialWorkout && hasCompleteTimeRange)}
+                value={initialWorkout ? editedDurationHours || '' : overrideDurationHours}
+                placeholder="0"
+                onChange={(event) => {
+                  if (!initialWorkout) {
+                    updateDurationOverride(event.target.value, String(overrideDurationRemainder));
+                    return;
+                  }
+                  const hours = Number.isNaN(event.target.valueAsNumber)
+                    ? 0
+                    : event.target.valueAsNumber;
+                  setEditedDurationMinutes(
+                    Math.min(1440, Math.max(0, Math.floor(hours)) * 60 + editedDurationRemainder),
+                  );
+                }}
+                aria-label="Workout duration hours"
+              />
+            </label>
+            <label>
+              Duration minutes
+              <input
+                type="number"
+                min="0"
+                max="59"
+                inputMode="numeric"
+                disabled={Boolean(initialWorkout && hasCompleteTimeRange)}
+                value={initialWorkout ? editedDurationRemainder || '' : overrideDurationRemainder}
+                placeholder="0"
+                onChange={(event) => {
+                  if (!initialWorkout) {
+                    updateDurationOverride(String(overrideDurationHours), event.target.value);
+                    return;
+                  }
+                  const minutes = Number.isNaN(event.target.valueAsNumber)
+                    ? 0
+                    : event.target.valueAsNumber;
+                  setEditedDurationMinutes(
+                    Math.min(
+                      1440,
+                      editedDurationHours * 60 + Math.min(59, Math.max(0, Math.floor(minutes))),
+                    ),
+                  );
+                }}
+                aria-label="Workout duration minutes"
+              />
+            </label>
+            <small className="workout-timing-help">
+              {initialWorkout
+                ? hasCompleteTimeRange
                   ? `${formatWorkoutTimeRange(startTime, endTime)} · duration calculated automatically`
-                  : 'Add both times to calculate duration automatically, including workouts ending after midnight.'}
-              </small>
-            </fieldset>
-          )}
-        </div>
-        {!initialWorkout && (
-          <label>
-            Actual duration (minutes)
-            <input
-              type="number"
-              min="1"
-              max="1440"
-              step="1"
-              value={durationOverrideMinutes ?? ''}
-              placeholder="Use live timer"
-              onChange={(event) =>
-                setDurationOverrideMinutes(
-                  event.target.value === ''
-                    ? null
-                    : Math.min(1440, Math.max(1, Math.round(Number(event.target.value) || 1))),
-                )
-              }
-            />
-            <small>
-              Left the timer running? Enter the duration to save, or leave blank to use the timer.
+                  : 'Add both times to calculate duration automatically, including workouts ending after midnight.'
+                : 'Leave both blank to use the live timer. Change them only if the timer is wrong.'}
             </small>
-          </label>
-        )}
+          </fieldset>
+        </div>
         <div className="workout-summary-metrics" aria-label="Workout totals">
           <span>
             <small>Time</small>
@@ -4413,6 +4488,56 @@ function SetEntryConfirmationDialog({
   );
 }
 
+function CardioSetScreenshotUpload({ onScan }: { onScan: (scan: CardioScreenshotScan) => void }) {
+  const [scanning, setScanning] = useState(false);
+  const [status, setStatus] = useState<{ message: string; warning: boolean } | null>(null);
+
+  async function importScreenshot(file: File) {
+    if (scanning) return;
+    setScanning(true);
+    setStatus(null);
+    try {
+      const scan = await api.scanCardioScreenshot(file);
+      onScan(scan);
+      setStatus({
+        message: `Scanned ${scan.fields_found.join(', ')}.${scan.warning ? ` ${scan.warning}` : ''} Review the set before saving.`,
+        warning: Boolean(scan.warning),
+      });
+    } catch (reason) {
+      setStatus({
+        message: reason instanceof Error ? reason.message : 'Could not scan that screenshot.',
+        warning: true,
+      });
+    } finally {
+      setScanning(false);
+    }
+  }
+
+  return (
+    <div className="cardio-set-screenshot-upload">
+      <label className={scanning ? 'disabled' : ''}>
+        {scanning ? 'Scanning…' : 'Upload screenshot'}
+        <input
+          type="file"
+          accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
+          disabled={scanning}
+          aria-label="Upload cardio set screenshot"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            event.target.value = '';
+            if (file) void importScreenshot(file);
+          }}
+        />
+      </label>
+      {status && (
+        <small className={status.warning ? 'warning' : ''} role="status">
+          {status.message}
+        </small>
+      )}
+    </div>
+  );
+}
+
 function CompletedSetEditDialog({
   exerciseName,
   setNumber,
@@ -4440,6 +4565,8 @@ function CompletedSetEditDialog({
     item.duration_seconds === null ? '' : String(Math.round(item.duration_seconds / 60)),
   );
   const [distance, setDistance] = useState(item.distance_km?.toString() ?? '');
+  const [calories, setCalories] = useState(item.calories_kcal?.toString() ?? '');
+  const [heartRate, setHeartRate] = useState(item.average_heart_rate_bpm?.toString() ?? '');
   const [incline, setIncline] = useState(item.incline_percent?.toString() ?? '');
   const [speed, setSpeed] = useState(item.speed_kph?.toString() ?? '');
   const [rpe, setRpe] = useState(item.rpe?.toString() ?? '');
@@ -4492,8 +4619,10 @@ function CompletedSetEditDialog({
       reps: cardio ? null : numberOrNull(reps),
       duration_seconds: cardio && durationMinutes !== null ? durationMinutes * 60 : null,
       distance_km: cardio ? decimalNumberOrNull(distance) : null,
+      calories_kcal: cardio ? numberOrNull(calories) : null,
+      average_heart_rate_bpm: cardio ? numberOrNull(heartRate) : null,
       incline_percent: treadmill ? decimalNumberOrNull(incline) : item.incline_percent,
-      speed_kph: treadmill ? decimalNumberOrNull(speed) : item.speed_kph,
+      speed_kph: cardio ? decimalNumberOrNull(speed) : item.speed_kph,
       rpe: numberOrNull(rpe),
       rest_seconds: cardio ? null : Number(restSeconds),
       set_type: setType,
@@ -4638,6 +4767,32 @@ function CompletedSetEditDialog({
                     <b>km</b>
                   </span>
                 </label>
+                <label>
+                  Active calories
+                  <span className="unit-input">
+                    <input
+                      inputMode="numeric"
+                      value={calories}
+                      onChange={(event) => {
+                        if (/^\d*$/.test(event.target.value)) setCalories(event.target.value);
+                      }}
+                    />
+                    <b>kcal</b>
+                  </span>
+                </label>
+                <label>
+                  Avg heart rate
+                  <span className="unit-input">
+                    <input
+                      inputMode="numeric"
+                      value={heartRate}
+                      onChange={(event) => {
+                        if (/^\d*$/.test(event.target.value)) setHeartRate(event.target.value);
+                      }}
+                    />
+                    <b>bpm</b>
+                  </span>
+                </label>
               </>
             ) : (
               <>
@@ -4721,26 +4876,44 @@ function CompletedSetEditDialog({
                   </select>
                 </label>
               )}
+              {cardio && (
+                <CardioSetScreenshotUpload
+                  onScan={(scan) => {
+                    const update = cardioSetUpdateFromScan(scan);
+                    if (update.duration_seconds != null) {
+                      setDuration(String(Math.round(update.duration_seconds / 60)));
+                    }
+                    if (update.distance_km != null) setDistance(String(update.distance_km));
+                    if (update.calories_kcal != null) {
+                      setCalories(String(update.calories_kcal));
+                    }
+                    if (update.average_heart_rate_bpm != null) {
+                      setHeartRate(String(update.average_heart_rate_bpm));
+                    }
+                    if (update.speed_kph != null) setSpeed(String(update.speed_kph));
+                  }}
+                />
+              )}
             </div>
+            {cardio && (
+              <label>
+                Avg speed km/h
+                <input
+                  inputMode="decimal"
+                  value={speed}
+                  onChange={(event) => updateDecimalDraft(event.target.value, setSpeed)}
+                />
+              </label>
+            )}
             {treadmill && (
-              <>
-                <label>
-                  Incline %
-                  <input
-                    inputMode="decimal"
-                    value={incline}
-                    onChange={(event) => updateDecimalDraft(event.target.value, setIncline)}
-                  />
-                </label>
-                <label>
-                  Speed km/h
-                  <input
-                    inputMode="decimal"
-                    value={speed}
-                    onChange={(event) => updateDecimalDraft(event.target.value, setSpeed)}
-                  />
-                </label>
-              </>
+              <label>
+                Incline %
+                <input
+                  inputMode="decimal"
+                  value={incline}
+                  onChange={(event) => updateDecimalDraft(event.target.value, setIncline)}
+                />
+              </label>
             )}
             <label className="add-set-notes-field">
               Set note
@@ -4786,12 +4959,18 @@ function AddSetDialog({
 }) {
   const previous = movement.sets.at(-1);
   const cardio = movement.exercise.kind === 'cardio';
+  const treadmill =
+    cardio && (movement.exercise.equipment?.toLowerCase().includes('treadmill') ?? false);
   const [weight, setWeight] = useState(previous?.weight_kg?.toString() ?? '');
   const [reps, setReps] = useState(previous?.reps?.toString() ?? '');
   const [duration, setDuration] = useState(
     previous?.duration_seconds ? Math.round(previous.duration_seconds / 60).toString() : '',
   );
   const [distance, setDistance] = useState(previous?.distance_km?.toString() ?? '');
+  const [calories, setCalories] = useState(previous?.calories_kcal?.toString() ?? '');
+  const [heartRate, setHeartRate] = useState(previous?.average_heart_rate_bpm?.toString() ?? '');
+  const [speed, setSpeed] = useState(previous?.speed_kph?.toString() ?? '');
+  const [incline, setIncline] = useState(previous?.incline_percent?.toString() ?? '');
   const [count, setCount] = useState('1');
   const [restSeconds, setRestSeconds] = useState(
     String(previous?.rest_seconds ?? DEFAULT_REST_SECONDS),
@@ -4840,6 +5019,10 @@ function AddSetDialog({
       reps: cardio ? null : numberOrNull(reps),
       duration_seconds: cardio && numberOrNull(duration) !== null ? Number(duration) * 60 : null,
       distance_km: cardio ? numberOrNull(distance) : null,
+      calories_kcal: cardio ? numberOrNull(calories) : null,
+      average_heart_rate_bpm: cardio ? numberOrNull(heartRate) : null,
+      speed_kph: cardio ? numberOrNull(speed) : null,
+      incline_percent: treadmill ? numberOrNull(incline) : null,
       rpe: numberOrNull(rpe),
       rest_seconds: cardio ? null : Number(restSeconds),
       notes: notes || null,
@@ -4934,6 +5117,65 @@ function AddSetDialog({
                     <b>km</b>
                   </span>
                 </label>
+                <label>
+                  Active calories
+                  <span className="unit-input">
+                    <input
+                      type="number"
+                      min="0"
+                      inputMode="numeric"
+                      value={calories}
+                      onChange={(event) => setCalories(event.target.value)}
+                    />
+                    <b>kcal</b>
+                  </span>
+                </label>
+                <label>
+                  Avg heart rate
+                  <span className="unit-input">
+                    <input
+                      type="number"
+                      min="20"
+                      max="250"
+                      inputMode="numeric"
+                      value={heartRate}
+                      onChange={(event) => setHeartRate(event.target.value)}
+                    />
+                    <b>bpm</b>
+                  </span>
+                </label>
+                <label>
+                  Avg speed
+                  <span className="unit-input">
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="0.1"
+                      inputMode="decimal"
+                      value={speed}
+                      onChange={(event) => setSpeed(event.target.value)}
+                    />
+                    <b>km/h</b>
+                  </span>
+                </label>
+                {treadmill && (
+                  <label>
+                    Incline
+                    <span className="unit-input">
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.1"
+                        inputMode="decimal"
+                        value={incline}
+                        onChange={(event) => setIncline(event.target.value)}
+                      />
+                      <b>%</b>
+                    </span>
+                  </label>
+                )}
               </>
             ) : (
               <>
@@ -5059,6 +5301,24 @@ function AddSetDialog({
             >
               ＋ RPE
             </button>
+            {cardio && (
+              <CardioSetScreenshotUpload
+                onScan={(scan) => {
+                  const update = cardioSetUpdateFromScan(scan);
+                  if (update.duration_seconds != null) {
+                    setDuration(String(Math.round(update.duration_seconds / 60)));
+                  }
+                  if (update.distance_km != null) setDistance(String(update.distance_km));
+                  if (update.calories_kcal != null) {
+                    setCalories(String(update.calories_kcal));
+                  }
+                  if (update.average_heart_rate_bpm != null) {
+                    setHeartRate(String(update.average_heart_rate_bpm));
+                  }
+                  if (update.speed_kph != null) setSpeed(String(update.speed_kph));
+                }}
+              />
+            )}
           </div>
         </div>
         {!viewport.keyboardVisible && (

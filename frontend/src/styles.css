@@ -5483,6 +5483,64 @@ html.edge-swipe-active .edge-swipe-indicator {
   outline: 1px solid var(--accent);
 }
 
+.cardio-set-screenshot-upload {
+  min-width: 0;
+  display: grid;
+  align-content: end;
+  gap: 0.4rem;
+}
+
+.add-set-dialog .cardio-set-screenshot-upload > label {
+  position: relative;
+  min-height: 2.8rem;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid var(--accent-dark);
+  border-radius: 5px;
+  padding: 0.65rem 0.8rem;
+  background: rgb(40 172 239 / 12%);
+  color: #55c5fa;
+  font-size: 0.72rem;
+  font-weight: 850;
+  line-height: 1.15;
+  text-align: center;
+  cursor: pointer;
+}
+
+.set-dialog-secondary-fields .cardio-set-screenshot-upload > label {
+  min-height: 3.6rem;
+}
+
+.add-set-dialog .cardio-set-screenshot-upload > label.disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.add-set-dialog .cardio-set-screenshot-upload input[type='file'] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.add-set-dialog .cardio-set-screenshot-upload > small {
+  color: #84e5a8;
+  font-size: 0.62rem;
+  line-height: 1.4;
+}
+
+.add-set-dialog .cardio-set-screenshot-upload > small.warning {
+  color: #f8c663;
+}
+
+.add-set-toggles .cardio-set-screenshot-upload {
+  flex: 1 1 13rem;
+}
+
 .add-set-dialog > footer,
 .superset-picker > footer {
   min-height: 5.7rem;
@@ -7004,6 +7062,12 @@ body,
 }
 .cardio-history-header h2 {
   margin: 0;
+}
+
+.live-workout-duration-editor {
+  grid-template-columns: repeat(2, minmax(5.5rem, 8rem));
+  justify-content: start;
+  column-gap: 1rem;
 }
 .cardio-history-title {
   display: flex;

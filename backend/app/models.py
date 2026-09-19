@@ -457,6 +457,8 @@ class WorkoutSet(Base):
     rest_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     distance_km: Mapped[float | None] = mapped_column(Float, nullable=True)
+    calories_kcal: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    average_heart_rate_bpm: Mapped[int | None] = mapped_column(Integer, nullable=True)
     incline_percent: Mapped[float | None] = mapped_column(Float, nullable=True)
     speed_kph: Mapped[float | None] = mapped_column(Float, nullable=True)
     bodyweight_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -484,6 +486,15 @@ class WorkoutSet(Base):
         ),
         CheckConstraint(
             "weight_kg IS NULL OR weight_kg >= 0", name="workout_set_weight_nonnegative"
+        ),
+        CheckConstraint(
+            "calories_kcal IS NULL OR (calories_kcal >= 0 AND calories_kcal <= 100000)",
+            name="workout_set_calories_range",
+        ),
+        CheckConstraint(
+            "average_heart_rate_bpm IS NULL OR "
+            "(average_heart_rate_bpm >= 20 AND average_heart_rate_bpm <= 250)",
+            name="workout_set_average_heart_rate_range",
         ),
         CheckConstraint("rpe IS NULL OR (rpe >= 1 AND rpe <= 10)", name="workout_set_rpe_range"),
         CheckConstraint(

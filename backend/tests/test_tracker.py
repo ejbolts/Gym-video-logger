@@ -369,6 +369,8 @@ def test_workout_sets_notes_rest_and_rpe_are_saved(client):
         "rest_seconds": 180,
         "duration_seconds": None,
         "distance_km": None,
+        "calories_kcal": None,
+        "average_heart_rate_bpm": None,
         "incline_percent": None,
         "speed_kph": None,
         "bodyweight_kg": None,

@@ -184,6 +184,8 @@ def test_cardio_creation_with_exercise_retains_calories_after_sync(client):
     ).json()
     assert session["calories_kcal"] == 420
     workout = client.get(f"/api/workouts/{session['source_workout_id']}").json()
+    assert workout["movements"][0]["sets"][0]["calories_kcal"] == 420
+    assert workout["movements"][0]["sets"][0]["average_heart_rate_bpm"] == 144
     assert workout["movements"][0]["sets"][0]["distance_km"] == 5.2
     assert workout["movements"][0]["sets"][0]["speed_kph"] == 10.4
     assert workout["movements"][0]["sets"][0]["incline_percent"] == 7
@@ -229,10 +231,48 @@ def test_cardio_creation_with_exercise_retains_calories_after_sync(client):
     )
     edited_workout = client.get(f"/api/workouts/{workout['id']}").json()
     edited_set = edited_workout["movements"][0]["sets"][0]
+    assert edited_set["calories_kcal"] == 425
+    assert edited_set["average_heart_rate_bpm"] == 146
     assert edited_set["distance_km"] == 5.75
     assert edited_set["speed_kph"] == 11.5
     assert edited_set["incline_percent"] == 9
     assert client.get("/api/workouts/revision").json()["revision"] != revision
+
+
+def test_cardio_metrics_entered_on_workout_sets_sync_to_cardio(client):
+    exercise = next(
+        item for item in client.get("/api/exercises").json() if item["kind"] == "cardio"
+    )
+    payload = {
+        "name": "Scanned cardio",
+        "workout_date": date.today().isoformat(),
+        "category": "cardio",
+        "duration_minutes": 30,
+        "movements": [
+            {
+                "exercise_id": exercise["id"],
+                "sets": [
+                    {
+                        "duration_seconds": 1800,
+                        "distance_km": 5.2,
+                        "speed_kph": 10.4,
+                        "calories_kcal": 420,
+                        "average_heart_rate_bpm": 144,
+                        "completed": True,
+                    }
+                ],
+            }
+        ],
+    }
+
+    created = client.post("/api/workouts", json=payload)
+
+    assert created.status_code == 201
+    session = client.get("/api/cardio").json()["sessions"][0]
+    assert session["calories_kcal"] == 420
+    assert session["average_heart_rate_bpm"] == 144
+    assert session["distance_km"] == 5.2
+    assert session["average_speed_kph"] == 10.4
 
 
 def test_periods_use_today_not_latest_session_and_respect_week_start():
