@@ -12,3 +12,11 @@ export function shouldAutoFinishWorkout(
 ): boolean {
   return now >= inactiveWorkoutFinishAt(startedAt, lastActiveAt);
 }
+
+export function extendInactiveWorkoutFinishAt(
+  currentFinishAt: number,
+  activityAt: number,
+): number {
+  if (activityAt >= currentFinishAt) return currentFinishAt;
+  return Math.max(currentFinishAt, activityAt + RECENT_WORKOUT_ACTIVITY_MS);
+}

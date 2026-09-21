@@ -163,6 +163,17 @@ describe('active workout draft persistence', () => {
     expect(readActiveWorkoutDraft(storage)).toBeNull();
   });
 
+  it('persists the inactivity deadline and rejects one before the workout began', () => {
+    const storage = new MemoryStorage();
+    const inactiveFinishAt = draft.startedAt + 3 * 60 * 60 * 1000;
+
+    writeActiveWorkoutDraft({ ...draft, inactiveFinishAt }, storage);
+    expect(readActiveWorkoutDraft(storage)?.inactiveFinishAt).toBe(inactiveFinishAt);
+
+    writeActiveWorkoutDraft({ ...draft, inactiveFinishAt: draft.startedAt - 1 }, storage);
+    expect(readActiveWorkoutDraft(storage)).toBeNull();
+  });
+
   it('keeps older drafts compatible and rejects activity before the workout began', () => {
     const storage = new MemoryStorage();
     const olderDraft = { ...draft };

@@ -16,6 +16,7 @@ from .cardio_energy import cardio_energy_periods
 from .cardio_ocr import CardioScreenshotError, scan_cardio_screenshot
 from .config import Settings, get_settings
 from .database import get_db
+from .exercise_aliases import canonical_exercise_name
 from .models import (
     AppSetting,
     BodyMeasurement,
@@ -798,7 +799,9 @@ def delete_body_measurement(measurement_id: str, db: DbSession) -> None:
 
 @router.post("/exercises", response_model=ExerciseRead, status_code=201)
 def create_exercise(payload: ExerciseCreate, db: DbSession) -> Exercise:
-    exercise = Exercise(**payload.model_dump(), is_custom=True)
+    exercise_data = payload.model_dump()
+    exercise_data["name"] = canonical_exercise_name(payload.name)
+    exercise = Exercise(**exercise_data, is_custom=True)
     try:
         db.add(exercise)
         db.commit()

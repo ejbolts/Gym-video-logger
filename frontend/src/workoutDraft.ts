@@ -28,6 +28,7 @@ export interface ActiveWorkoutDraft {
   startedAt: number;
   updatedAt: number;
   lastActiveAt?: number;
+  inactiveFinishAt?: number;
   durationOverrideMinutes?: number | null;
   name: string;
   workoutDate: string;
@@ -95,6 +96,10 @@ function isActiveWorkoutDraft(value: unknown): value is ActiveWorkoutDraft {
       (typeof value.lastActiveAt === 'number' &&
         Number.isFinite(value.lastActiveAt) &&
         value.lastActiveAt >= value.startedAt)) &&
+    (value.inactiveFinishAt === undefined ||
+      (typeof value.inactiveFinishAt === 'number' &&
+        Number.isFinite(value.inactiveFinishAt) &&
+        value.inactiveFinishAt >= value.startedAt)) &&
     (value.durationOverrideMinutes == null ||
       (typeof value.durationOverrideMinutes === 'number' &&
         Number.isInteger(value.durationOverrideMinutes) &&

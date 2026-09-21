@@ -1,5 +1,9 @@
 import { useActiveWorkoutReminder } from './activeWorkoutReminder';
-import { inactiveWorkoutFinishAt, shouldAutoFinishWorkout } from './activeWorkoutTimeout';
+import {
+  extendInactiveWorkoutFinishAt,
+  inactiveWorkoutFinishAt,
+  MAX_INACTIVE_WORKOUT_MS,
+} from './activeWorkoutTimeout';
 import { Fragment, startTransition, useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, FormEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
@@ -68,6 +72,7 @@ import {
   PHONE_PUSH_PREFERENCE_EVENT,
   pushNotificationsSupported,
   showRestTimerNotification,
+  showWorkoutAutoSavedNotification,
 } from './push';
 import { SetLevelLabel } from './SetLevelLabel';
 import { SetDialogKeyboardAction } from './SetDialogKeyboardAction';
@@ -117,6 +122,7 @@ import {
 } from './workoutMovements';
 import { applySupersetSelection, clearSuperset } from './workoutSupersets';
 import { upsertWorkoutByRecency, workoutPageForId } from './workoutHistory';
+import { isWorkoutSetAutoSavable, workoutSetForAutoSave } from './workoutAutoSave';
 import { readDashboardCache, writeDashboardCache } from './workoutCache';
 import { trainingDataActivityLabel } from './trainingDataRefresh';
 import {
@@ -974,8 +980,8 @@ export function App() {
         )}
         {!loading &&
           (tab === 'log' ||
-            (visitedTabs.has('log') &&
-              (activeWorkoutStartedAt !== null || editingWorkout !== null))) && (
+            activeWorkoutStartedAt !== null ||
+            (visitedTabs.has('log') && editingWorkout !== null)) && (
             <CachedTabPanel active={tab === 'log'}>
               <WorkoutLogger
                 key={
@@ -1000,6 +1006,9 @@ export function App() {
                 onExerciseFavorite={updateExerciseFavorite}
                 onCreateExercise={createExercise}
                 onSave={saveWorkout}
+                onAutoSaved={() =>
+                  setMessage('Your inactive workout passed its time limit and was auto-saved.')
+                }
                 activeStartedAt={activeWorkoutStartedAt}
                 onClose={navigateBack}
                 onDelete={() => {
@@ -1937,6 +1946,7 @@ function WorkoutLogger({
   onExerciseFavorite,
   onCreateExercise,
   onSave,
+  onAutoSaved,
   activeStartedAt,
   onClose,
   onDelete,
@@ -1953,6 +1963,7 @@ function WorkoutLogger({
   onExerciseFavorite: (exerciseId: string, isFavorite: boolean) => Promise<void>;
   onCreateExercise: (input: ExerciseCreateInput) => Promise<Exercise>;
   onSave: (payload: WorkoutInput) => Promise<void>;
+  onAutoSaved: () => void;
   activeStartedAt: number | null;
   onClose: () => void;
   onDelete: () => void;
@@ -2037,9 +2048,25 @@ function WorkoutLogger({
   const deleteButtonRef = useRef<HTMLButtonElement>(null);
   const supersetButtonRef = useRef<HTMLButtonElement>(null);
   const startedAt = useState(() => restoredDraft?.startedAt ?? activeStartedAt ?? Date.now())[0];
-  const lastActiveAtRef = useRef(
-    Math.max(startedAt, restoredDraft?.lastActiveAt ?? restoredDraft?.updatedAt ?? Date.now()),
-  );
+  const initialActivity = useState(() => {
+    const lastActiveAt = Math.max(
+      startedAt,
+      restoredDraft?.lastActiveAt ?? restoredDraft?.updatedAt ?? startedAt,
+    );
+    const normalFinishAt = inactiveWorkoutFinishAt(startedAt, lastActiveAt);
+    const legacyDraftAlreadyOverdue =
+      restoredDraft !== null &&
+      restoredDraft.inactiveFinishAt === undefined &&
+      Date.now() >= startedAt + MAX_INACTIVE_WORKOUT_MS;
+    return {
+      lastActiveAt,
+      finishAt:
+        restoredDraft?.inactiveFinishAt ??
+        (legacyDraftAlreadyOverdue ? startedAt + MAX_INACTIVE_WORKOUT_MS : normalFinishAt),
+    };
+  })[0];
+  const lastActiveAtRef = useRef(initialActivity.lastActiveAt);
+  const inactiveFinishAtRef = useRef(initialActivity.finishAt);
   const savingRef = useRef(false);
   const finishWorkoutRef = useRef<(automaticEndAt?: number) => Promise<void>>(async () => {});
   const [elapsed, setElapsed] = useState(
@@ -2074,6 +2101,7 @@ function WorkoutLogger({
         startedAt,
         updatedAt: Date.now(),
         lastActiveAt: lastActiveAtRef.current,
+        inactiveFinishAt: inactiveFinishAtRef.current,
         durationOverrideMinutes,
         name,
         workoutDate,
@@ -2092,7 +2120,15 @@ function WorkoutLogger({
     };
     const recordActivity = () => {
       const now = Date.now();
+      if (now >= inactiveFinishAtRef.current) {
+        void finishWorkoutRef.current(inactiveFinishAtRef.current);
+        return;
+      }
       lastActiveAtRef.current = now;
+      inactiveFinishAtRef.current = extendInactiveWorkoutFinishAt(
+        inactiveFinishAtRef.current,
+        now,
+      );
       if (now - lastActivityWriteAt >= 15_000) {
         lastActivityWriteAt = now;
         persistDraft();
@@ -2100,7 +2136,6 @@ function WorkoutLogger({
     };
     const persistWhenHidden = () => {
       if (document.visibilityState === 'hidden') {
-        lastActiveAtRef.current = Date.now();
         persistDraft();
       }
     };
@@ -2476,7 +2511,16 @@ function WorkoutLogger({
 
   async function finishWorkout(automaticEndAt?: number) {
     if (savingRef.current) return;
-    const completed = movements
+    const movementsToSave =
+      automaticEndAt === undefined
+        ? movements
+        : movements.map((movement) => ({
+            ...movement,
+            sets: movement.sets.map((item) =>
+              workoutSetForAutoSave(movement.exercise.kind, item),
+            ),
+          }));
+    const completed = movementsToSave
       .flatMap((movement) => movement.sets)
       .filter((item) => item.completed);
     if (!movements.length || !completed.length) {
@@ -2523,7 +2567,7 @@ function WorkoutLogger({
           : (durationOverrideMinutes ?? Math.max(1, Math.round(liveElapsed / 60))),
         start_time: initialWorkout && startTime && endTime ? startTime : null,
         end_time: initialWorkout && startTime && endTime ? endTime : null,
-        movements: movements.map((movement) => ({
+        movements: movementsToSave.map((movement) => ({
           exercise_id: movement.exercise.id,
           notes: movement.notes.trim() || null,
           machine_photo_ids: movement.machinePhotoIds,
@@ -2550,6 +2594,10 @@ function WorkoutLogger({
           superset_key: movement.supersetKey,
         })),
       });
+      if (automaticEndAt !== undefined) {
+        onAutoSaved();
+        void showWorkoutAutoSavedNotification().catch(() => undefined);
+      }
     } catch (saveError) {
       savingRef.current = false;
       setError(saveError instanceof Error ? saveError.message : 'Could not save the workout.');
@@ -2561,15 +2609,14 @@ function WorkoutLogger({
 
   useEffect(() => {
     if (initialWorkout) return;
-    const hasCompletedSet = movements.some((movement) =>
-      movement.sets.some((item) => item.completed),
+    const hasSavableSet = movements.some((movement) =>
+      movement.sets.some((item) => isWorkoutSetAutoSavable(movement.exercise.kind, item)),
     );
     const checkForInactiveWorkout = () => {
-      if (!hasCompletedSet || savingRef.current) return;
-      const lastActiveAt = Math.max(startedAt, lastActiveAtRef.current);
+      if (!hasSavableSet || savingRef.current) return;
       const now = Date.now();
-      if (!shouldAutoFinishWorkout(startedAt, lastActiveAt, now)) return;
-      void finishWorkoutRef.current(inactiveWorkoutFinishAt(startedAt, lastActiveAt));
+      if (now < inactiveFinishAtRef.current) return;
+      void finishWorkoutRef.current(inactiveFinishAtRef.current);
     };
     checkForInactiveWorkout();
     const interval = window.setInterval(checkForInactiveWorkout, 30_000);

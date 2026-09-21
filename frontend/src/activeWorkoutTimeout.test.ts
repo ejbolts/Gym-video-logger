@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  extendInactiveWorkoutFinishAt,
   inactiveWorkoutFinishAt,
   MAX_INACTIVE_WORKOUT_MS,
   RECENT_WORKOUT_ACTIVITY_MS,
@@ -32,5 +33,22 @@ describe('inactive workout timeout', () => {
 
     expect(shouldAutoFinishWorkout(startedAt, lastActiveAt, finishAt - 1)).toBe(false);
     expect(shouldAutoFinishWorkout(startedAt, lastActiveAt, finishAt)).toBe(true);
+  });
+
+  it('extends the deadline when the user is active shortly before it expires', () => {
+    const initialFinishAt = startedAt + MAX_INACTIVE_WORKOUT_MS;
+    const activityAt = initialFinishAt - 10 * 60 * 1000;
+
+    expect(extendInactiveWorkoutFinishAt(initialFinishAt, activityAt)).toBe(
+      activityAt + RECENT_WORKOUT_ACTIVITY_MS,
+    );
+  });
+
+  it('does not revive a workout after its inactivity deadline has passed', () => {
+    const initialFinishAt = startedAt + MAX_INACTIVE_WORKOUT_MS;
+
+    expect(extendInactiveWorkoutFinishAt(initialFinishAt, initialFinishAt + 1)).toBe(
+      initialFinishAt,
+    );
   });
 });

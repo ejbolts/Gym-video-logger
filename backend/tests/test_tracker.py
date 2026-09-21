@@ -702,7 +702,7 @@ def test_csv_import_uses_logger_category_pattern_and_strength_history(client):
     crunch = next(
         item
         for item in client.get("/api/exercises").json()
-        if item["name"] == "Machine Seated Crunch"
+        if item["name"] == "Seated Ab Crunch Machine"
     )
     assert crunch["kind"] == "strength"
     assert crunch["category"] == "full_body"

@@ -11,6 +11,7 @@ from statistics import median
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from .exercise_aliases import canonical_exercise_name
 from .models import (
     BodyMeasurement,
     Exercise,
@@ -262,7 +263,7 @@ def import_workouts(db: Session, raw: bytes) -> ImportSummary:
     grouped: dict[date, dict[str, list[ParsedRow]]] = defaultdict(lambda: defaultdict(list))
     bodyweights: dict[date, list[float]] = defaultdict(list)
     for row in rows:
-        grouped[row.workout_date][row.exercise_name].append(row)
+        grouped[row.workout_date][canonical_exercise_name(row.exercise_name)].append(row)
         if row.bodyweight_kg is not None:
             bodyweights[row.workout_date].append(row.bodyweight_kg)
 

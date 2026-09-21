@@ -42,6 +42,24 @@ def test_create_exercise_duplicate_does_not_add_another_entry(client):
     )
 
 
+def test_create_exercise_alias_does_not_duplicate_a_canonical_exercise(client):
+    response = client.post(
+        "/api/exercises",
+        json=exercise_payload(
+            name="Bench Press",
+            category="push",
+            muscle_group="Chest",
+            equipment="Barbell",
+        ),
+    )
+
+    assert response.status_code == 409
+    assert "already exists" in response.json()["error"]["message"]
+    names = [item["name"] for item in client.get("/api/exercises").json()]
+    assert names.count("Barbell Bench Press") == 1
+    assert "Bench Press" not in names
+
+
 def test_create_cardio_exercise_without_equipment(client):
     response = client.post(
         "/api/exercises",
