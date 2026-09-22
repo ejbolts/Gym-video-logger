@@ -1,4 +1,4 @@
-"""Track average cycling power for cardio fitness comparisons."""
+"""Track average cycling power for cardio performance history."""
 
 import sqlalchemy as sa
 from alembic import op

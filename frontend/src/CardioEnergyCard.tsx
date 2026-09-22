@@ -1,7 +1,6 @@
 import { useState } from 'react';
-import type { CardioEnergyPeriod, CardioSession } from './types';
+import type { CardioEnergyPeriod } from './types';
 import { fatEnergyEquivalent } from './cardioEnergy';
-import { cardioFitnessSummary } from './cardioFitness';
 
 const periods: { value: CardioEnergyPeriod['period']; label: string }[] = [
   { value: 'week', label: 'This week' },
@@ -30,13 +29,7 @@ function comparison(current: number | null, previous: number | null, unit = ''):
   return `${prefix} ${Math.abs(difference).toFixed(decimals)}${unit ? ` ${unit}` : ''} vs prior`;
 }
 
-export function CardioEnergyCard({
-  summaries,
-  sessions,
-}: {
-  summaries: CardioEnergyPeriod[] | undefined;
-  sessions?: CardioSession[];
-}) {
+export function CardioEnergyCard({ summaries }: { summaries: CardioEnergyPeriod[] | undefined }) {
   const [period, setPeriod] = useState<CardioEnergyPeriod['period']>('week');
   const [expanded, setExpanded] = useState(false);
   const summary = summaries?.find((item) => item.period === period);
@@ -58,13 +51,10 @@ export function CardioEnergyCard({
   const distance = summary.distance_km ?? 0;
   const speed = summary.average_speed_kph ?? null;
   const incline = summary.average_incline_percent ?? null;
-  const fitness = cardioFitnessSummary(sessions);
-  const fitnessChange = fitness.changeFromBaseline ?? 0;
-  const fitnessTrend =
-    Math.abs(fitnessChange) < 3
-      ? 'Stable vs baseline'
-      : `${fitnessChange > 0 ? '+' : ''}${fitnessChange} vs baseline`;
-  const primaryFitness = fitness.primaryActivity;
+  const averageMets = summary.average_mets ?? null;
+  const metsSessions = summary.mets_sessions ?? 0;
+  const metMinutes = summary.met_minutes ?? 0;
+  const metsRecorded = metsSessions > 0;
 
   return (
     <section className="panel cardio-energy-card cardio-progress-card" aria-label="Cardio progress">
@@ -75,28 +65,18 @@ export function CardioEnergyCard({
         onClick={() => setExpanded((current) => !current)}
       >
         <div>
-          <p className="section-kicker">COMPARE WITH YOURSELF</p>
-          <h2>Cardio fitness</h2>
-          <div className="cardio-fitness-summary" aria-live="polite">
-            {fitness.status === 'ready' ? (
-              <>
-                <strong>
-                  {fitness.score}
-                  <small>/100</small>
-                </strong>
-                <span>
-                  {fitness.activityLabel} · {fitnessTrend}
-                </span>
-              </>
-            ) : (
-              <>
-                <strong>Building baseline</strong>
-                <span>
-                  {fitness.sessionsNeeded} more complete {fitness.activityLabel.toLocaleLowerCase()}{' '}
-                  {fitness.sessionsNeeded === 1 ? 'session' : 'sessions'} needed
-                </span>
-              </>
-            )}
+          <p className="section-kicker">METABOLIC WORKLOAD</p>
+          <h2>Cardio METs</h2>
+          <div className="cardio-met-summary" aria-live="polite">
+            <strong>
+              {metsRecorded ? metMinutes.toLocaleString() : '—'}
+              <small> MET-min</small>
+            </strong>
+            <span>
+              {metsRecorded
+                ? `${averageMets?.toFixed(1)} average METs · ${metsSessions} of ${summary.total_sessions} sessions logged`
+                : 'Log average METs to track metabolic workload'}
+            </span>
           </div>
         </div>
         <span className="cardio-energy-estimate">
@@ -105,68 +85,6 @@ export function CardioEnergyCard({
       </button>
       {expanded && (
         <div className="cardio-progress-content">
-          <div className="cardio-fitness-details">
-            <div className="cardio-fitness-heading">
-              <div>
-                <span>Personal progress score</span>
-                <strong>{fitness.confidence} confidence</strong>
-              </div>
-              <small>
-                {fitness.eligibleSessions} of {fitness.totalSessions} comparable sessions include
-                the required workload and heart-rate data.
-              </small>
-            </div>
-            {primaryFitness ? (
-              <>
-                <div className="cardio-fitness-components">
-                  <article>
-                    <span>Aerobic efficiency</span>
-                    <strong>{primaryFitness.components.efficiency}</strong>
-                    <small>Workload per heartbeat · 60%</small>
-                  </article>
-                  <article>
-                    <span>Sustained workload</span>
-                    <strong>{primaryFitness.components.workload}</strong>
-                    <small>
-                      {primaryFitness.workload.toFixed(1)} {primaryFitness.workloadUnit} · 20%
-                    </small>
-                  </article>
-                  <article>
-                    <span>Endurance</span>
-                    <strong>{primaryFitness.components.endurance}</strong>
-                    <small>Workload × duration · 20%</small>
-                  </article>
-                </div>
-                {fitness.activities.length > 1 && (
-                  <div className="cardio-fitness-context-scores">
-                    {fitness.activities.map((activity) => (
-                      <article key={`${activity.family}-${activity.context}`}>
-                        <span>{activity.activityLabel}</span>
-                        <small>{activity.contextLabel}</small>
-                        <strong>{activity.score}/100</strong>
-                      </article>
-                    ))}
-                  </div>
-                )}
-                <p className="cardio-fitness-method">
-                  Your first three complete {primaryFitness.activityLabel.toLocaleLowerCase()}{' '}
-                  sessions in {primaryFitness.contextLabel.toLocaleLowerCase()} set a personal
-                  baseline of 50. The current score uses sessions from{' '}
-                  {prettyDate(primaryFitness.currentStart)} to{' '}
-                  {prettyDate(primaryFitness.currentEnd)}. Pure cardio and workout + cardio are
-                  scored separately so earlier lifting does not distort the comparison. Treadmill
-                  workload uses speed and incline; cycling uses average watts.
-                </p>
-              </>
-            ) : (
-              <p className="cardio-fitness-method">
-                Log at least four comparable sessions in one activity and workout context. Incline
-                treadmill walking needs duration, average heart rate, speed, and incline. Indoor
-                cycling needs duration, average heart rate, and average watts.
-              </p>
-            )}
-          </div>
-          <h3 className="cardio-progress-subheading">Training metrics</h3>
           <div className="cardio-energy-periods" role="group" aria-label="Cardio progress period">
             {periods.map((item) => (
               <button
@@ -186,6 +104,26 @@ export function CardioEnergyCard({
             <span>{previousDates ? `Compared with ${previousDates}` : 'All recorded history'}</span>
           </div>
           <div className="cardio-progress-grid" aria-live="polite" aria-atomic="true">
+            <article>
+              <span>MET-minutes</span>
+              <strong>{metsRecorded ? `${metMinutes.toLocaleString()} MET-min` : '—'}</strong>
+              <small>{metsSessions} sessions logged</small>
+              <small className="cardio-progress-comparison">
+                {metsRecorded
+                  ? comparison(metMinutes, summary.previous_met_minutes ?? null, 'MET-min')
+                  : 'No METs logged'}
+              </small>
+            </article>
+            <article>
+              <span>Average METs</span>
+              <strong>{averageMets === null ? '—' : averageMets.toFixed(1)}</strong>
+              <small>Duration-weighted intensity</small>
+              <small className="cardio-progress-comparison">
+                {averageMets === null
+                  ? 'No METs logged'
+                  : comparison(averageMets, summary.previous_average_mets ?? null, 'METs')}
+              </small>
+            </article>
             <article>
               <span>Calories</span>
               <strong>

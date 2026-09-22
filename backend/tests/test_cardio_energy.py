@@ -59,6 +59,7 @@ def test_record_and_edit_cardio_performance_metrics(client):
             distance_km=5.25,
             average_speed_kph=10.5,
             incline_percent=6.5,
+            average_mets=7.5,
         ),
     ).json()
 
@@ -66,6 +67,7 @@ def test_record_and_edit_cardio_performance_metrics(client):
     assert session["distance_km"] == 5.25
     assert session["average_speed_kph"] == 10.5
     assert session["incline_percent"] == 6.5
+    assert session["average_mets"] == 7.5
 
     updated = client.patch(
         f"/api/cardio/{session['id']}/metrics",
@@ -75,6 +77,7 @@ def test_record_and_edit_cardio_performance_metrics(client):
             "distance_km": 5.5,
             "average_speed_kph": 11,
             "incline_percent": None,
+            "average_mets": 8.2,
         },
     )
     assert updated.status_code == 200
@@ -83,6 +86,7 @@ def test_record_and_edit_cardio_performance_metrics(client):
     assert updated.json()["distance_km"] == 5.5
     assert updated.json()["average_speed_kph"] == 11
     assert updated.json()["incline_percent"] is None
+    assert updated.json()["average_mets"] == 8.2
 
 
 @pytest.mark.parametrize(
@@ -92,6 +96,8 @@ def test_record_and_edit_cardio_performance_metrics(client):
         ("distance_km", -1),
         ("average_speed_kph", 101),
         ("incline_percent", 101),
+        ("average_mets", 0),
+        ("average_mets", 50.1),
     ],
 )
 def test_invalid_cardio_performance_metrics_are_rejected(client, field, value):
@@ -180,9 +186,11 @@ def test_cardio_creation_with_exercise_retains_calories_after_sync(client):
             distance_km=5.2,
             average_speed_kph=10.4,
             incline_percent=7,
+            average_mets=7.5,
         ),
     ).json()
     assert session["calories_kcal"] == 420
+    assert session["average_mets"] == 7.5
     workout = client.get(f"/api/workouts/{session['source_workout_id']}").json()
     assert workout["movements"][0]["sets"][0]["calories_kcal"] == 420
     assert workout["movements"][0]["sets"][0]["average_heart_rate_bpm"] == 144
@@ -215,6 +223,7 @@ def test_cardio_creation_with_exercise_retains_calories_after_sync(client):
     assert synced["distance_km"] == 5.5
     assert synced["average_speed_kph"] == 11
     assert synced["incline_percent"] == 8
+    assert synced["average_mets"] == 7.5
     revision = client.get("/api/workouts/revision").json()["revision"]
     assert (
         client.patch(
@@ -225,6 +234,7 @@ def test_cardio_creation_with_exercise_retains_calories_after_sync(client):
                 "distance_km": 5.75,
                 "average_speed_kph": 11.5,
                 "incline_percent": 9,
+                "average_mets": 8.2,
             },
         ).status_code
         == 200
@@ -236,6 +246,7 @@ def test_cardio_creation_with_exercise_retains_calories_after_sync(client):
     assert edited_set["distance_km"] == 5.75
     assert edited_set["speed_kph"] == 11.5
     assert edited_set["incline_percent"] == 9
+    assert client.get("/api/cardio").json()["sessions"][0]["average_mets"] == 8.2
     assert client.get("/api/workouts/revision").json()["revision"] != revision
 
 
@@ -319,6 +330,7 @@ def test_periods_compare_weighted_cardio_performance_with_prior_period():
             distance_km=5,
             average_speed_kph=10,
             incline_percent=5,
+            average_mets=6,
         ),
         CardioSession(
             session_date=today,
@@ -328,6 +340,7 @@ def test_periods_compare_weighted_cardio_performance_with_prior_period():
             distance_km=8,
             average_speed_kph=8,
             incline_percent=10,
+            average_mets=9,
         ),
         CardioSession(
             session_date=date(2026, 9, 6),
@@ -337,6 +350,7 @@ def test_periods_compare_weighted_cardio_performance_with_prior_period():
             distance_km=4,
             average_speed_kph=7,
             incline_percent=2,
+            average_mets=4,
         ),
     ]
 
@@ -350,6 +364,11 @@ def test_periods_compare_weighted_cardio_performance_with_prior_period():
     assert week.previous_distance_km == 4
     assert week.average_speed_kph == 8.7
     assert week.average_incline_percent == 8.3
+    assert week.average_mets == 8
+    assert week.met_minutes == 720
+    assert week.previous_average_mets == 4
+    assert week.previous_met_minutes == 180
+    assert week.mets_sessions == 2
     assert week.heart_rate_sessions == week.distance_sessions == 2
     assert week.previous_start_date == date(2026, 8, 31)
     assert week.previous_end_date == date(2026, 9, 6)

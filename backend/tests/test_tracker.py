@@ -930,7 +930,7 @@ def test_iphone_heic_machine_photo_is_accepted_and_converted_to_webp(client):
         assert decoded.size == (800, 1200)
 
 
-def test_training_mode_changes_rpe_aware_weekly_goal(client):
+def test_dashboard_tracks_rpe_aware_weekly_sets_by_muscle_without_targets(client):
     exercise = next(
         item
         for item in client.get("/api/exercises").json()
@@ -946,86 +946,50 @@ def test_training_mode_changes_rpe_aware_weekly_goal(client):
     assert client.post("/api/workouts", json=payload).status_code == 201
 
     dashboard = client.get("/api/dashboard").json()
-    goal = dashboard["weekly_goal"]
-    assert dashboard["training_mode"] == "maintenance"
-    assert goal["target_sets_per_muscle"] == 12
-    assert goal["raw_sets"] == 3
-    assert goal["effective_sets"] == 4
-    assert goal["unrated_sets"] == 1
-    assert goal["low_rpe_sets"] == 1
-    assert goal["rpe_logging_percent"] == 66.7
-    assert goal["overall_percent"] == 16.7
-    assert {item["muscle_group"]: item["effective_sets"] for item in goal["muscle_groups"]} == {
+    weekly_sets = dashboard["weekly_sets"]
+    assert "training_mode" not in dashboard
+    assert "weekly_goal" not in dashboard
+    assert weekly_sets["raw_sets"] == 3
+    assert weekly_sets["effective_sets"] == 4
+    assert weekly_sets["unrated_sets"] == 1
+    assert weekly_sets["low_rpe_sets"] == 1
+    assert weekly_sets["rpe_logging_percent"] == 66.7
+    assert {
+        item["muscle_group"]: item["effective_sets"] for item in weekly_sets["muscle_groups"]
+    } == {
         "Front delts": 1.0,
         "Pectorals": 2.0,
         "Triceps": 1.0,
     }
-    assert {item["muscle_group"]: item["target_sets"] for item in goal["muscle_groups"]} == {
-        "Front delts": 6,
-        "Pectorals": 12,
-        "Triceps": 6,
+    assert {item["muscle_group"]: item["raw_sets"] for item in weekly_sets["muscle_groups"]} == {
+        "Front delts": 1.5,
+        "Pectorals": 3.0,
+        "Triceps": 1.5,
     }
+    assert all("target_sets" not in item for item in weekly_sets["muscle_groups"])
+    assert "goal" not in dashboard["recommendation"]["reason"].lower()
 
-    changed = client.put("/api/training-mode", json={"mode": "cut", "effective_date": "2026-07-01"})
-    assert changed.status_code == 200
-    assert changed.json() == {"mode": "cut"}
-    phases = client.get("/api/training-phases").json()
-    assert len(phases) == 1
-    assert phases[0]["start_date"] == "2026-07-01"
-    assert phases[0]["mode"] == "cut"
-    cut_dashboard = client.get("/api/dashboard").json()
-    assert cut_dashboard["weekly_goal"]["target_sets_per_muscle"] == 10
-    assert cut_dashboard["weekly_goal"]["overall_percent"] == 20.0
-    assert {
-        item["muscle_group"]: item["target_sets"]
-        for item in cut_dashboard["weekly_goal"]["muscle_groups"]
-    } == {"Front delts": 5, "Pectorals": 10, "Triceps": 5}
-    assert "Cut goal" in cut_dashboard["recommendation"]["reason"]
-
-    assert (
-        client.put(
-            "/api/training-mode", json={"mode": "bulk", "effective_date": "2026-07-01"}
-        ).status_code
-        == 200
-    )
-    bulk_goal = client.get("/api/dashboard").json()["weekly_goal"]
-    assert bulk_goal["target_sets_per_muscle"] == 14
-    assert bulk_goal["overall_percent"] == 14.3
-    assert {item["muscle_group"]: item["target_sets"] for item in bulk_goal["muscle_groups"]} == {
-        "Front delts": 7,
-        "Pectorals": 14,
-        "Triceps": 7,
-    }
+    paths = client.get("/openapi.json").json()["paths"]
+    assert "/api/training-mode" not in paths
+    assert "/api/training-phases" not in paths
 
 
-def test_active_body_weight_goal_infers_and_persists_training_mode(client):
-    cases = (
-        (98.9, "cut"),
-        (99.0, "maintenance"),
-        (101.0, "maintenance"),
-        (101.1, "bulk"),
+def test_active_body_weight_goal_has_no_training_mode(client):
+    created = client.post(
+        "/api/body-weight-goals",
+        json={
+            "start_date": "2026-07-30",
+            "target_date": "2026-12-30",
+            "start_weight_kg": 100,
+            "target_weight_kg": 92,
+            "active": True,
+        },
     )
 
-    for target_weight, expected_mode in cases:
-        created = client.post(
-            "/api/body-weight-goals",
-            json={
-                "start_date": "2026-07-30",
-                "target_date": "2026-12-30",
-                "start_weight_kg": 100,
-                "target_weight_kg": target_weight,
-                "mode": "cut" if expected_mode != "cut" else "bulk",
-                "active": True,
-            },
-        )
-
-        assert created.status_code == 201
-        assert created.json()["mode"] == expected_mode
-        assert client.get("/api/dashboard").json()["training_mode"] == expected_mode
-        phases = client.get("/api/training-phases").json()
-        assert len(phases) == 1
-        assert phases[0]["start_date"] == "2026-07-30"
-        assert phases[0]["mode"] == expected_mode
+    assert created.status_code == 201
+    assert created.json()["target_weight_kg"] == 92
+    assert "mode" not in created.json()
+    assert "mode" not in client.get("/api/body-weight-goals").json()[0]
 
 
 def test_pr_types_warmups_failed_sets_and_unit_conversion(client):

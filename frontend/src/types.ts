@@ -76,7 +76,6 @@ export type WorkoutCategory =
 
 export type ExerciseKind = 'strength' | 'cardio';
 
-export type TrainingMode = 'cut' | 'maintenance' | 'bulk';
 export type SetType = 'warmup' | 'normal' | 'drop';
 export type PersonalRecordType =
   'weight' | 'reps_at_weight' | 'estimated_1rm' | 'duration' | 'distance';
@@ -277,28 +276,22 @@ export interface WorkoutRecommendation {
   muscle_frequency: MuscleFrequency[];
 }
 
-export interface MuscleGoalProgress {
+export interface WeeklyMuscleSets {
   muscle_group: string;
   raw_sets: number;
   effective_sets: number;
-  target_sets: number;
   average_rpe: number | null;
-  status: 'below' | 'on_target' | 'above';
 }
 
-export interface WeeklyGoal {
-  mode: TrainingMode;
+export interface WeeklySets {
   week_start: string;
   week_end: string;
-  target_sets_per_muscle: number;
   raw_sets: number;
   effective_sets: number;
   unrated_sets: number;
   low_rpe_sets: number;
   rpe_logging_percent: number;
-  overall_percent: number;
-  days_remaining: number;
-  muscle_groups: MuscleGoalProgress[];
+  muscle_groups: WeeklyMuscleSets[];
 }
 
 export interface DashboardData {
@@ -312,8 +305,7 @@ export interface DashboardData {
   heatmap: HeatmapDay[];
   weekly_days: WeeklyDayBreakdown[];
   recommendation: WorkoutRecommendation;
-  training_mode: TrainingMode;
-  weekly_goal: WeeklyGoal;
+  weekly_sets: WeeklySets;
   muscle_volume: MuscleVolume[];
   zone2: Zone2Week;
   recent_workouts: TrackedWorkout[];
@@ -365,6 +357,7 @@ export interface CardioSessionInput {
   average_speed_kph?: number | null;
   incline_percent?: number | null;
   average_power_watts?: number | null;
+  average_mets?: number | null;
   intensity: string | null;
   zone: string | null;
   qualifies_zone2: boolean;
@@ -419,10 +412,15 @@ export interface CardioEnergyPeriod {
   previous_average_speed_kph: number | null;
   average_incline_percent: number | null;
   previous_average_incline_percent: number | null;
+  average_mets: number | null;
+  previous_average_mets: number | null;
+  met_minutes: number;
+  previous_met_minutes: number | null;
   heart_rate_sessions: number;
   distance_sessions: number;
   speed_sessions: number;
   incline_sessions: number;
+  mets_sessions: number;
 }
 
 export interface CardioMetricsInput {
@@ -432,6 +430,7 @@ export interface CardioMetricsInput {
   average_speed_kph: number | null;
   incline_percent: number | null;
   average_power_watts?: number | null;
+  average_mets?: number | null;
 }
 
 export interface BodyWeightGoalInput {
@@ -439,19 +438,11 @@ export interface BodyWeightGoalInput {
   target_date: string;
   start_weight_kg: number;
   target_weight_kg: number;
-  mode: TrainingMode;
   active: boolean;
 }
 
 export interface BodyWeightGoal extends BodyWeightGoalInput {
   id: string;
-  created_at: string;
-}
-
-export interface TrainingPhase {
-  id: string;
-  start_date: string;
-  mode: TrainingMode;
   created_at: string;
 }
 

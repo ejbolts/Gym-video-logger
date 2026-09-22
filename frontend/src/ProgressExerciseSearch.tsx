@@ -45,6 +45,9 @@ export function ProgressExerciseSearch({
     setQuery(exercise.name);
     setOpen(false);
     setActiveIndex(0);
+    // Let the browser finish the activating gesture before dismissing the
+    // keyboard. In particular, iOS can otherwise swallow the option's click.
+    window.requestAnimationFrame(() => inputRef.current?.blur());
   }
 
   return (
@@ -111,7 +114,6 @@ export function ProgressExerciseSearch({
           type="button"
           aria-label={open ? 'Close exercise search' : 'Browse exercises'}
           aria-expanded={open}
-          onPointerDown={(event) => event.preventDefault()}
           onClick={() => {
             if (open) {
               setOpen(false);
@@ -137,8 +139,9 @@ export function ProgressExerciseSearch({
               aria-selected={exercise.id === exerciseId}
               className={index === activeIndex ? 'active' : ''}
               key={exercise.id}
-              onPointerDown={(event) => event.preventDefault()}
-              onPointerMove={() => setActiveIndex(index)}
+              onPointerMove={(event) => {
+                if (event.pointerType === 'mouse') setActiveIndex(index);
+              }}
               onClick={() => choose(exercise)}
             >
               <strong>{exercise.name}</strong>

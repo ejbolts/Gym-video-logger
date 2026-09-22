@@ -4,7 +4,17 @@ import {
   inactiveWorkoutFinishAt,
   MAX_INACTIVE_WORKOUT_MS,
 } from './activeWorkoutTimeout';
-import { Fragment, startTransition, useEffect, useId, useMemo, useRef, useState } from 'react';
+import {
+  createContext,
+  Fragment,
+  startTransition,
+  useContext,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import type { CSSProperties, FormEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from './api';
@@ -23,8 +33,6 @@ import type {
   PersonalRecord,
   TrackedSet,
   TrackedWorkout,
-  TrainingMode,
-  TrainingPhase,
   TrainingPreferences,
   WorkoutCategory,
   WorkoutInput,
@@ -36,9 +44,7 @@ import {
   bodyweightEntryPlaceholder,
   filterMeasurementsByRange,
   nearestChartPointIndex,
-  splitWeightLineByPhase,
   summarizeBodyWeightTrend,
-  trainingPhaseAtDate,
 } from './bodyTrend';
 import type { BodyTrendDuration, BodyTrendRange, BodyTrendStatistic } from './bodyTrend';
 import {
@@ -47,6 +53,12 @@ import {
   saveBodyTrendPreference,
   type BodyTrendPreference,
 } from './bodyTrendPreference';
+import {
+  DEFAULT_CHART_HEIGHT,
+  DEFAULT_CHART_WIDTH,
+  evenlySpacedChartIndexes,
+  responsiveChartWidth,
+} from './chartLayout';
 import { monthCountFromOldestWorkout } from './calendarRange';
 import { InlineConfirmButton } from './InlineConfirmButton';
 import { NotificationDialog } from './NotificationDialog';
@@ -56,7 +68,6 @@ import { BackgroundActivityBar } from './BackgroundActivityBar';
 import { CardioEnergyCard } from './CardioEnergyCard';
 import { CardioMetricsEditor } from './CardioMetricsEditor';
 import { fatEnergyEquivalent } from './cardioEnergy';
-import { cardioSessionScores, cardioWorkoutContext } from './cardioFitness';
 import { cardioSetUpdateFromScan } from './cardioScreenshot';
 import { CachedTabPanel } from './CachedTabPanel';
 import { ConfettiBurst } from './ConfettiBurst';
@@ -86,6 +97,7 @@ import {
   type AppTab,
 } from './appNavigation';
 import { recentExerciseHistory, type ExerciseHistoryEntry } from './exerciseHistory';
+import { exerciseIconFor } from './exerciseIcons';
 import { fuzzyHighlightIndices, rankExerciseSearchMatches } from './exerciseSearch';
 import {
   decimalNumberOrNull,
@@ -845,17 +857,6 @@ export function App() {
     return exercise;
   }
 
-  async function updateTrainingMode(mode: TrainingMode) {
-    try {
-      await withBackgroundActivity('Updating training mode…', async () => {
-        await api.updateTrainingMode(mode, localDate());
-        await refreshData({ activityLabel: null });
-      });
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Could not update the training mode.');
-    }
-  }
-
   function updateRestTimerPreference(enabled: boolean) {
     saveRestTimerPreference(enabled);
     setRestTimerEnabled(enabled);
@@ -964,6 +965,7 @@ export function App() {
                 }}
                 onMeasurements={() => setTab('body')}
                 onSettings={() => setTab('settings')}
+                onVideos={() => setTab('videos')}
                 onWorkoutLive={() => setTab('log')}
                 todayBodyweight={todayMeasurement?.weight_kg ?? null}
                 onSaveBodyweight={(weight) =>
@@ -1029,10 +1031,8 @@ export function App() {
           <CachedTabPanel active={tab === 'body'}>
             <BodyCompositionScreen
               measurements={measurements}
-              trainingMode={dashboard?.training_mode ?? 'maintenance'}
               onSave={saveMeasurement}
               onDelete={deleteMeasurement}
-              onTrainingMode={updateTrainingMode}
               onDataChange={refreshAfterMutation}
               entryRequest={measurementEntryRequest}
               trendPreference={bodyTrendPreference}
@@ -1338,6 +1338,7 @@ export function DashboardScreen({
   onExercises,
   onMeasurements,
   onSettings,
+  onVideos,
   onWorkoutLive,
   todayBodyweight,
   onSaveBodyweight,
@@ -1352,6 +1353,7 @@ export function DashboardScreen({
   onExercises: () => void;
   onMeasurements: () => void;
   onSettings: () => void;
+  onVideos: () => void;
   onWorkoutLive: () => void;
   todayBodyweight: number | null;
   onSaveBodyweight: (weight: number) => Promise<void>;
@@ -1410,6 +1412,13 @@ export function DashboardScreen({
         <button type="button" onClick={onSettings}>
           <span aria-hidden="true">⚙</span>
           <strong>Settings</strong>
+        </button>
+        <button className="dashboard-video-shortcut" type="button" onClick={onVideos}>
+          <span aria-hidden="true">▷</span>
+          <span className="dashboard-shortcut-copy">
+            <strong>Video logger</strong>
+            <small>Upload and combine set clips</small>
+          </span>
         </button>
       </div>
 
@@ -1687,20 +1696,6 @@ function MetricCard({
   ) : (
     <article className="metric-card">{content}</article>
   );
-}
-
-const trainingModeLabels: Record<TrainingMode, string> = {
-  cut: 'Cut',
-  maintenance: 'Maintenance',
-  bulk: 'Bulk',
-};
-
-const maintenanceWeightRangeRatio = 0.01;
-
-function trainingModeForWeightTarget(currentWeight: number, targetWeight: number): TrainingMode {
-  if (targetWeight < currentWeight * (1 - maintenanceWeightRangeRatio)) return 'cut';
-  if (targetWeight > currentWeight * (1 + maintenanceWeightRangeRatio)) return 'bulk';
-  return 'maintenance';
 }
 
 function WorkoutHeatmap({
@@ -2125,10 +2120,7 @@ function WorkoutLogger({
         return;
       }
       lastActiveAtRef.current = now;
-      inactiveFinishAtRef.current = extendInactiveWorkoutFinishAt(
-        inactiveFinishAtRef.current,
-        now,
-      );
+      inactiveFinishAtRef.current = extendInactiveWorkoutFinishAt(inactiveFinishAtRef.current, now);
       if (now - lastActivityWriteAt >= 15_000) {
         lastActivityWriteAt = now;
         persistDraft();
@@ -2516,9 +2508,7 @@ function WorkoutLogger({
         ? movements
         : movements.map((movement) => ({
             ...movement,
-            sets: movement.sets.map((item) =>
-              workoutSetForAutoSave(movement.exercise.kind, item),
-            ),
+            sets: movement.sets.map((item) => workoutSetForAutoSave(movement.exercise.kind, item)),
           }));
     const completed = movementsToSave
       .flatMap((movement) => movement.sets)
@@ -3357,45 +3347,9 @@ function WorkoutCloseDialog({
 }
 
 function ExerciseIcon({ exercise, number }: { exercise: Exercise; number?: number }) {
-  const label = `${exercise.name} ${exercise.muscle_group}`.toLowerCase();
-  const kind =
-    exercise.kind === 'cardio'
-      ? 'cardio'
-      : label.includes('squat') || label.includes('leg')
-        ? 'lower'
-        : label.includes('press') || label.includes('fly')
-          ? 'press'
-          : label.includes('row') || label.includes('pull')
-            ? 'pull'
-            : 'strength';
   return (
-    <span className={`exercise-icon exercise-icon-${kind}`} aria-hidden="true">
-      <svg viewBox="0 0 32 32" focusable="false">
-        {kind === 'cardio' ? (
-          <>
-            <path d="M7 24c4-7 6-10 9-10s4 4 9 4" />
-            <circle cx="16" cy="7" r="3" />
-          </>
-        ) : kind === 'lower' ? (
-          <>
-            <path d="M8 8h16M10 6v4M22 6v4M12 11l4 6 6 3M16 17l-4 9M17 18l5 8" />
-          </>
-        ) : kind === 'press' ? (
-          <>
-            <path d="M5 9v14M27 9v14M5 16h22M10 13v6M22 13v6" />
-            <circle cx="16" cy="23" r="3" />
-          </>
-        ) : kind === 'pull' ? (
-          <>
-            <path d="M5 7h22M8 5v4M24 5v4M16 8v8M16 16l-6 8M16 16l6 8" />
-            <circle cx="16" cy="13" r="3" />
-          </>
-        ) : (
-          <>
-            <path d="M5 16h22M8 12v8M24 12v8M12 14v4M20 14v4" />
-          </>
-        )}
-      </svg>
+    <span className="exercise-icon" aria-hidden="true">
+      <img src={exerciseIconFor(exercise)} alt="" />
       {number !== undefined && <b>{number}</b>}
     </span>
   );
@@ -6126,14 +6080,54 @@ type LockableScreenOrientation = ScreenOrientation & {
   unlock?: () => void;
 };
 
+const LandscapeChartExpandedContext = createContext(false);
+
+function useResponsiveChartWidth(expandedOverride?: boolean) {
+  const contextExpanded = useContext(LandscapeChartExpandedContext);
+  const expanded = expandedOverride ?? contextExpanded;
+  const svgRef = useRef<SVGSVGElement>(null);
+  const [width, setWidth] = useState(DEFAULT_CHART_WIDTH);
+
+  useEffect(() => {
+    if (!expanded) {
+      setWidth(DEFAULT_CHART_WIDTH);
+      return;
+    }
+
+    const svg = svgRef.current;
+    if (!svg) return;
+
+    const updateWidth = () => {
+      const bounds = svg.getBoundingClientRect();
+      const nextWidth = responsiveChartWidth(bounds.width, bounds.height);
+      setWidth((currentWidth) => (currentWidth === nextWidth ? currentWidth : nextWidth));
+    };
+
+    updateWidth();
+    window.addEventListener('resize', updateWidth);
+    const observer =
+      typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => updateWidth());
+    observer?.observe(svg);
+
+    return () => {
+      window.removeEventListener('resize', updateWidth);
+      observer?.disconnect();
+    };
+  }, [expanded]);
+
+  return { svgRef, width };
+}
+
 function LandscapeChartFrame({
   title,
   controls,
   children,
+  onExpandedChange,
 }: {
   title: string;
   controls: ReactNode;
   children: ReactNode;
+  onExpandedChange?: (expanded: boolean) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const frameRef = useRef<HTMLDivElement>(null);
@@ -6169,6 +6163,10 @@ function LandscapeChartFrame({
   }
 
   useEffect(() => {
+    onExpandedChange?.(expanded);
+  }, [expanded, onExpandedChange]);
+
+  useEffect(() => {
     if (!expanded) return;
     document.body.classList.add('chart-fullscreen-open');
     const closeFallback = () => {
@@ -6197,27 +6195,29 @@ function LandscapeChartFrame({
   }, [expanded]);
 
   return (
-    <div
-      className={`landscape-chart-frame ${expanded ? 'landscape-chart-expanded' : ''}`}
-      ref={frameRef}
-    >
-      <div className="landscape-chart-toolbar">
-        <strong className="landscape-chart-title">{title}</strong>
-        <div className="landscape-chart-options">{controls}</div>
-        <button
-          type="button"
-          className="landscape-chart-toggle"
-          aria-label={
-            expanded ? `Exit full-screen ${title}` : `View ${title} full screen in landscape`
-          }
-          onClick={() => void (expanded ? exitLandscape() : enterLandscape())}
-        >
-          <span aria-hidden="true">{expanded ? '×' : '⛶'}</span>
-          {expanded ? 'Exit' : 'Landscape'}
-        </button>
+    <LandscapeChartExpandedContext.Provider value={expanded}>
+      <div
+        className={`landscape-chart-frame ${expanded ? 'landscape-chart-expanded' : ''}`}
+        ref={frameRef}
+      >
+        <div className="landscape-chart-toolbar">
+          <strong className="landscape-chart-title">{title}</strong>
+          <div className="landscape-chart-options">{controls}</div>
+          <button
+            type="button"
+            className="landscape-chart-toggle"
+            aria-label={
+              expanded ? `Exit full-screen ${title}` : `View ${title} full screen in landscape`
+            }
+            onClick={() => void (expanded ? exitLandscape() : enterLandscape())}
+          >
+            <span aria-hidden="true">{expanded ? '×' : '⛶'}</span>
+            {expanded ? 'Exit' : 'Landscape'}
+          </button>
+        </div>
+        <div className="landscape-chart-content">{children}</div>
       </div>
-      <div className="landscape-chart-content">{children}</div>
-    </div>
+    </LandscapeChartExpandedContext.Provider>
   );
 }
 
@@ -6389,11 +6389,11 @@ function ProgressChart({
   metric: ProgressMetric;
 }) {
   const [activePointIndex, setActivePointIndex] = useState<number | null>(null);
+  const { svgRef, width } = useResponsiveChartWidth();
   const values = progress.points.map((point) => point[metric]);
   const maximum = Math.max(...values, 1);
   const minimum = Math.min(...values, 0);
-  const width = 340;
-  const height = 190;
+  const height = DEFAULT_CHART_HEIGHT;
   const left = 42;
   const right = 10;
   const top = 12;
@@ -6407,7 +6407,7 @@ function ProgressChart({
     return { x, y, value };
   });
   const yTicks = [minimum, (minimum + maximum) / 2, maximum];
-  const xIndexes = [...new Set([0, Math.floor((values.length - 1) / 2), values.length - 1])];
+  const xIndexes = evenlySpacedChartIndexes(values.length, width > 500 ? 5 : 3);
   const activeChartPoint = activePointIndex === null ? null : (points[activePointIndex] ?? null);
   const activeProgressPoint =
     activePointIndex === null ? null : (progress.points[activePointIndex] ?? null);
@@ -6435,6 +6435,7 @@ function ProgressChart({
   return (
     <div className="chart-wrap">
       <svg
+        ref={svgRef}
         viewBox={`0 0 ${width} ${height}`}
         role="img"
         aria-label={`${progress.exercise.name} ${metricLabel} progress chart. Drag horizontally to inspect each session.`}
@@ -6599,31 +6600,6 @@ function ExportTimeFrame({
             : 'No saved entries — exports an empty CSV template'}
       </small>
     </div>
-  );
-}
-
-function InfoPopover({ label, children }: { label: string; children: ReactNode }) {
-  const [open, setOpen] = useState(false);
-  const tooltipId = useId();
-
-  return (
-    <span className={`info-popover${open ? ' open' : ''}`} onMouseLeave={() => setOpen(false)}>
-      <button
-        type="button"
-        aria-label={label}
-        aria-expanded={open}
-        aria-describedby={open ? tooltipId : undefined}
-        onClick={() => setOpen((current) => !current)}
-        onKeyDown={(event) => {
-          if (event.key === 'Escape') setOpen(false);
-        }}
-      >
-        i
-      </button>
-      <span id={tooltipId} className="info-popover-content" role="tooltip">
-        {children}
-      </span>
-    </span>
   );
 }
 
@@ -7118,16 +7094,13 @@ function SettingsScreen({
 
 export function BodyCompositionScreen({
   measurements,
-  trainingMode,
   onSave,
   onDelete,
-  onTrainingMode,
   onDataChange,
   entryRequest = 0,
   trendPreference = DEFAULT_BODY_TREND_PREFERENCE,
 }: {
   measurements: BodyMeasurement[];
-  trainingMode: TrainingMode;
   onSave: (payload: {
     measurement_date: string;
     weight_kg: number;
@@ -7135,7 +7108,6 @@ export function BodyCompositionScreen({
     notes: string | null;
   }) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
-  onTrainingMode: (mode: TrainingMode) => Promise<void>;
   onDataChange: () => Promise<void>;
   entryRequest?: number;
   trendPreference?: BodyTrendPreference;
@@ -7149,11 +7121,9 @@ export function BodyCompositionScreen({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [goals, setGoals] = useState<BodyWeightGoal[]>([]);
-  const [phases, setPhases] = useState<TrainingPhase[]>([]);
   const [goalTarget, setGoalTarget] = useState('');
   const [goalDate, setGoalDate] = useState('');
   const [savingGoal, setSavingGoal] = useState(false);
-  const [changingMode, setChangingMode] = useState(false);
   const [editingMeasurement, setEditingMeasurement] = useState<BodyMeasurement | null>(null);
   const [editWeight, setEditWeight] = useState('');
   const [editBodyFat, setEditBodyFat] = useState('');
@@ -7191,42 +7161,17 @@ export function BodyCompositionScreen({
     setTrendDuration(trendPreference.duration);
     setTrendStatistic(trendPreference.statistic);
   }, [trendPreference]);
-  const inferredGoalMode =
-    latest && hasValidTarget ? trainingModeForWeightTarget(latest.weight_kg, targetWeight) : null;
-  const maintenanceMinimum = latest
-    ? Number((latest.weight_kg * (1 - maintenanceWeightRangeRatio)).toFixed(1))
-    : null;
-  const maintenanceMaximum = latest
-    ? Number((latest.weight_kg * (1 + maintenanceWeightRangeRatio)).toFixed(1))
-    : null;
-
   useEffect(() => {
-    void Promise.all([api.listBodyWeightGoals(), api.listTrainingPhases()])
-      .then(([nextGoals, nextPhases]) => {
-        setGoals(nextGoals);
-        setPhases(nextPhases);
-      })
+    void api
+      .listBodyWeightGoals()
+      .then(setGoals)
       .catch((reason) =>
         setError(reason instanceof Error ? reason.message : 'Could not load body-weight goals.'),
       );
   }, []);
 
-  async function changeTrainingMode(mode: TrainingMode) {
-    if (mode === trainingMode || changingMode) return;
-    setChangingMode(true);
-    setError(null);
-    try {
-      await onTrainingMode(mode);
-      setPhases(await api.listTrainingPhases());
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Could not load training phases.');
-    } finally {
-      setChangingMode(false);
-    }
-  }
-
   async function saveGoal() {
-    if (!latest || !hasValidTarget || !goalDate || !inferredGoalMode) {
+    if (!latest || !hasValidTarget || !goalDate) {
       setError('Log a current weight, target weight, and target date first.');
       return;
     }
@@ -7238,11 +7183,9 @@ export function BodyCompositionScreen({
         target_date: goalDate,
         start_weight_kg: latest.weight_kg,
         target_weight_kg: targetWeight,
-        mode: inferredGoalMode,
         active: true,
       });
       setGoals((current) => [goal, ...current.map((item) => ({ ...item, active: false }))]);
-      setPhases(await api.listTrainingPhases());
       await onDataChange();
       setGoalTarget('');
       setGoalDate('');
@@ -7410,29 +7353,6 @@ export function BodyCompositionScreen({
           className="body-goal-popup"
           onClose={() => setGoalOpen(false)}
         >
-          <section className="body-goal-phase">
-            <div>
-              <p className="section-kicker">TRAINING PHASE</p>
-              <h3>{trainingModeLabels[trainingMode]} phase</h3>
-            </div>
-            <div className="goal-mode-tabs goal-mode-tabs-large" aria-label="Training phase">
-              {(Object.keys(trainingModeLabels) as TrainingMode[]).map((mode) => (
-                <button
-                  type="button"
-                  className={trainingMode === mode ? 'active' : ''}
-                  disabled={changingMode}
-                  onClick={() => void changeTrainingMode(mode)}
-                  key={mode}
-                >
-                  {trainingModeLabels[mode]}
-                  <small>
-                    {mode === 'cut' ? 10 : mode === 'maintenance' ? 12 : 14} sets / muscle
-                  </small>
-                </button>
-              ))}
-            </div>
-            <p>Used for weekly targets and workout recommendations.</p>
-          </section>
           <form
             className="body-goal-form"
             onSubmit={(event) => {
@@ -7455,22 +7375,6 @@ export function BodyCompositionScreen({
                     }}
                   />
                 </div>
-              </div>
-            )}
-            {latest && (
-              <div
-                className={`goal-mode-preview ${inferredGoalMode ?? 'maintenance'}`}
-                aria-live="polite"
-              >
-                <span>Automatic phase</span>
-                <strong>
-                  {inferredGoalMode
-                    ? `${trainingModeLabels[inferredGoalMode]} target`
-                    : 'Enter a target'}
-                </strong>
-                <small>
-                  Maintenance range: {maintenanceMinimum}–{maintenanceMaximum} kg
-                </small>
               </div>
             )}
             <div className="goal-entry-fields">
@@ -7561,7 +7465,7 @@ export function BodyCompositionScreen({
             <textarea
               value={notes}
               onChange={(event) => setNotes(event.target.value)}
-              placeholder="Conditions, phase, or anything worth remembering…"
+              placeholder="Conditions or anything worth remembering…"
               rows={2}
             />
             {error && <p className="inline-error">{error}</p>}
@@ -7585,12 +7489,7 @@ export function BodyCompositionScreen({
               <h2>Body composition</h2>
             </div>
           </div>
-          <BodyTrendChart
-            measurements={measurements}
-            goals={goals}
-            phases={[...goals, ...phases]}
-            currentMode={trainingMode}
-          />
+          <BodyTrendChart measurements={measurements} goals={goals} />
         </section>
       )}
 
@@ -7743,22 +7642,19 @@ export function BodyCompositionScreen({
 function BodyTrendChart({
   measurements,
   goals,
-  phases,
-  currentMode,
 }: {
   measurements: BodyMeasurement[];
   goals: BodyWeightGoal[];
-  phases: Array<Pick<TrainingPhase, 'start_date' | 'mode'>>;
-  currentMode: TrainingMode;
 }) {
   const [displayRange, setDisplayRange] = useState<BodyTrendRange>('1m');
   const [activePointIndex, setActivePointIndex] = useState<number | null>(null);
   const [showWeight, setShowWeight] = useState(true);
   const [showBodyFat, setShowBodyFat] = useState(true);
+  const [chartExpanded, setChartExpanded] = useState(false);
+  const { svgRef, width } = useResponsiveChartWidth(chartExpanded);
   const visibleMeasurements = filterMeasurementsByRange(measurements, displayRange);
   const ordered = visibleMeasurements.slice().reverse();
-  const width = 340;
-  const height = 190;
+  const height = DEFAULT_CHART_HEIGHT;
   const left = 42;
   const right = 38;
   const top = 18;
@@ -7816,17 +7712,17 @@ function BodyTrendChart({
     .filter((point): point is { x: number; y: number } => point !== null)
     .map((point) => `${point.x},${point.y}`)
     .join(' ');
-  const fallbackMode = phases.length ? 'maintenance' : currentMode;
-  const weightSegments = splitWeightLineByPhase(weightPoints, phases, fallbackMode);
+  const weightLinePoints = weightPoints.map((point) => `${point.x},${point.y}`).join(' ');
   const yFractions = [0, 0.5, 1];
-  const xTicks = [...new Set([domainStart, domainStart + domainSpan / 2, domainEnd])];
+  const xTickCount = width > 500 ? 5 : 3;
+  const xTicks = Array.from(
+    { length: xTickCount },
+    (_, index) => domainStart + (domainSpan * index) / Math.max(xTickCount - 1, 1),
+  );
   const activeMeasurement = activePointIndex === null ? null : (ordered[activePointIndex] ?? null);
   const activeWeightPoint =
     activePointIndex === null ? null : (weightPoints[activePointIndex] ?? null);
   const activeFatPoint = activePointIndex === null ? null : (fatPoints[activePointIndex] ?? null);
-  const activeMode = activeMeasurement
-    ? trainingPhaseAtDate(activeMeasurement.measurement_date, phases, fallbackMode)
-    : null;
   const tooltipWidth = 112;
   const tooltipValueCount =
     Number(weightVisible) + Number(bodyFatVisible && activeMeasurement?.body_fat_pct !== null);
@@ -7873,6 +7769,7 @@ function BodyTrendChart({
   return (
     <LandscapeChartFrame
       title="Body composition trend"
+      onExpandedChange={setChartExpanded}
       controls={
         <>
           <label className="chart-option-field">
@@ -7921,6 +7818,7 @@ function BodyTrendChart({
           {ordered.length} {ordered.length === 1 ? 'check-in' : 'check-ins'} shown
         </span>
         <svg
+          ref={svgRef}
           viewBox={`0 0 ${width} ${height}`}
           role="img"
           aria-label="Body composition trend with dated bodyweight goal paths. Drag horizontally to inspect each check-in."
@@ -7981,30 +7879,11 @@ function BodyTrendChart({
             y1={height - bottom}
             y2={height - bottom}
           />
+          {weightVisible && <polyline className="weight-line" points={weightLinePoints} />}
           {weightVisible &&
-            weightSegments.map((segment, index) => (
-              <line
-                className={`weight-segment phase-${segment.mode}`}
-                key={`${segment.x1}-${segment.x2}-${index}`}
-                x1={segment.x1}
-                y1={segment.y1}
-                x2={segment.x2}
-                y2={segment.y2}
-              />
+            weightPoints.map((point) => (
+              <circle className="weight-point" key={point.date} cx={point.x} cy={point.y} r="2.8" />
             ))}
-          {weightVisible &&
-            weightPoints.map((point) => {
-              const mode = trainingPhaseAtDate(point.date, phases, fallbackMode);
-              return (
-                <circle
-                  className={`weight-point phase-${mode}`}
-                  key={point.date}
-                  cx={point.x}
-                  cy={point.y}
-                  r="2.8"
-                />
-              );
-            })}
           {weightVisible &&
             relevantGoals.map((goal, index) => {
               const startRatio =
@@ -8082,7 +7961,7 @@ function BodyTrendChart({
               Body fat %
             </text>
           )}
-          {activeMeasurement && activeWeightPoint && activeMode && (
+          {activeMeasurement && activeWeightPoint && (
             <g className="body-chart-selection" aria-hidden="true">
               <line
                 className="selection-guide"
@@ -8093,7 +7972,7 @@ function BodyTrendChart({
               />
               {weightVisible && (
                 <circle
-                  className={`selected-weight-point phase-${activeMode}`}
+                  className="selected-weight-point"
                   cx={activeWeightPoint.x}
                   cy={activeWeightPoint.y}
                   r="5"
@@ -8123,11 +8002,7 @@ function BodyTrendChart({
                     )}
                   </tspan>
                   {weightVisible && (
-                    <tspan
-                      className={`tooltip-weight phase-${activeMode}`}
-                      x={tooltipX + 8}
-                      dy="11"
-                    >
+                    <tspan className="tooltip-weight" x={tooltipX + 8} dy="11">
                       {activeMeasurement.weight_kg} kg
                     </tspan>
                   )}
@@ -8148,17 +8023,9 @@ function BodyTrendChart({
         </p>
         <div className="body-chart-legend" aria-label="Chart legend">
           {weightVisible && (
-            <>
-              <span>
-                <i className="phase-cut" /> Cut
-              </span>
-              <span>
-                <i className="phase-maintenance" /> Maintenance
-              </span>
-              <span>
-                <i className="phase-bulk" /> Bulk
-              </span>
-            </>
+            <span>
+              <i className="weight" /> Body weight
+            </span>
           )}
           {bodyFatVisible && (
             <span>
@@ -8203,6 +8070,7 @@ function CardioScreen({
     average_speed_kph: null,
     incline_percent: null,
     average_power_watts: null,
+    average_mets: null,
     intensity: null,
     zone: 'Zone 2',
     qualifies_zone2: true,
@@ -8257,6 +8125,7 @@ function CardioScreen({
         average_speed_kph: scan.average_speed_kph,
         incline_percent: null,
         average_power_watts: null,
+        average_mets: null,
       }));
       const scanned = scan.fields_found.join(', ');
       const activityWarning =
@@ -8332,14 +8201,17 @@ function CardioScreen({
       0,
     ),
   }));
-  const fitnessScores = cardioSessionScores(overview.sessions, today);
   const filteredSessions = overview.sessions.filter(
-    (session) => historyFilter === 'all' || cardioWorkoutContext(session) === historyFilter,
+    (session) =>
+      historyFilter === 'all' ||
+      (session.workout_context === 'workout_plus_cardio'
+        ? 'workout_plus_cardio'
+        : 'pure_cardio') === historyFilter,
   );
   return (
     <div className="cardio-screen">
       {error && <p className="inline-error">{error}</p>}
-      <CardioEnergyCard summaries={overview.energy_periods} sessions={overview.sessions} />
+      <CardioEnergyCard summaries={overview.energy_periods} />
       {metricSession && (
         <CardioMetricsEditor
           key={metricSession.id}
@@ -8535,10 +8407,25 @@ function CardioScreen({
               />
             </label>
           )}
+          <label>
+            Average METs
+            <input
+              type="number"
+              min="0.1"
+              max="50"
+              step="0.1"
+              inputMode="decimal"
+              value={draft.average_mets ?? ''}
+              onChange={(event) =>
+                setDraft({ ...draft, average_mets: numberOrNull(event.target.value) })
+              }
+              placeholder="e.g. 7.5"
+            />
+          </label>
         </div>
         <p className="cardio-calorie-hint">
           Performance metrics are optional. For calories, prefer your watch or machine’s active
-          calorie estimate.
+          calorie estimate. MET-minutes are calculated as average METs × session minutes.
         </p>
         <textarea
           value={draft.notes ?? ''}
@@ -8580,13 +8467,7 @@ function CardioScreen({
       </section>
       <section className="panel cardio-history">
         <div className="cardio-history-header">
-          <div className="cardio-history-title">
-            <h2>Cardio history</h2>
-            <InfoPopover label="How cardio fitness baselines work">
-              Fitness scores use separate baselines for cardio-only sessions and sessions performed
-              after a strength workout.
-            </InfoPopover>
-          </div>
+          <h2>Cardio history</h2>
           <div className="cardio-history-filters" role="group" aria-label="Filter cardio history">
             {[
               ['all', 'All'],
@@ -8610,17 +8491,11 @@ function CardioScreen({
           <p className="cardio-history-empty">No cardio sessions match this filter.</p>
         )}
         {filteredSessions.map((session) => {
-          const workoutContext = cardioWorkoutContext(session);
-          const fitnessScore = fitnessScores.get(session.id);
-          const normalizedActivity = session.activity_type.toLocaleLowerCase();
-          const supportsFitnessScore =
-            normalizedActivity.includes('cycl') ||
-            normalizedActivity.includes('bike') ||
-            (normalizedActivity.includes('walk') && normalizedActivity.includes('treadmill'));
+          const workoutContext =
+            session.workout_context === 'workout_plus_cardio'
+              ? 'workout_plus_cardio'
+              : 'pure_cardio';
           const workoutName = session.source_workout_name?.replace(/\s+workout$/i, '');
-          const pendingScoreExplanation = `Needs a three-session ${
-            workoutContext === 'workout_plus_cardio' ? 'after-workout' : 'cardio-only'
-          } baseline and complete workload and heart-rate metrics.`;
           return (
             <article key={session.id}>
               <div>
@@ -8664,24 +8539,17 @@ function CardioScreen({
                     session.average_power_watts == null
                       ? null
                       : `${session.average_power_watts} W avg`,
+                    session.average_mets == null ? null : `${session.average_mets} METs avg`,
+                    session.average_mets == null
+                      ? null
+                      : `${(session.average_mets * session.duration_minutes).toLocaleString(
+                          undefined,
+                          { maximumFractionDigits: 1 },
+                        )} MET-min`,
                   ]
                     .filter((value): value is string => value !== null)
                     .join(' · ') || 'Performance metrics not logged'}
                 </small>
-                {fitnessScore && (
-                  <small className="cardio-session-fitness">
-                    Fitness {fitnessScore.score}/100
-                    {fitnessScore.isBaselineSession ? ' · Baseline reference' : ''}
-                  </small>
-                )}
-                {!fitnessScore && supportsFitnessScore && (
-                  <small className="cardio-session-fitness unavailable">
-                    Fitness score pending.
-                    <InfoPopover label="Why the fitness score is pending">
-                      {pendingScoreExplanation}
-                    </InfoPopover>
-                  </small>
-                )}
               </div>
               <div className="cardio-session-actions">
                 <button
@@ -8696,6 +8564,7 @@ function CardioScreen({
                     session.average_speed_kph,
                     session.incline_percent,
                     session.average_power_watts,
+                    session.average_mets,
                   ].some((value) => value != null)
                     ? 'Edit metrics'
                     : 'Log metrics'}

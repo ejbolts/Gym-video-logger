@@ -21,6 +21,7 @@ export function CardioMetricsEditor({
   const [speed, setSpeed] = useState(session.average_speed_kph?.toString() ?? '');
   const [incline, setIncline] = useState(session.incline_percent?.toString() ?? '');
   const [power, setPower] = useState(session.average_power_watts?.toString() ?? '');
+  const [mets, setMets] = useState(session.average_mets?.toString() ?? '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -40,6 +41,7 @@ export function CardioMetricsEditor({
               average_speed_kph: optionalNumber(speed),
               incline_percent: optionalNumber(incline),
               average_power_watts: optionalNumber(power),
+              average_mets: optionalNumber(mets),
             });
             onClose();
           } catch (reason) {
@@ -128,8 +130,24 @@ export function CardioMetricsEditor({
               />
             </label>
           )}
+          <label>
+            Average METs
+            <input
+              type="number"
+              inputMode="decimal"
+              min="0.1"
+              max="50"
+              step="0.1"
+              value={mets}
+              onChange={(event) => setMets(event.target.value)}
+              placeholder="e.g. 7.5"
+            />
+          </label>
         </div>
-        <p className="cardio-metric-hint">All performance fields are optional.</p>
+        <p className="cardio-metric-hint">
+          All performance fields are optional. MET-minutes are calculated as average METs × session
+          minutes.
+        </p>
         {error && <p className="inline-error">{error}</p>}
         <footer className="popup-dialog-actions">
           <button type="button" disabled={saving} onClick={onClose}>

@@ -1,0 +1,266 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1355" height="1785" viewBox="0 0 1355 1785">
+  <defs>
+    <linearGradient id="board" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#15191b"/>
+      <stop offset="1" stop-color="#101314"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="9" flood-color="#000" flood-opacity=".25"/>
+    </filter>
+    <style>
+      .card { fill:#191c1e; stroke:#3b4144; stroke-width:2; }
+      .body { fill:none; stroke:#d8d6d3; stroke-width:7; stroke-linecap:round; stroke-linejoin:round; }
+      .body-thin { fill:none; stroke:#d8d6d3; stroke-width:5; stroke-linecap:round; stroke-linejoin:round; }
+      .equip { fill:none; stroke:#6d777c; stroke-width:7; stroke-linecap:round; stroke-linejoin:round; }
+      .equip-thin { fill:none; stroke:#6d777c; stroke-width:5; stroke-linecap:round; stroke-linejoin:round; }
+      .weight { fill:#6d777c; }
+      .muscle { fill:#28acef; }
+      .label { fill:#eeece8; font-family:'Segoe UI',Arial,sans-serif; font-size:19px; font-weight:750; letter-spacing:1.5px; text-anchor:middle; }
+      .sub { fill:#28acef; font-family:'Segoe UI',Arial,sans-serif; font-size:12px; font-weight:700; letter-spacing:2px; text-anchor:middle; }
+      .tiny { fill:#858d91; font-family:'Segoe UI',Arial,sans-serif; font-size:15px; font-weight:600; letter-spacing:1px; }
+    </style>
+  </defs>
+
+  <rect width="1355" height="1785" fill="url(#board)"/>
+  <circle cx="48" cy="52" r="8" fill="#28acef"/>
+  <text x="70" y="60" fill="#f2f0ed" font-family="'Segoe UI',Arial,sans-serif" font-size="34" font-weight="760" letter-spacing="-.5">Exercise icon system</text>
+  <text x="42" y="97" class="tiny">CONCEPT 01 · MOTION SILHOUETTES + PRIMARY MUSCLE HIGHLIGHTS · 24 ICONS</text>
+  <path d="M42 120H1313" stroke="#303639" stroke-width="2"/>
+
+  <!-- Row 1 -->
+  <g filter="url(#shadow)"><rect class="card" x="40" y="145" width="300" height="250" rx="22"/></g>
+  <g transform="translate(80 160)">
+    <path class="equip" d="M35 144H205M55 144V166M185 144V166"/>
+    <circle class="body" cx="120" cy="126" r="13"/>
+    <path class="body" d="M72 103Q120 91 168 103M72 103V64M168 103V64M72 64L52 48M168 64L188 48"/>
+    <rect class="muscle" x="99" y="94" width="42" height="13" rx="7"/>
+    <path class="equip-thin" d="M32 45H208"/>
+    <g class="weight"><rect x="24" y="27" width="8" height="36" rx="3"/><rect x="14" y="34" width="8" height="22" rx="3"/><rect x="208" y="27" width="8" height="36" rx="3"/><rect x="218" y="34" width="8" height="22" rx="3"/></g>
+  </g>
+  <text class="label" x="190" y="357">BENCH PRESS</text><text class="sub" x="190" y="379">CHEST</text>
+
+  <g filter="url(#shadow)"><rect class="card" x="365" y="145" width="300" height="250" rx="22"/></g>
+  <g transform="translate(405 160)">
+    <circle class="body" cx="120" cy="78" r="13"/>
+    <path class="body" d="M120 94V142M120 142L91 168M120 142L149 168M94 105L70 78L70 43M146 105L170 78L170 43"/>
+    <ellipse class="muscle" cx="94" cy="104" rx="12" ry="8" transform="rotate(32 94 104)"/><ellipse class="muscle" cx="146" cy="104" rx="12" ry="8" transform="rotate(-32 146 104)"/>
+    <path class="equip-thin" d="M48 39H192"/>
+    <g class="weight"><rect x="39" y="22" width="9" height="34" rx="3"/><rect x="28" y="29" width="8" height="20" rx="3"/><rect x="192" y="22" width="9" height="34" rx="3"/><rect x="204" y="29" width="8" height="20" rx="3"/></g>
+  </g>
+  <text class="label" x="515" y="357">OVERHEAD PRESS</text><text class="sub" x="515" y="379">SHOULDERS</text>
+
+  <g filter="url(#shadow)"><rect class="card" x="690" y="145" width="300" height="250" rx="22"/></g>
+  <g transform="translate(730 160)">
+    <circle class="body" cx="120" cy="64" r="13"/>
+    <path class="body" d="M120 80V142M120 142L94 169M120 142L146 169M101 91L58 86L25 58M139 91L182 86L215 58"/>
+    <path class="muscle" d="M101 89Q120 82 120 105Q105 106 98 99Z"/><path class="muscle" d="M139 89Q120 82 120 105Q135 106 142 99Z"/>
+    <circle class="equip" cx="23" cy="56" r="5"/><circle class="equip" cx="217" cy="56" r="5"/><path class="equip-thin" d="M23 51L7 28M217 51L233 28"/>
+  </g>
+  <text class="label" x="840" y="357">CHEST FLY</text><text class="sub" x="840" y="379">CHEST</text>
+
+  <g filter="url(#shadow)"><rect class="card" x="1015" y="145" width="300" height="250" rx="22"/></g>
+  <g transform="translate(1055 160)">
+    <path class="equip" d="M190 22V168M190 32H164M158 48V99"/>
+    <circle class="body" cx="99" cy="52" r="13"/>
+    <path class="body" d="M98 68L87 112L92 159M87 112L68 156M94 78L125 93L145 79M125 93L145 110L158 102"/>
+    <path class="muscle" d="M112 82Q124 84 130 91L124 103Q113 97 105 91Z"/>
+    <path class="equip-thin" d="M145 79L158 48M149 109H169"/>
+  </g>
+  <text class="label" x="1165" y="357">TRICEPS PUSHDOWN</text><text class="sub" x="1165" y="379">TRICEPS</text>
+
+  <!-- Row 2 -->
+  <g filter="url(#shadow)"><rect class="card" x="40" y="415" width="300" height="250" rx="22"/></g>
+  <g transform="translate(80 430)">
+    <path class="equip" d="M120 24V46M55 43H185M74 43L91 82M166 43L149 82M76 158H164M90 158V176M150 158V176"/>
+    <circle class="body" cx="120" cy="77" r="13"/>
+    <path class="body" d="M120 93V150M91 82L104 104M149 82L136 104"/>
+    <path class="muscle" d="M103 99Q89 113 94 145Q108 131 116 108Z"/><path class="muscle" d="M137 99Q151 113 146 145Q132 131 124 108Z"/>
+  </g>
+  <text class="label" x="190" y="627">LAT PULLDOWN</text><text class="sub" x="190" y="649">LATS</text>
+
+  <g filter="url(#shadow)"><rect class="card" x="365" y="415" width="300" height="250" rx="22"/></g>
+  <g transform="translate(405 430)">
+    <path class="equip" d="M45 142H127M45 142V160M188 130L204 162M180 144H205M145 97H222"/>
+    <circle class="body" cx="78" cy="59" r="13"/>
+    <path class="body" d="M77 75L67 119L112 137M67 119L100 145L159 145M86 86L122 103L153 99M122 103L154 105"/>
+    <path class="muscle" d="M74 78Q92 82 105 98L93 110Q76 101 67 91Z"/>
+    <rect class="equip" x="153" y="95" width="12" height="14" rx="4"/>
+  </g>
+  <text class="label" x="515" y="627">SEATED ROW</text><text class="sub" x="515" y="649">UPPER BACK</text>
+
+  <g filter="url(#shadow)"><rect class="card" x="690" y="415" width="300" height="250" rx="22"/></g>
+  <g transform="translate(730 430)">
+    <circle class="body" cx="120" cy="54" r="13"/>
+    <path class="body" d="M120 70V137M120 137L94 170M120 137L146 170M103 84L83 105L62 88M137 84L157 105L178 88"/>
+    <ellipse class="muscle" cx="92" cy="96" rx="8" ry="16" transform="rotate(42 92 96)"/><ellipse class="muscle" cx="148" cy="96" rx="8" ry="16" transform="rotate(-42 148 96)"/>
+    <g class="weight"><rect x="42" y="78" width="8" height="20" rx="3"/><rect x="51" y="82" width="10" height="12" rx="3"/><rect x="190" y="78" width="8" height="20" rx="3"/><rect x="179" y="82" width="10" height="12" rx="3"/></g>
+  </g>
+  <text class="label" x="840" y="627">BICEPS CURL</text><text class="sub" x="840" y="649">BICEPS</text>
+
+  <g filter="url(#shadow)"><rect class="card" x="1015" y="415" width="300" height="250" rx="22"/></g>
+  <g transform="translate(1055 430)">
+    <path class="equip-thin" d="M35 148H208"/><g class="weight"><rect x="26" y="132" width="9" height="32" rx="3"/><rect x="17" y="138" width="7" height="20" rx="3"/><rect x="208" y="132" width="9" height="32" rx="3"/><rect x="219" y="138" width="7" height="20" rx="3"/></g>
+    <circle class="body" cx="139" cy="54" r="13"/>
+    <path class="body" d="M132 69L96 101L77 148M96 101L139 110L165 148M111 86L129 113L115 146M131 77L160 100L184 145"/>
+    <ellipse class="muscle" cx="101" cy="100" rx="14" ry="10" transform="rotate(-38 101 100)"/><path class="muscle" d="M137 109Q153 111 162 132L153 141Q137 129 128 114Z"/>
+  </g>
+  <text class="label" x="1165" y="627">DEADLIFT</text><text class="sub" x="1165" y="649">POSTERIOR CHAIN</text>
+
+  <!-- Row 3 -->
+  <g filter="url(#shadow)"><rect class="card" x="40" y="685" width="300" height="250" rx="22"/></g>
+  <g transform="translate(80 700)">
+    <path class="equip-thin" d="M37 59H203"/><g class="weight"><rect x="28" y="43" width="9" height="32" rx="3"/><rect x="18" y="49" width="7" height="20" rx="3"/><rect x="203" y="43" width="9" height="32" rx="3"/><rect x="214" y="49" width="7" height="20" rx="3"/></g>
+    <circle class="body" cx="120" cy="38" r="13"/>
+    <path class="body" d="M120 54V108M84 61L120 70L156 61M120 108L84 128L67 166M120 108L156 128L173 166"/>
+    <path class="muscle" d="M91 125Q105 116 112 120L99 151Q88 146 82 137Z"/><path class="muscle" d="M149 125Q135 116 128 120L141 151Q152 146 158 137Z"/>
+  </g>
+  <text class="label" x="190" y="897">BACK SQUAT</text><text class="sub" x="190" y="919">QUADS + GLUTES</text>
+
+  <g filter="url(#shadow)"><rect class="card" x="365" y="685" width="300" height="250" rx="22"/></g>
+  <g transform="translate(405 700)">
+    <path class="equip" d="M32 150L74 87M45 158H182M173 31L213 81M181 40L137 87"/>
+    <circle class="body" cx="80" cy="79" r="12"/>
+    <path class="body" d="M74 92L90 129L129 138M90 129L61 144M87 103L125 114L151 82M125 114L150 116L174 72"/>
+    <path class="muscle" d="M111 111Q128 108 143 93L151 105Q139 124 122 130Z"/>
+    <path class="equip-thin" d="M174 63L200 46M165 55L191 38"/>
+  </g>
+  <text class="label" x="515" y="897">LEG PRESS</text><text class="sub" x="515" y="919">QUADS</text>
+
+  <g filter="url(#shadow)"><rect class="card" x="690" y="685" width="300" height="250" rx="22"/></g>
+  <g transform="translate(730 700)">
+    <path class="equip" d="M38 119H177M62 119V151M165 119V151M178 101V151"/>
+    <circle class="body" cx="190" cy="75" r="12"/>
+    <path class="body" d="M177 82L139 103L84 104M84 104L49 92M139 103L108 128L78 109M108 128L76 146"/>
+    <path class="muscle" d="M138 100Q118 104 101 116L111 129Q131 120 150 106Z"/>
+    <circle class="equip" cx="68" cy="151" r="9"/>
+  </g>
+  <text class="label" x="840" y="897">HAMSTRING CURL</text><text class="sub" x="840" y="919">HAMSTRINGS</text>
+
+  <g filter="url(#shadow)"><rect class="card" x="1015" y="685" width="300" height="250" rx="22"/></g>
+  <g transform="translate(1055 700)">
+    <path class="equip" d="M32 107H76M39 107V145M195 145H220"/>
+    <circle class="body" cx="58" cy="84" r="12"/>
+    <path class="body" d="M69 92L105 113L155 112M105 113L76 140M155 112L190 128L202 161M155 112L175 157"/>
+    <ellipse class="muscle" cx="145" cy="111" rx="19" ry="12"/>
+    <path class="equip-thin" d="M125 101H169"/><g class="weight"><rect x="120" y="91" width="6" height="20" rx="2"/><rect x="169" y="91" width="6" height="20" rx="2"/></g>
+  </g>
+  <text class="label" x="1165" y="897">HIP THRUST</text><text class="sub" x="1165" y="919">GLUTES</text>
+
+  <!-- Row 4 -->
+  <g filter="url(#shadow)"><rect class="card" x="40" y="955" width="300" height="250" rx="22"/></g>
+  <g transform="translate(80 970)">
+    <path class="equip" d="M50 38V174M190 38V174M50 58H78M162 58H190M62 174H178"/>
+    <circle class="body" cx="120" cy="48" r="13"/>
+    <path class="body" d="M120 64V123M120 81L78 59M120 81L162 59M120 123L96 170M120 123L144 170"/>
+    <path class="muscle" d="M91 143Q100 147 106 157L98 174Q87 165 86 154Z"/><path class="muscle" d="M149 143Q140 147 134 157L142 174Q153 165 154 154Z"/>
+  </g>
+  <text class="label" x="190" y="1167">CALF RAISE</text><text class="sub" x="190" y="1189">CALVES</text>
+
+  <g filter="url(#shadow)"><rect class="card" x="365" y="955" width="300" height="250" rx="22"/></g>
+  <g transform="translate(405 970)">
+    <circle class="body" cx="72" cy="70" r="13"/>
+    <path class="body" d="M82 78Q111 88 127 119Q145 145 174 151M76 86L53 103M127 119L163 108L196 137M127 119L97 145L73 165"/>
+    <path class="muscle" d="M94 91Q116 101 126 121L111 134Q95 120 86 101Z"/>
+    <path class="body-thin" d="M100 100L109 99M105 111L116 109M110 122L121 118"/>
+  </g>
+  <text class="label" x="515" y="1167">CRUNCH</text><text class="sub" x="515" y="1189">CORE</text>
+
+  <g filter="url(#shadow)"><rect class="card" x="690" y="955" width="300" height="250" rx="22"/></g>
+  <g transform="translate(730 970)">
+    <circle class="body" cx="130" cy="46" r="12"/>
+    <path class="body" d="M124 60L101 101L76 128M106 88L139 93L162 72M101 101L128 128L177 153M101 101L77 139L43 161"/>
+    <path class="muscle" d="M112 71C112 62 124 61 128 70C132 61 144 62 144 71C144 81 128 91 128 91C128 91 112 81 112 71Z"/>
+  </g>
+  <text class="label" x="840" y="1167">RUNNING</text><text class="sub" x="840" y="1189">CARDIO</text>
+
+  <g filter="url(#shadow)"><rect class="card" x="1015" y="955" width="300" height="250" rx="22"/></g>
+  <g transform="translate(1055 970)">
+    <circle class="equip" cx="74" cy="141" r="34"/><circle class="equip" cx="180" cy="141" r="34"/>
+    <path class="equip" d="M74 141L112 88L141 141H74L114 141L180 141L150 95M112 88H139M148 94L161 75"/>
+    <circle class="body" cx="124" cy="43" r="12"/>
+    <path class="body" d="M119 57L100 84L139 87L159 76M101 84L134 111L151 139M134 111L105 141"/>
+    <path class="muscle" d="M111 65C111 58 120 57 124 64C128 57 137 58 137 65C137 73 124 81 124 81C124 81 111 73 111 65Z"/>
+  </g>
+  <text class="label" x="1165" y="1167">CYCLING</text><text class="sub" x="1165" y="1189">CARDIO</text>
+
+  <!-- Row 5: machine and movement-specific additions -->
+  <g filter="url(#shadow)"><rect class="card" x="40" y="1225" width="300" height="250" rx="22"/></g>
+  <g transform="translate(80 1240)">
+    <path class="equip" d="M42 28V168M198 28V168M42 43H73M167 43H198M86 157H154M99 157V174M141 157V174"/>
+    <circle class="body" cx="120" cy="61" r="13"/>
+    <path class="body" d="M120 77V145M101 92L82 108L70 82M139 92L158 108L170 82"/>
+    <path class="muscle" d="M101 90Q120 83 120 106Q105 107 98 100Z"/><path class="muscle" d="M139 90Q120 83 120 106Q135 107 142 100Z"/>
+    <path class="equip-thin" d="M70 66V94M170 66V94"/>
+    <rect class="weight" x="62" y="66" width="16" height="9" rx="4"/><rect class="weight" x="162" y="66" width="16" height="9" rx="4"/>
+  </g>
+  <text class="label" x="190" y="1437">PEC DECK</text><text class="sub" x="190" y="1459">CHEST</text>
+
+  <g filter="url(#shadow)"><rect class="card" x="365" y="1225" width="300" height="250" rx="22"/></g>
+  <g transform="translate(405 1240)">
+    <path class="equip" d="M54 171L182 35M77 171L205 35M45 171H209M165 47L195 76M73 131L106 98"/>
+    <circle class="body" cx="128" cy="72" r="12"/>
+    <path class="body" d="M119 82L99 111L125 135M99 111L72 139L61 169M125 135L160 139L188 163M111 94L139 108L157 89"/>
+    <path class="muscle" d="M102 111Q118 113 135 130L126 144Q107 136 92 122Z"/>
+    <path class="equip-thin" d="M175 153L202 168"/>
+  </g>
+  <text class="label" x="515" y="1437">HACK SQUAT</text><text class="sub" x="515" y="1459">QUADS</text>
+
+  <g filter="url(#shadow)"><rect class="card" x="690" y="1225" width="300" height="250" rx="22"/></g>
+  <g transform="translate(730 1240)">
+    <path class="equip" d="M26 163L207 121M39 171L217 129M185 49V129M166 49H205M47 171H25M207 129H224"/>
+    <circle class="body" cx="107" cy="47" r="12"/>
+    <path class="body" d="M104 61L93 104L121 121M97 80L134 91L164 66M93 104L67 136L48 158M121 121L151 145L179 144"/>
+    <path class="muscle" d="M92 97Q105 101 118 117L108 128Q92 121 82 110Z"/>
+    <path class="muscle" d="M97 72C97 65 106 64 110 71C114 64 123 65 123 72C123 80 110 88 110 88C110 88 97 80 97 72Z"/>
+  </g>
+  <text class="label" x="840" y="1437">INCLINE WALK</text><text class="sub" x="840" y="1459">CARDIO + GLUTES</text>
+
+  <g filter="url(#shadow)"><rect class="card" x="1015" y="1225" width="300" height="250" rx="22"/></g>
+  <g transform="translate(1055 1240)">
+    <circle class="body" cx="120" cy="51" r="13"/>
+    <path class="body" d="M120 67V139M120 139L94 171M120 139L146 171M103 82L69 103L32 92M137 82L171 103L208 92"/>
+    <ellipse class="muscle" cx="101" cy="83" rx="12" ry="8" transform="rotate(-18 101 83)"/><ellipse class="muscle" cx="139" cy="83" rx="12" ry="8" transform="rotate(18 139 83)"/>
+    <g class="weight"><rect x="18" y="82" width="9" height="21" rx="3"/><rect x="28" y="86" width="8" height="13" rx="3"/><rect x="213" y="82" width="9" height="21" rx="3"/><rect x="204" y="86" width="8" height="13" rx="3"/></g>
+  </g>
+  <text class="label" x="1165" y="1437">LATERAL RAISE</text><text class="sub" x="1165" y="1459">SIDE DELTS</text>
+
+  <!-- Row 6 -->
+  <g filter="url(#shadow)"><rect class="card" x="40" y="1495" width="300" height="250" rx="22"/></g>
+  <g transform="translate(80 1510)">
+    <path class="equip" d="M35 31H205M50 22V40M190 22V40"/>
+    <circle class="body" cx="120" cy="85" r="12"/>
+    <path class="body" d="M72 34L91 61L103 76M168 34L149 61L137 76M120 98V140M120 140L95 171M120 140L145 171"/>
+    <path class="muscle" d="M103 73Q91 88 97 120Q111 106 116 84Z"/><path class="muscle" d="M137 73Q149 88 143 120Q129 106 124 84Z"/>
+  </g>
+  <text class="label" x="190" y="1707">PULL-UP</text><text class="sub" x="190" y="1729">LATS</text>
+
+  <g filter="url(#shadow)"><rect class="card" x="365" y="1495" width="300" height="250" rx="22"/></g>
+  <g transform="translate(405 1510)">
+    <path class="equip" d="M207 28V172M207 43H186M184 48L145 81"/>
+    <circle class="body" cx="100" cy="69" r="12"/>
+    <path class="body" d="M96 82L84 125L91 167M84 125L67 164M92 91L124 103L145 82M124 103L147 105L165 87"/>
+    <ellipse class="muscle" cx="91" cy="90" rx="12" ry="8" transform="rotate(-35 91 90)"/>
+    <path class="equip-thin" d="M145 82L171 67M147 105L175 99M171 67L185 53M175 99L187 109"/>
+  </g>
+  <text class="label" x="515" y="1707">FACE PULL</text><text class="sub" x="515" y="1729">REAR DELTS</text>
+
+  <g filter="url(#shadow)"><rect class="card" x="690" y="1495" width="300" height="250" rx="22"/></g>
+  <g transform="translate(730 1510)">
+    <path class="equip" d="M42 65L71 122M55 122H132M55 122V155M124 122V155M177 87V161M165 161H194"/>
+    <circle class="body" cx="79" cy="51" r="12"/>
+    <path class="body" d="M75 64L85 101L117 112M85 101L59 118M117 112L155 108L182 117M155 108L185 106"/>
+    <path class="muscle" d="M111 105Q132 100 152 104L151 119Q129 123 111 116Z"/>
+    <circle class="equip" cx="193" cy="112" r="10"/>
+  </g>
+  <text class="label" x="840" y="1707">LEG EXTENSION</text><text class="sub" x="840" y="1729">QUADS</text>
+
+  <g filter="url(#shadow)"><rect class="card" x="1015" y="1495" width="300" height="250" rx="22"/></g>
+  <g transform="translate(1055 1510)">
+    <path class="equip" d="M56 173H203M72 173L98 145L124 145L148 117L174 117L198 89M178 43H207V172M178 43L156 82"/>
+    <circle class="body" cx="125" cy="47" r="12"/>
+    <path class="body" d="M121 60L107 104L136 120M112 78L150 87L174 61M107 104L88 139L66 162M136 120L164 139L189 134"/>
+    <path class="muscle" d="M112 70C112 63 121 62 125 69C129 62 138 63 138 70C138 78 125 86 125 86C125 86 112 78 112 70Z"/>
+    <ellipse class="muscle" cx="111" cy="105" rx="15" ry="10" transform="rotate(33 111 105)"/>
+  </g>
+  <text class="label" x="1165" y="1707">STAIR CLIMBER</text><text class="sub" x="1165" y="1729">CARDIO + GLUTES</text>
+</svg>

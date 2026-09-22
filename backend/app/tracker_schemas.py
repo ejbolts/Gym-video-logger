@@ -10,7 +10,6 @@ from .models import (
     MuscleRole,
     PersonalRecordType,
     SetType,
-    TrainingMode,
     WorkoutCategory,
 )
 
@@ -285,46 +284,22 @@ class WorkoutRecommendationRead(BaseModel):
     muscle_frequency: list[MuscleFrequencyRead]
 
 
-class TrainingModeUpdate(BaseModel):
-    mode: TrainingMode
-    effective_date: date = Field(default_factory=date.today)
-
-
-class TrainingModeRead(BaseModel):
-    mode: TrainingMode
-
-
-class TrainingPhaseRead(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: str
-    start_date: date
-    mode: TrainingMode
-    created_at: datetime
-
-
-class WeeklyMuscleGoalRead(BaseModel):
+class WeeklyMuscleSetsRead(BaseModel):
     muscle_group: str
     raw_sets: float
     effective_sets: float
-    target_sets: int
     average_rpe: float | None
-    status: Literal["below", "on_target", "above"]
 
 
-class WeeklyGoalRead(BaseModel):
-    mode: TrainingMode
+class WeeklySetsRead(BaseModel):
     week_start: date
     week_end: date
-    target_sets_per_muscle: int
     raw_sets: int
     effective_sets: float
     unrated_sets: int
     low_rpe_sets: int
     rpe_logging_percent: float
-    overall_percent: float
-    days_remaining: int
-    muscle_groups: list[WeeklyMuscleGoalRead]
+    muscle_groups: list[WeeklyMuscleSetsRead]
 
 
 class BodyMeasurementCreate(BaseModel):
@@ -362,7 +337,6 @@ class BodyWeightGoalCreate(BaseModel):
     target_date: date
     start_weight_kg: float = Field(gt=0, le=500)
     target_weight_kg: float = Field(gt=0, le=500)
-    mode: TrainingMode
     active: bool = True
 
     @model_validator(mode="after")
@@ -410,6 +384,7 @@ class CardioSessionFields(BaseModel):
     average_speed_kph: float | None = Field(default=None, ge=0, le=100)
     incline_percent: float | None = Field(default=None, ge=0, le=100)
     average_power_watts: int | None = Field(default=None, ge=1, le=3_000)
+    average_mets: float | None = Field(default=None, gt=0, le=50)
     intensity: str | None = Field(default=None, max_length=100)
     zone: str | None = Field(default=None, max_length=30)
     qualifies_zone2: bool = False
@@ -452,6 +427,7 @@ class CardioMetricsUpdate(BaseModel):
     average_speed_kph: float | None = Field(default=None, ge=0, le=100)
     incline_percent: float | None = Field(default=None, ge=0, le=100)
     average_power_watts: int | None = Field(default=None, ge=1, le=3_000)
+    average_mets: float | None = Field(default=None, gt=0, le=50)
 
 
 class CardioEnergyPeriodRead(BaseModel):
@@ -472,10 +448,15 @@ class CardioEnergyPeriodRead(BaseModel):
     previous_average_speed_kph: float | None
     average_incline_percent: float | None
     previous_average_incline_percent: float | None
+    average_mets: float | None
+    previous_average_mets: float | None
+    met_minutes: float
+    previous_met_minutes: float | None
     heart_rate_sessions: int
     distance_sessions: int
     speed_sessions: int
     incline_sessions: int
+    mets_sessions: int
 
 
 class CardioSessionRead(CardioSessionFields):
@@ -529,8 +510,7 @@ class DashboardRead(BaseModel):
     heatmap: list[HeatmapDay]
     weekly_days: list[WeeklyDayBreakdown]
     recommendation: WorkoutRecommendationRead
-    training_mode: TrainingMode
-    weekly_goal: WeeklyGoalRead
+    weekly_sets: WeeklySetsRead
     muscle_volume: list[MuscleVolumeRead]
     zone2: Zone2WeekRead
     recent_workouts: list[TrainingWorkoutRead]

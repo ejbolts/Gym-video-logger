@@ -42,6 +42,7 @@ describe('App startup', () => {
         onExercises={vi.fn()}
         onMeasurements={vi.fn()}
         onSettings={vi.fn()}
+        onVideos={vi.fn()}
         onWorkoutLive={vi.fn()}
         todayBodyweight={null}
         onSaveBodyweight={vi.fn()}
@@ -60,6 +61,8 @@ describe('App startup', () => {
     expect(markup).toContain('dashboard-live-duration');
     expect(markup).toContain('1:05');
     expect(markup).toContain('Measurements');
+    expect(markup).toContain('Video logger');
+    expect(markup).toContain('Upload and combine set clips');
     expect(markup).toContain('DAILY CHECK-IN');
     expect(markup).toContain('Quick select bodyweight');
     expect(markup).not.toContain('Fat-energy equivalent');
@@ -82,6 +85,7 @@ describe('App startup', () => {
         onExercises={vi.fn()}
         onMeasurements={vi.fn()}
         onSettings={vi.fn()}
+        onVideos={vi.fn()}
         onWorkoutLive={vi.fn()}
         todayBodyweight={84.1}
         onSaveBodyweight={vi.fn()}

@@ -21,10 +21,15 @@ const week: CardioEnergyPeriod = {
   previous_average_speed_kph: 8.9,
   average_incline_percent: 7.5,
   previous_average_incline_percent: 6,
+  average_mets: 7.2,
+  previous_average_mets: 6.5,
+  met_minutes: 864,
+  previous_met_minutes: 650,
   heart_rate_sessions: 3,
   distance_sessions: 3,
   speed_sessions: 2,
   incline_sessions: 2,
+  mets_sessions: 3,
 };
 
 describe('cardio energy card', () => {
@@ -32,6 +37,9 @@ describe('cardio energy card', () => {
     const markup = renderToStaticMarkup(<CardioEnergyCard summaries={[week]} />);
     expect(markup).toContain('aria-expanded="false"');
     expect(markup).toContain('Show details +');
+    expect(markup).toContain('864');
+    expect(markup).toContain('MET-min');
+    expect(markup).toContain('7.2 average METs');
     expect(markup).not.toContain('1,540 kcal');
     expect(markup).not.toContain('How comparisons work');
   });

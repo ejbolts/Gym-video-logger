@@ -24,8 +24,6 @@ import type {
   WorkoutCacheRevision,
   WorkoutSnapshot,
   WorkoutSession,
-  TrainingMode,
-  TrainingPhase,
   TrainingPreferences,
 } from './types';
 import { cachedWorkoutsForRevision, readWorkoutCache, writeWorkoutCache } from './workoutCache';
@@ -160,13 +158,6 @@ export const api = {
   deleteMachinePhoto: (photoId: string) =>
     request<void>(`/api/machine-photos/${photoId}`, { method: 'DELETE' }),
   dashboard: () => request<DashboardData>('/api/dashboard'),
-  updateTrainingMode: (mode: TrainingMode, effectiveDate: string) =>
-    request<void>('/api/training-mode', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mode, effective_date: effectiveDate }),
-    }),
-  listTrainingPhases: () => request<TrainingPhase[]>('/api/training-phases'),
   listWorkouts: listCachedWorkouts,
   listBodyMeasurements: () => request<BodyMeasurement[]>('/api/body-measurements'),
   saveBodyMeasurement: (payload: {

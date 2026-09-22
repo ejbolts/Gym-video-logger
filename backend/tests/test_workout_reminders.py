@@ -122,7 +122,7 @@ def test_sunday_week_is_shared_and_future_cardio_is_excluded(client, monkeypatch
     cardio = client.get("/api/cardio").json()
     assert dashboard["cardio_minutes_this_week"] == 111
     assert dashboard["workouts_this_week"] == 2
-    assert dashboard["weekly_goal"]["week_start"] == "2026-09-06"
+    assert dashboard["weekly_sets"]["week_start"] == "2026-09-06"
     assert dashboard["zone2"] == cardio["current_week"]
     assert cardio["current_week"]["completed_minutes"] == 40
     assert cardio["current_week"]["week_end"] == "2026-09-12"

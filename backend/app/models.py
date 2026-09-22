@@ -62,12 +62,6 @@ class ExerciseKind(enum.StrEnum):
     CARDIO = "cardio"
 
 
-class TrainingMode(enum.StrEnum):
-    CUT = "cut"
-    MAINTENANCE = "maintenance"
-    BULK = "bulk"
-
-
 class SetType(enum.StrEnum):
     WARMUP = "warmup"
     NORMAL = "normal"
@@ -224,17 +218,6 @@ class ActiveWorkoutReminder(Base):
     cancelled: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
-class TrainingPhase(Base):
-    __tablename__ = "training_phases"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
-    start_date: Mapped[date] = mapped_column(Date, unique=True)
-    mode: Mapped[TrainingMode] = mapped_column(Enum(TrainingMode, native_enum=False))
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utc_now, server_default=func.now()
-    )
-
-
 class BodyMeasurement(Base):
     __tablename__ = "body_measurements"
 
@@ -265,7 +248,6 @@ class BodyWeightGoal(Base):
     target_date: Mapped[date] = mapped_column(Date)
     start_weight_kg: Mapped[float] = mapped_column(Float)
     target_weight_kg: Mapped[float] = mapped_column(Float)
-    mode: Mapped[TrainingMode] = mapped_column(Enum(TrainingMode, native_enum=False))
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, server_default=func.now()
@@ -592,6 +574,7 @@ class CardioSession(Base):
     average_speed_kph: Mapped[float | None] = mapped_column(Float, nullable=True)
     incline_percent: Mapped[float | None] = mapped_column(Float, nullable=True)
     average_power_watts: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    average_mets: Mapped[float | None] = mapped_column(Float, nullable=True)
     source_exercise_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     intensity: Mapped[str | None] = mapped_column(String(100), nullable=True)
     zone: Mapped[str | None] = mapped_column(String(30), nullable=True)
@@ -660,6 +643,10 @@ class CardioSession(Base):
             "average_power_watts IS NULL OR "
             "(average_power_watts >= 1 AND average_power_watts <= 3000)",
             name="cardio_average_power_range",
+        ),
+        CheckConstraint(
+            "average_mets IS NULL OR (average_mets > 0 AND average_mets <= 50)",
+            name="cardio_average_mets_range",
         ),
         CheckConstraint(
             "duration_minutes > 0 AND duration_minutes <= 1440", name="cardio_duration_range"

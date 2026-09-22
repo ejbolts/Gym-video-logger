@@ -18,7 +18,6 @@ from .config import Settings, get_settings
 from .database import get_db
 from .exercise_aliases import canonical_exercise_name
 from .models import (
-    AppSetting,
     BodyMeasurement,
     BodyWeightGoal,
     CardioSession,
@@ -27,8 +26,6 @@ from .models import (
     MachinePhoto,
     PersonalRecord,
     SupersetGroup,
-    TrainingMode,
-    TrainingPhase,
     TrainingWorkout,
     WorkoutCategory,
     WorkoutMovement,
@@ -69,17 +66,14 @@ from .tracker_schemas import (
     MuscleVolumeRead,
     PersonalRecordRead,
     ProgressPoint,
-    TrainingModeRead,
-    TrainingModeUpdate,
-    TrainingPhaseRead,
     TrainingPreferencesRead,
     TrainingPreferencesUpdate,
     TrainingWorkoutCreate,
     TrainingWorkoutRead,
     WeeklyDayBreakdown,
     WeeklyExerciseBreakdown,
-    WeeklyGoalRead,
-    WeeklyMuscleGoalRead,
+    WeeklyMuscleSetsRead,
+    WeeklySetsRead,
     WorkoutCacheRevisionRead,
     WorkoutRecommendationRead,
     WorkoutSnapshotRead,
@@ -186,30 +180,6 @@ SESSION_NAMES = {
     WorkoutCategory.LOWER: "Legs",
     WorkoutCategory.CARDIO: "Cardio",
 }
-TRAINING_MODE_SETTING_KEY = "training_mode"
-MAINTENANCE_WEIGHT_RANGE_RATIO = 0.01
-WEEKLY_SET_TARGETS = {
-    TrainingMode.CUT: 10,
-    TrainingMode.MAINTENANCE: 12,
-    TrainingMode.BULK: 14,
-}
-SMALL_MUSCLE_GROUPS = {
-    "Biceps",
-    "Calves",
-    "Core",
-    "Forearms",
-    "Front delts",
-    "Hip flexors",
-    "Rear deltoids",
-    "Side delts",
-    "Triceps",
-    "Upper traps",
-}
-
-
-def weekly_set_target(mode: TrainingMode, muscle_group: str) -> int:
-    target = WEEKLY_SET_TARGETS[mode]
-    return target // 2 if muscle_group in SMALL_MUSCLE_GROUPS else target
 
 
 def exercise_muscle_credits(exercise: Exercise) -> list[tuple[str, float]]:
@@ -224,39 +194,9 @@ def exercise_coverage_groups(exercise: Exercise) -> set[str]:
     return {group for group, _ in exercise_muscle_credits(exercise)}
 
 
-def current_training_mode(db: Session) -> TrainingMode:
-    setting = db.get(AppSetting, TRAINING_MODE_SETTING_KEY)
-    if not setting:
-        return TrainingMode.MAINTENANCE
-    try:
-        return TrainingMode(setting.value)
-    except ValueError:
-        return TrainingMode.MAINTENANCE
-
-
-def training_mode_for_weight_target(
-    current_weight_kg: float, target_weight_kg: float
-) -> TrainingMode:
-    if target_weight_kg < current_weight_kg * (1 - MAINTENANCE_WEIGHT_RANGE_RATIO):
-        return TrainingMode.CUT
-    if target_weight_kg > current_weight_kg * (1 + MAINTENANCE_WEIGHT_RANGE_RATIO):
-        return TrainingMode.BULK
-    return TrainingMode.MAINTENANCE
-
-
-def record_training_phase(db: Session, mode: TrainingMode, effective_date: date) -> TrainingPhase:
-    phase = db.scalar(select(TrainingPhase).where(TrainingPhase.start_date == effective_date))
-    if phase:
-        phase.mode = mode
-    else:
-        phase = TrainingPhase(start_date=effective_date, mode=mode)
-        db.add(phase)
-    return phase
-
-
-def weekly_goal(
-    workouts: list[TrainingWorkout], today: date, mode: TrainingMode, week_start_day: str = "monday"
-) -> WeeklyGoalRead:
+def weekly_sets(
+    workouts: list[TrainingWorkout], today: date, week_start_day: str = "monday"
+) -> WeeklySetsRead:
     week_start = start_of_week(today, week_start_day)
     week_end = week_start + timedelta(days=6)
     active_start = today - timedelta(days=27)
@@ -298,61 +238,36 @@ def weekly_goal(
                     if item.rpe is not None:
                         rpes_by_group[group].append(item.rpe)
 
-    target = WEEKLY_SET_TARGETS[mode]
-    muscle_groups: list[WeeklyMuscleGoalRead] = []
+    muscle_groups: list[WeeklyMuscleSetsRead] = []
     for group in sorted(active_groups):
-        group_target = weekly_set_target(mode, group)
         effective = round(effective_by_group[group], 1)
-        if effective < group_target:
-            status = "below"
-        elif effective <= group_target * 1.15:
-            status = "on_target"
-        else:
-            status = "above"
         group_rpes = rpes_by_group[group]
         muscle_groups.append(
-            WeeklyMuscleGoalRead(
+            WeeklyMuscleSetsRead(
                 muscle_group=group,
                 raw_sets=round(raw_by_group[group], 1),
                 effective_sets=effective,
-                target_sets=group_target,
                 average_rpe=(round(sum(group_rpes) / len(group_rpes), 1) if group_rpes else None),
-                status=status,
             )
         )
 
-    overall_percent = (
-        round(
-            sum(min(item.effective_sets / item.target_sets, 1) for item in muscle_groups)
-            / len(muscle_groups)
-            * 100,
-            1,
-        )
-        if muscle_groups
-        else 0.0
-    )
-    return WeeklyGoalRead(
-        mode=mode,
+    return WeeklySetsRead(
         week_start=week_start,
         week_end=week_end,
-        target_sets_per_muscle=target,
         raw_sets=raw_sets,
         effective_sets=round(sum(item.effective_sets for item in muscle_groups), 1),
         unrated_sets=unrated_sets,
         low_rpe_sets=low_rpe_sets,
         rpe_logging_percent=round(rated_sets / raw_sets * 100, 1) if raw_sets else 0.0,
-        overall_percent=overall_percent,
-        days_remaining=max(0, (week_end - today).days),
         muscle_groups=muscle_groups,
     )
 
 
 def workout_recommendation(
-    workouts: list[TrainingWorkout], today: date, mode: TrainingMode = TrainingMode.MAINTENANCE
+    workouts: list[TrainingWorkout], today: date
 ) -> WorkoutRecommendationRead:
     recent_start = today - timedelta(days=6)
     group_dates: dict[str, set[date]] = defaultdict(set)
-    group_effective_sets: dict[str, float] = defaultdict(float)
     for workout in workouts:
         if not recent_start <= workout.workout_date <= today:
             continue
@@ -361,11 +276,6 @@ def workout_recommendation(
                 continue
             for group in exercise_coverage_groups(movement.exercise):
                 group_dates[group].add(workout.workout_date)
-            for item in movement.sets:
-                if not is_working_set(item) or (item.rpe is not None and item.rpe < 7):
-                    continue
-                for group, contribution in exercise_muscle_credits(movement.exercise):
-                    group_effective_sets[group] += contribution
 
     last_rotation = next(
         (workout.category for workout in workouts if workout.category in TRAINING_ROTATION),
@@ -389,18 +299,8 @@ def workout_recommendation(
         ]
         coverage_need = sum(deficits) / len(groups)
         recovery_readiness = sum(days_since) / len(days_since) / 7
-        volume_need = (
-            0.0
-            if category == WorkoutCategory.CARDIO
-            else sum(
-                max(0.0, weekly_set_target(mode, group) - group_effective_sets[group])
-                / weekly_set_target(mode, group)
-                for group in groups
-            )
-            / len(groups)
-        )
         rotation_bonus = 0.8 if category == rotation_next else 0
-        return coverage_need * 2 + recovery_readiness + volume_need + rotation_bonus
+        return coverage_need * 2 + recovery_readiness + rotation_bonus
 
     recommended = max(TRAINING_ROTATION, key=candidate_score)
     target = 1 if recommended == WorkoutCategory.CARDIO else 2
@@ -422,14 +322,6 @@ def workout_recommendation(
         reason = (
             f"{SESSION_NAMES[recommended]} moves ahead of {SESSION_NAMES[rotation_next]} because "
             f"{overdue_text or 'its muscle groups'} have the largest 7-day frequency gap."
-        )
-    strength_groups = SESSION_MUSCLE_GROUPS[recommended]
-    if recommended != WorkoutCategory.CARDIO:
-        lowest_group = min(strength_groups, key=lambda group: group_effective_sets[group])
-        reason += (
-            f" {mode.value.title()} goal: {lowest_group} has "
-            f"{group_effective_sets[lowest_group]:g} of "
-            f"{weekly_set_target(mode, lowest_group)} effective sets."
         )
     return WorkoutRecommendationRead(
         category=recommended,
@@ -597,6 +489,7 @@ def sync_workout_cardio_sessions(db: Session, workout: TrainingWorkout) -> None:
             "calories_kcal": session.calories_kcal,
             "average_heart_rate_bpm": session.average_heart_rate_bpm,
             "average_power_watts": session.average_power_watts,
+            "average_mets": session.average_mets,
         }
         for session in existing.values()
     }
@@ -655,6 +548,7 @@ def sync_workout_cardio_sessions(db: Session, workout: TrainingWorkout) -> None:
             )
         )
         session.average_power_watts = manual_metrics.get("average_power_watts")
+        session.average_mets = manual_metrics.get("average_mets")
         distances = [item.distance_km for item in completed_sets if item.distance_km is not None]
         speed_sets = [item for item in completed_sets if item.speed_kph is not None]
         incline_sets = [item for item in completed_sets if item.incline_percent is not None]
@@ -976,19 +870,6 @@ def delete_machine_photo(photo_id: str, db: DbSession, settings: SettingsDepende
     delete_machine_photo_files(settings, full_filename, thumbnail_filename)
 
 
-@router.put("/training-mode", response_model=TrainingModeRead)
-def update_training_mode(payload: TrainingModeUpdate, db: DbSession) -> TrainingModeRead:
-    set_setting(db, TRAINING_MODE_SETTING_KEY, payload.mode.value)
-    record_training_phase(db, payload.mode, payload.effective_date)
-    db.commit()
-    return TrainingModeRead(mode=payload.mode)
-
-
-@router.get("/training-phases", response_model=list[TrainingPhaseRead])
-def list_training_phases(db: DbSession) -> list[TrainingPhase]:
-    return list(db.scalars(select(TrainingPhase).order_by(TrainingPhase.start_date.asc())))
-
-
 def training_preferences(db: Session) -> TrainingPreferencesRead:
     unit = preferred_weight_unit(db)
     week_start_value = get_setting(db, "week_start", "monday")
@@ -1130,6 +1011,7 @@ def create_cardio_session(payload: CardioSessionCreate, db: DbSession) -> Cardio
             average_speed_kph=payload.average_speed_kph,
             incline_percent=payload.incline_percent,
             average_power_watts=payload.average_power_watts,
+            average_mets=payload.average_mets,
             source_exercise_id=exercise.id,
             intensity=None,
             zone=payload.zone,
@@ -1168,6 +1050,7 @@ def update_cardio_session(
         "average_speed_kph",
         "incline_percent",
         "average_power_watts",
+        "average_mets",
     }
     for key, value in payload.model_dump(exclude={"exercise_id"}).items():
         if key in optional_metrics and key not in payload.model_fields_set:
@@ -1297,17 +1180,12 @@ def list_body_weight_goals(db: DbSession) -> list[BodyWeightGoal]:
 
 @router.post("/body-weight-goals", response_model=BodyWeightGoalRead, status_code=201)
 def create_body_weight_goal(payload: BodyWeightGoalCreate, db: DbSession) -> BodyWeightGoal:
-    mode = training_mode_for_weight_target(payload.start_weight_kg, payload.target_weight_kg)
     if payload.active:
         for existing_goal in db.scalars(
             select(BodyWeightGoal).where(BodyWeightGoal.active.is_(True))
         ):
             existing_goal.active = False
-        set_setting(db, TRAINING_MODE_SETTING_KEY, mode.value)
-        record_training_phase(db, mode, payload.start_date)
-    values = payload.model_dump()
-    values["mode"] = mode
-    goal = BodyWeightGoal(**values)
+    goal = BodyWeightGoal(**payload.model_dump())
     db.add(goal)
     db.commit()
     db.refresh(goal)
@@ -1321,15 +1199,11 @@ def update_body_weight_goal(
     goal = db.get(BodyWeightGoal, goal_id)
     if not goal:
         raise HTTPException(status_code=404, detail="Body-weight goal was not found.")
-    mode = training_mode_for_weight_target(payload.start_weight_kg, payload.target_weight_kg)
     if payload.active:
         for other in db.scalars(select(BodyWeightGoal).where(BodyWeightGoal.active.is_(True))):
             if other.id != goal_id:
                 other.active = False
-        set_setting(db, TRAINING_MODE_SETTING_KEY, mode.value)
-        record_training_phase(db, mode, payload.start_date)
     values = payload.model_dump()
-    values["mode"] = mode
     for key, value in values.items():
         setattr(goal, key, value)
     db.commit()
@@ -1530,7 +1404,6 @@ def delete_sample_data(db: DbSession) -> None:
 @router.get("/dashboard", response_model=DashboardRead)
 def dashboard(db: DbSession) -> DashboardRead:
     today = date.today()
-    training_mode = current_training_mode(db)
     workouts = list(
         db.scalars(
             select(TrainingWorkout)
@@ -1718,9 +1591,8 @@ def dashboard(db: DbSession) -> DashboardRead:
         cardio_energy_periods=cardio_energy_periods(cardio_sessions, today, preferences.week_start),
         heatmap=heatmap,
         weekly_days=weekly_days,
-        recommendation=workout_recommendation(workouts, today, training_mode),
-        training_mode=training_mode,
-        weekly_goal=weekly_goal(workouts, today, training_mode, preferences.week_start),
+        recommendation=workout_recommendation(workouts, today),
+        weekly_sets=weekly_sets(workouts, today, preferences.week_start),
         muscle_volume=[
             MuscleVolumeRead(muscle_name=name, set_total=value)
             for name, value in sorted(muscle_totals.items())

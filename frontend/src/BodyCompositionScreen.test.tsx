@@ -30,10 +30,8 @@ describe('BodyCompositionScreen', () => {
     const markup = renderToStaticMarkup(
       <BodyCompositionScreen
         measurements={measurements}
-        trainingMode="maintenance"
         onSave={vi.fn()}
         onDelete={vi.fn()}
-        onTrainingMode={vi.fn()}
         onDataChange={vi.fn()}
       />,
     );
@@ -42,6 +40,7 @@ describe('BodyCompositionScreen', () => {
     expect(markup).toContain('<strong>84.2 kg</strong>');
     expect(markup).toContain('<option value="1m" selected="">1 month</option>');
     expect(markup).toContain('<option value="3m">3 months</option>');
+    expect(markup).not.toContain('Training phase');
   });
 
   it('shows the configured bodyweight trend statistic and duration as dropdowns', () => {
@@ -69,10 +68,8 @@ describe('BodyCompositionScreen', () => {
     const markup = renderToStaticMarkup(
       <BodyCompositionScreen
         measurements={measurements}
-        trainingMode="maintenance"
         onSave={vi.fn()}
         onDelete={vi.fn()}
-        onTrainingMode={vi.fn()}
         onDataChange={vi.fn()}
         trendPreference={{ duration: '14d', statistic: 'median' }}
       />,
