@@ -40,6 +40,8 @@ describe('BodyCompositionScreen', () => {
     expect(markup).toContain('<strong>84.2 kg</strong>');
     expect(markup).toContain('<option value="1m" selected="">1 month</option>');
     expect(markup).toContain('<option value="3m">3 months</option>');
+    expect(markup).toContain('⌁ Add Goal');
+    expect(markup).not.toContain('⌁ Goals');
     expect(markup).not.toContain('Training phase');
   });
 

@@ -1,6 +1,19 @@
 export const DEFAULT_CHART_WIDTH = 340;
 export const DEFAULT_CHART_HEIGHT = 190;
 
+export function paddedChartRange(
+  values: Array<number | null>,
+): { min: number; max: number } | null {
+  const present = values.filter(
+    (value): value is number => value !== null && Number.isFinite(value),
+  );
+  if (!present.length) return null;
+  const rawMin = Math.min(...present);
+  const rawMax = Math.max(...present);
+  const spread = Math.max(rawMax - rawMin, Math.abs(rawMax) * 0.02, 1);
+  return { min: rawMin - spread * 0.15, max: rawMax + spread * 0.15 };
+}
+
 export function responsiveChartWidth(
   renderedWidth: number,
   renderedHeight: number,

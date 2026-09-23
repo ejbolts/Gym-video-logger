@@ -10,13 +10,18 @@ import {
   startTransition,
   useContext,
   useEffect,
-  useId,
   useMemo,
   useRef,
   useState,
 } from 'react';
 import type { CSSProperties, FormEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import dashboardCardioIcon from './assets/dashboard-icons/cardio.webp';
+import dashboardExercisesIcon from './assets/dashboard-icons/exercises.webp';
+import dashboardMeasurementsIcon from './assets/dashboard-icons/measurements.webp';
+import dashboardSettingsIcon from './assets/dashboard-icons/settings.webp';
+import dashboardVideoIcon from './assets/dashboard-icons/video-logger.webp';
+import dashboardWorkoutsIcon from './assets/dashboard-icons/workouts.webp';
 import { api } from './api';
 import type {
   BodyMeasurement,
@@ -43,7 +48,6 @@ import {
   BODY_TREND_DURATION_OPTIONS,
   bodyweightEntryPlaceholder,
   filterMeasurementsByRange,
-  nearestChartPointIndex,
   summarizeBodyWeightTrend,
 } from './bodyTrend';
 import type { BodyTrendDuration, BodyTrendRange, BodyTrendStatistic } from './bodyTrend';
@@ -56,7 +60,7 @@ import {
 import {
   DEFAULT_CHART_HEIGHT,
   DEFAULT_CHART_WIDTH,
-  evenlySpacedChartIndexes,
+  paddedChartRange,
   responsiveChartWidth,
 } from './chartLayout';
 import { monthCountFromOldestWorkout } from './calendarRange';
@@ -73,6 +77,11 @@ import { CachedTabPanel } from './CachedTabPanel';
 import { ConfettiBurst } from './ConfettiBurst';
 import { EdgeSwipeBack } from './EdgeSwipeBack';
 import { ProgressExerciseSearch } from './ProgressExerciseSearch';
+import {
+  personalBestProgressPoint,
+  progressPointsForChart,
+  type ProgressMetric,
+} from './progressChart';
 import { restTimerPreferenceEnabled, saveRestTimerPreference } from './restTimerPreference';
 import { cancelRestTimerPushSchedule } from './restTimer';
 import {
@@ -144,7 +153,6 @@ import {
   type TimeRange,
 } from './dateRanges';
 
-type ProgressMetric = 'estimated_1rm' | 'best_weight_kg' | 'volume_kg';
 type SetEditorFocus = 'weight' | 'reps' | 'type' | 'rpe' | 'notes' | null;
 type RestAlertStatus =
   'checking' | 'available' | 'enabling' | 'enabled' | 'blocked' | 'unsupported';
@@ -963,6 +971,12 @@ export function App() {
                   setHistorySection('progress');
                   setTab('history');
                 }}
+                onCardio={() => {
+                  setHistoryOpenId(null);
+                  setHistoryExerciseId(null);
+                  setHistorySection('cardio');
+                  setTab('history');
+                }}
                 onMeasurements={() => setTab('body')}
                 onSettings={() => setTab('settings')}
                 onVideos={() => setTab('videos')}
@@ -1046,7 +1060,6 @@ export function App() {
               workouts={workouts}
               measurements={measurements}
               exercises={exercises}
-              currentBodyweight={measurements[0]?.weight_kg ?? null}
               onEdit={editWorkout}
               onDelete={deleteWorkout}
               personalRecords={personalRecords}
@@ -1177,7 +1190,7 @@ function DashboardMenuSkeleton() {
       </section>
 
       <div className="dashboard-shortcuts menu-skeleton-shortcuts" aria-hidden="true">
-        {[0, 1, 2, 3].map((item) => (
+        {[0, 1, 2, 3, 4, 5].map((item) => (
           <div className="menu-skeleton-shortcut" key={item}>
             <span className="menu-skeleton-shape menu-skeleton-icon" />
             <strong className="menu-skeleton-shape menu-skeleton-title" />
@@ -1327,6 +1340,26 @@ function OverlayScreenHeader({
   );
 }
 
+type DashboardShortcutIconName =
+  'workouts' | 'exercises' | 'measurements' | 'settings' | 'video' | 'cardio';
+
+const DASHBOARD_SHORTCUT_ICONS: Record<DashboardShortcutIconName, string> = {
+  workouts: dashboardWorkoutsIcon,
+  exercises: dashboardExercisesIcon,
+  measurements: dashboardMeasurementsIcon,
+  settings: dashboardSettingsIcon,
+  video: dashboardVideoIcon,
+  cardio: dashboardCardioIcon,
+};
+
+function DashboardShortcutIcon({ name }: { name: DashboardShortcutIconName }) {
+  return (
+    <span className="dashboard-shortcut-icon" aria-hidden="true">
+      <img src={DASHBOARD_SHORTCUT_ICONS[name]} alt="" />
+    </span>
+  );
+}
+
 export function DashboardScreen({
   data,
   totalWorkouts,
@@ -1336,6 +1369,7 @@ export function DashboardScreen({
   workoutStartedAt,
   onHistory,
   onExercises,
+  onCardio,
   onMeasurements,
   onSettings,
   onVideos,
@@ -1351,6 +1385,7 @@ export function DashboardScreen({
   workoutStartedAt: number | null;
   onHistory: () => void;
   onExercises: () => void;
+  onCardio: () => void;
   onMeasurements: () => void;
   onSettings: () => void;
   onVideos: () => void;
@@ -1398,27 +1433,28 @@ export function DashboardScreen({
 
       <div className="dashboard-shortcuts" aria-label="Quick actions">
         <button type="button" onClick={onHistory}>
-          <span aria-hidden="true">↔</span>
+          <DashboardShortcutIcon name="workouts" />
           <strong>Workouts</strong>
         </button>
         <button type="button" onClick={onExercises}>
-          <span aria-hidden="true">☷</span>
+          <DashboardShortcutIcon name="exercises" />
           <strong>Exercises</strong>
         </button>
         <button type="button" onClick={onMeasurements}>
-          <span aria-hidden="true">⌁</span>
-          <strong>Measurements</strong>
+          <DashboardShortcutIcon name="measurements" />
+          <strong>Measure</strong>
         </button>
         <button type="button" onClick={onSettings}>
-          <span aria-hidden="true">⚙</span>
+          <DashboardShortcutIcon name="settings" />
           <strong>Settings</strong>
         </button>
         <button className="dashboard-video-shortcut" type="button" onClick={onVideos}>
-          <span aria-hidden="true">▷</span>
-          <span className="dashboard-shortcut-copy">
-            <strong>Video logger</strong>
-            <small>Upload and combine set clips</small>
-          </span>
+          <DashboardShortcutIcon name="video" />
+          <strong>Video logger</strong>
+        </button>
+        <button className="dashboard-cardio-shortcut" type="button" onClick={onCardio}>
+          <DashboardShortcutIcon name="cardio" />
+          <strong>Cardio</strong>
         </button>
       </div>
 
@@ -1667,34 +1703,6 @@ function CalendarCreateWorkoutDialog({
       </section>
     </div>,
     document.body,
-  );
-}
-
-function MetricCard({
-  value,
-  label,
-  suffix,
-  onClick,
-}: {
-  value: number | string;
-  label: string;
-  suffix: string;
-  onClick?: () => void;
-}) {
-  const content = (
-    <>
-      <strong>{value}</strong>
-      <span>{label}</span>
-      <small>{suffix}</small>
-      {onClick && <b aria-hidden="true">View details&nbsp; →</b>}
-    </>
-  );
-  return onClick ? (
-    <button type="button" className="metric-card" onClick={onClick} aria-label={`View ${label}`}>
-      {content}
-    </button>
-  ) : (
-    <article className="metric-card">{content}</article>
   );
 }
 
@@ -6223,14 +6231,12 @@ function LandscapeChartFrame({
 
 function ProgressScreen({
   exercises,
-  currentBodyweight,
   onOpenWorkout,
   embedded = false,
   initialExerciseId = null,
   exercisePickerRequest = 0,
 }: {
   exercises: Exercise[];
-  currentBodyweight: number | null;
   onOpenWorkout: (workoutId: string, exerciseId: string) => void;
   embedded?: boolean;
   initialExerciseId?: string | null;
@@ -6243,6 +6249,7 @@ function ProgressScreen({
       : (strengthExercises[0]?.id ?? ''),
   );
   const [metric, setMetric] = useState<ProgressMetric>('estimated_1rm');
+  const [displayRange, setDisplayRange] = useState<BodyTrendRange>('1m');
   const [progress, setProgress] = useState<ExerciseProgress | null>(null);
   const [loading, setLoading] = useState(false);
   const [progressPage, setProgressPage] = useState(1);
@@ -6280,12 +6287,17 @@ function ProgressScreen({
     setProgressPage((page) => Math.min(page, progressPageCount));
   }, [progressPageCount]);
 
+  const heaviestSetPoint = progress
+    ? personalBestProgressPoint(progress.points, 'best_weight_kg')
+    : null;
+  const estimatedOneRepMaxPoint = progress
+    ? personalBestProgressPoint(progress.points, 'estimated_1rm')
+    : null;
+  const historyMetricLabel =
+    metric === 'estimated_1rm' ? 'Est. 1RM' : metric === 'best_weight_kg' ? 'Top weight' : 'Volume';
+
   return (
     <section className={`progress-screen ${embedded ? '' : 'content-page'}`}>
-      <div className="screen-intro">
-        <p className="section-kicker">PERFORMANCE</p>
-        <h1>Movement progress</h1>
-      </div>
       <section className="panel progress-controls">
         <ProgressExerciseSearch
           exercises={strengthExercises}
@@ -6297,48 +6309,73 @@ function ProgressScreen({
       {loading && <LoadingState />}
       {!loading && progress && (
         <>
-          <div className="progress-pbs">
-            <MetricCard
-              value={`${progress.personal_best_weight_kg} kg`}
-              label="Heaviest set"
-              suffix="personal best"
-            />
-            <MetricCard
-              value={`${progress.personal_best_estimated_1rm} kg`}
-              label="Estimated 1RM"
-              suffix="personal best"
-            />
-          </div>
-          <section className="panel chart-panel">
-            <div className="panel-heading">
-              <div>
-                <p className="section-kicker">TREND</p>
-                <h2>
-                  {progress.exercise.name}
-                  {currentBodyweight !== null && ` @ ${currentBodyweight} kg`}
-                </h2>
-              </div>
-              <small>{progress.points.length} sessions</small>
+          <section className="progress-stat-strip" aria-label="Personal bests">
+            <div className="progress-stat">
+              <strong>
+                {progress.personal_best_weight_kg}
+                <span> kg</span>
+              </strong>
+              <b>Heaviest set</b>
+              <small>
+                Personal best
+                {heaviestSetPoint ? ` · ${prettyDate(heaviestSetPoint.workout_date)}` : ''}
+              </small>
             </div>
+            <div className="progress-stat">
+              <strong>
+                {progress.personal_best_estimated_1rm}
+                <span> kg</span>
+              </strong>
+              <b>Estimated 1RM</b>
+              <small>
+                Personal best
+                {estimatedOneRepMaxPoint
+                  ? ` · ${prettyDate(estimatedOneRepMaxPoint.workout_date)}`
+                  : ''}
+              </small>
+            </div>
+          </section>
+          <section className="progress-trend-panel">
             {progress.points.length ? (
               <LandscapeChartFrame
                 title={`${progress.exercise.name} progress`}
                 controls={
-                  <label className="chart-option-field">
-                    <span>Metric</span>
-                    <select
-                      aria-label="Progress graph metric"
-                      value={metric}
-                      onChange={(event) => setMetric(event.target.value as ProgressMetric)}
-                    >
-                      <option value="estimated_1rm">Estimated 1RM (Epley)</option>
-                      <option value="best_weight_kg">Top weight</option>
-                      <option value="volume_kg">Volume</option>
-                    </select>
-                  </label>
+                  <>
+                    <span className="progress-trend-kicker">Trend</span>
+                    <label className="chart-option-field progress-metric-field">
+                      <span className="sr-only">Metric</span>
+                      <select
+                        aria-label="Progress graph metric"
+                        value={metric}
+                        onChange={(event) => setMetric(event.target.value as ProgressMetric)}
+                      >
+                        <option value="estimated_1rm">Estimated 1RM (Epley)</option>
+                        <option value="best_weight_kg">Top weight</option>
+                        <option value="volume_kg">Volume</option>
+                      </select>
+                    </label>
+                    <label className="chart-option-field">
+                      <span className="sr-only">Range</span>
+                      <select
+                        aria-label="Exercise progress graph range"
+                        value={displayRange}
+                        onChange={(event) => setDisplayRange(event.target.value as BodyTrendRange)}
+                      >
+                        {TIME_RANGE_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <span className="progress-session-count">
+                      <strong>{progress.points.length}</strong>
+                      <small>Sessions</small>
+                    </span>
+                  </>
                 }
               >
-                <ProgressChart progress={progress} metric={metric} />
+                <ProgressChart progress={progress} metric={metric} displayRange={displayRange} />
               </LandscapeChartFrame>
             ) : (
               <EmptyState
@@ -6347,28 +6384,39 @@ function ProgressScreen({
               />
             )}
           </section>
-          {pagedProgressPoints.map((point) => (
-            <button
-              type="button"
-              className="progress-row"
-              key={point.workout_id}
-              aria-label={`View ${progress.exercise.name} in workout from ${prettyDate(point.workout_date)}`}
-              onClick={() => onOpenWorkout(point.workout_id, progress.exercise.id)}
-            >
-              <span>
-                <strong>{prettyDate(point.workout_date)}</strong>
-                <small>
-                  {point.best_reps} reps · RPE {point.best_rpe ?? '–'}
-                </small>
-              </span>
-              <strong>
-                {metric === 'volume_kg'
-                  ? Math.round(point[metric]).toLocaleString()
-                  : point[metric]}{' '}
-                kg
-              </strong>
-            </button>
-          ))}
+          {pagedProgressPoints.length > 0 && (
+            <section className="progress-history" aria-label="Exercise session history">
+              <div className="progress-history-header" aria-hidden="true">
+                <span>Date</span>
+                <span>Reps</span>
+                <span>RPE</span>
+                <span>{historyMetricLabel}</span>
+                <span />
+              </div>
+              {pagedProgressPoints.map((point) => (
+                <button
+                  type="button"
+                  className="progress-history-row"
+                  key={point.workout_id}
+                  aria-label={`View ${progress.exercise.name} in workout from ${prettyDate(point.workout_date)}`}
+                  onClick={() => onOpenWorkout(point.workout_id, progress.exercise.id)}
+                >
+                  <strong>{prettyDate(point.workout_date)}</strong>
+                  <span>{point.best_reps}</span>
+                  <span>{point.best_rpe ?? '–'}</span>
+                  <strong className="progress-history-value">
+                    {metric === 'volume_kg'
+                      ? Math.round(point[metric]).toLocaleString()
+                      : Number(point[metric].toFixed(1)).toLocaleString()}{' '}
+                    kg
+                  </strong>
+                  <span className="progress-history-chevron" aria-hidden="true">
+                    ›
+                  </span>
+                </button>
+              ))}
+            </section>
+          )}
           <PaginationControls
             currentPage={progressPage}
             totalPages={progressPageCount}
@@ -6384,35 +6432,51 @@ function ProgressScreen({
 function ProgressChart({
   progress,
   metric,
+  displayRange,
 }: {
   progress: ExerciseProgress;
   metric: ProgressMetric;
+  displayRange: BodyTrendRange;
 }) {
   const [activePointIndex, setActivePointIndex] = useState<number | null>(null);
   const { svgRef, width } = useResponsiveChartWidth();
-  const values = progress.points.map((point) => point[metric]);
-  const maximum = Math.max(...values, 1);
-  const minimum = Math.min(...values, 0);
+  const ordered = progressPointsForChart(progress.points, metric, displayRange);
+  const values = ordered.map((point) => point[metric]);
+  const valueRange = paddedChartRange(values);
   const height = DEFAULT_CHART_HEIGHT;
   const left = 42;
-  const right = 10;
-  const top = 12;
+  const right = 38;
+  const top = 18;
   const bottom = 34;
+  const dateTime = (value: string) => new Date(`${value}T12:00:00`).getTime();
+  const domainStart = ordered[0] ? dateTime(ordered[0].workout_date) : 0;
+  const domainEnd = ordered.at(-1) ? dateTime(ordered.at(-1)!.workout_date) : domainStart;
+  const domainSpan = Math.max(domainEnd - domainStart, 1);
+  const xForTime = (value: number) =>
+    left +
+    ((Math.min(domainEnd, Math.max(domainStart, value)) - domainStart) / domainSpan) *
+      (width - left - right);
   const points = values.map((value, index) => {
-    const x = left + (index / Math.max(values.length - 1, 1)) * (width - left - right);
+    const x = xForTime(dateTime(ordered[index].workout_date));
     const y =
       height -
       bottom -
-      ((value - minimum) / Math.max(maximum - minimum, 1)) * (height - top - bottom);
+      ((value - valueRange!.min) / Math.max(valueRange!.max - valueRange!.min, 1)) *
+        (height - top - bottom);
     return { x, y, value };
   });
-  const yTicks = [minimum, (minimum + maximum) / 2, maximum];
-  const xIndexes = evenlySpacedChartIndexes(values.length, width > 500 ? 5 : 3);
+  const yFractions = [0, 0.5, 1];
+  const xTickCount = width > 500 ? 5 : 3;
+  const xTicks = Array.from(
+    { length: xTickCount },
+    (_, index) => domainStart + (domainSpan * index) / Math.max(xTickCount - 1, 1),
+  );
   const activeChartPoint = activePointIndex === null ? null : (points[activePointIndex] ?? null);
   const activeProgressPoint =
-    activePointIndex === null ? null : (progress.points[activePointIndex] ?? null);
+    activePointIndex === null ? null : (ordered[activePointIndex] ?? null);
   const metricLabel =
     metric === 'estimated_1rm' ? 'Est. 1RM' : metric === 'best_weight_kg' ? 'Top weight' : 'Volume';
+  const metricLegend = metric === 'estimated_1rm' ? 'Estimated 1RM' : metricLabel;
   const formattedActiveValue = activeChartPoint
     ? metric === 'volume_kg'
       ? Math.round(activeChartPoint.value).toLocaleString()
@@ -6425,15 +6489,36 @@ function ProgressChart({
     : 0;
   const tooltipY = activeChartPoint ? Math.max(3, activeChartPoint.y - tooltipHeight - 8) : 0;
 
+  useEffect(() => {
+    setActivePointIndex(null);
+  }, [displayRange, metric, progress.exercise.id]);
+
   function selectPointAtClientX(clientX: number, svg: SVGSVGElement) {
     const bounds = svg.getBoundingClientRect();
     if (bounds.width === 0) return;
     const chartX = ((clientX - bounds.left) / bounds.width) * width;
-    setActivePointIndex(nearestChartPointIndex(chartX, left, width - right, points.length));
+    const nearestIndex = points.reduce(
+      (nearest, point, index) =>
+        Math.abs(point.x - chartX) < Math.abs(points[nearest].x - chartX) ? index : nearest,
+      0,
+    );
+    setActivePointIndex(nearestIndex);
+  }
+
+  if (!valueRange || !ordered.length) {
+    return (
+      <div className="chart-wrap body-chart">
+        <span className="body-chart-count">0 sessions shown</span>
+        <p className="muted-empty">No recorded {metricLabel.toLowerCase()} values in this range.</p>
+      </div>
+    );
   }
 
   return (
-    <div className="chart-wrap">
+    <div className="chart-wrap body-chart">
+      <span className="body-chart-count">
+        {ordered.length} {ordered.length === 1 ? 'session' : 'sessions'} shown
+      </span>
       <svg
         ref={svgRef}
         viewBox={`0 0 ${width} ${height}`}
@@ -6461,22 +6546,16 @@ function ProgressChart({
           if (event.pointerType === 'mouse') setActivePointIndex(null);
         }}
       >
-        <defs>
-          <linearGradient id="chart-fill" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0" stopColor="#e14a3b" stopOpacity="0.28" />
-            <stop offset="1" stopColor="#e14a3b" stopOpacity="0" />
-          </linearGradient>
-        </defs>
-        {yTicks.map((tick) => {
-          const y =
-            height -
-            bottom -
-            ((tick - minimum) / Math.max(maximum - minimum, 1)) * (height - top - bottom);
+        {yFractions.map((fraction) => {
+          const y = height - bottom - fraction * (height - top - bottom);
+          const tick = valueRange.min + fraction * (valueRange.max - valueRange.min);
           return (
-            <g className="chart-axis" key={tick}>
+            <g className="chart-axis" key={fraction}>
               <line x1={left} x2={width - right} y1={y} y2={y} />
               <text x={left - 5} y={y + 3} textAnchor="end">
-                {metric === 'volume_kg' ? Math.round(tick).toLocaleString() : tick.toFixed(1)}
+                {metric === 'volume_kg'
+                  ? Math.round(tick).toLocaleString()
+                  : Number(tick.toFixed(1)).toLocaleString()}
               </text>
             </g>
           );
@@ -6489,47 +6568,58 @@ function ProgressChart({
           y1={height - bottom}
           y2={height - bottom}
         />
-        <path
-          className="chart-area"
-          d={`M ${points[0].x} ${height - bottom} ${points.map((point) => `L ${point.x} ${point.y}`).join(' ')} L ${points.at(-1)!.x} ${height - bottom} Z`}
+        <polyline
+          className="weight-line"
+          points={points.map((point) => `${point.x},${point.y}`).join(' ')}
         />
-        <polyline points={points.map((point) => `${point.x},${point.y}`).join(' ')} />
         {points.map((point, index) => (
-          <circle key={index} cx={point.x} cy={point.y} r="4" />
+          <circle
+            className="weight-point"
+            key={`${ordered[index].workout_date}-${ordered[index].workout_id}`}
+            cx={point.x}
+            cy={point.y}
+            r="2.8"
+          />
         ))}
-        {xIndexes.map((index) => (
-          <text
-            className="chart-x-label"
-            key={index}
-            x={points[index].x}
-            y={height - 11}
-            textAnchor={index === 0 ? 'start' : index === values.length - 1 ? 'end' : 'middle'}
-          >
-            {new Date(`${progress.points[index].workout_date}T12:00:00`).toLocaleDateString(
-              undefined,
-              { month: 'short', day: 'numeric' },
-            )}
-          </text>
-        ))}
-        <text className="chart-y-title" x="4" y="10">
-          {metric === 'volume_kg' ? 'Volume (kg)' : 'Weight (kg)'}
+        {xTicks.map((tick, index) => {
+          const x = xForTime(tick);
+          return (
+            <text
+              className="chart-x-label"
+              key={tick}
+              x={x}
+              y={height - 11}
+              textAnchor={index === 0 ? 'start' : index === xTicks.length - 1 ? 'end' : 'middle'}
+            >
+              {new Date(tick).toLocaleDateString(undefined, {
+                month: 'short',
+                day: domainSpan > 1000 * 60 * 60 * 24 * 370 ? undefined : 'numeric',
+                year: domainSpan > 1000 * 60 * 60 * 24 * 370 ? '2-digit' : undefined,
+              })}
+            </text>
+          );
+        })}
+        <text className="chart-y-title weight-axis-title" x="4" y="11">
+          {metric === 'volume_kg' ? 'Volume kg' : 'Weight kg'}
         </text>
         {activeChartPoint && activeProgressPoint && (
-          <g className="exercise-chart-selection" aria-hidden="true">
+          <g className="exercise-chart-selection">
             <line
               className="selection-guide"
+              aria-hidden="true"
               x1={activeChartPoint.x}
               x2={activeChartPoint.x}
               y1={top}
               y2={height - bottom}
             />
             <circle
-              className="selected-exercise-point"
+              className="selected-weight-point"
+              aria-hidden="true"
               cx={activeChartPoint.x}
               cy={activeChartPoint.y}
-              r="6"
+              r="5"
             />
-            <g className="exercise-chart-tooltip">
+            <g className="measurement-tooltip" aria-hidden="true">
               <rect x={tooltipX} y={tooltipY} width={tooltipWidth} height={tooltipHeight} rx="6" />
               <text x={tooltipX + 8} y={tooltipY + 12}>
                 <tspan className="tooltip-date">
@@ -6538,7 +6628,7 @@ function ProgressChart({
                     { month: 'short', day: 'numeric', year: 'numeric' },
                   )}
                 </tspan>
-                <tspan className="tooltip-value" x={tooltipX + 8} dy="11">
+                <tspan className="tooltip-weight" x={tooltipX + 8} dy="11">
                   {metricLabel} {formattedActiveValue} kg
                 </tspan>
                 <tspan className="tooltip-detail" x={tooltipX + 8} dy="10">
@@ -6549,6 +6639,34 @@ function ProgressChart({
                 </tspan>
               </text>
             </g>
+            <g
+              className="measurement-tooltip-close"
+              role="button"
+              tabIndex={0}
+              aria-label="Close session details"
+              transform={`translate(${tooltipX + tooltipWidth - 7} ${tooltipY + 7})`}
+              onPointerDown={(event) => {
+                event.stopPropagation();
+                setActivePointIndex(null);
+              }}
+              onClick={(event) => {
+                event.stopPropagation();
+                setActivePointIndex(null);
+              }}
+              onKeyDown={(event) => {
+                if (event.key !== 'Enter' && event.key !== ' ') return;
+                event.preventDefault();
+                event.stopPropagation();
+                setActivePointIndex(null);
+              }}
+            >
+              <circle className="tooltip-close-hit-area" r="7" />
+              <circle className="tooltip-close-circle" r="4.5" />
+              <path
+                className="tooltip-close-icon"
+                d="M -1.6 -1.6 L 1.6 1.6 M 1.6 -1.6 L -1.6 1.6"
+              />
+            </g>
           </g>
         )}
       </svg>
@@ -6557,6 +6675,11 @@ function ProgressChart({
           ? `${prettyDate(activeProgressPoint.workout_date)}: ${metricLabel} ${formattedActiveValue} kilograms, ${activeProgressPoint.best_reps} reps${activeProgressPoint.best_rpe === null ? '' : `, RPE ${activeProgressPoint.best_rpe}`}`
           : ''}
       </p>
+      <div className="body-chart-legend" aria-label="Chart legend">
+        <span>
+          <i className="weight" /> {metricLegend}
+        </span>
+      </div>
     </div>
   );
 }
@@ -7497,18 +7620,6 @@ export function BodyCompositionScreen({
         <button className="active" type="button" role="tab" aria-selected="true">
           ▣ Bodyweights
         </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected="false"
-          onClick={() => {
-            setError(null);
-            setGoalOpen(true);
-            setEntryOpen(false);
-          }}
-        >
-          ⌁ Goals
-        </button>
       </div>
 
       <section className="panel body-history-panel">
@@ -7678,20 +7789,11 @@ function BodyTrendChart({
     ((Math.min(domainEnd, Math.max(domainStart, value)) - domainStart) / domainSpan) *
       (width - left - right);
 
-  function range(values: Array<number | null>): { min: number; max: number } | null {
-    const present = values.filter((value): value is number => value !== null);
-    if (!present.length) return null;
-    const rawMin = Math.min(...present);
-    const rawMax = Math.max(...present);
-    const spread = Math.max(rawMax - rawMin, rawMax * 0.02, 1);
-    return { min: rawMin - spread * 0.15, max: rawMax + spread * 0.15 };
-  }
-
-  const weightRange = range([
+  const weightRange = paddedChartRange([
     ...weightValues,
     ...relevantGoals.flatMap((item) => [item.start_weight_kg, item.target_weight_kg]),
   ])!;
-  const fatRange = range(fatValues);
+  const fatRange = paddedChartRange(fatValues);
   const weightVisible = showWeight || fatRange === null;
   const bodyFatVisible = showBodyFat && fatRange !== null;
   const displaySeries = weightVisible && bodyFatVisible ? 'both' : weightVisible ? 'weight' : 'fat';
@@ -7962,9 +8064,10 @@ function BodyTrendChart({
             </text>
           )}
           {activeMeasurement && activeWeightPoint && (
-            <g className="body-chart-selection" aria-hidden="true">
+            <g className="body-chart-selection">
               <line
                 className="selection-guide"
+                aria-hidden="true"
                 x1={activeWeightPoint.x}
                 x2={activeWeightPoint.x}
                 y1={top}
@@ -7973,6 +8076,7 @@ function BodyTrendChart({
               {weightVisible && (
                 <circle
                   className="selected-weight-point"
+                  aria-hidden="true"
                   cx={activeWeightPoint.x}
                   cy={activeWeightPoint.y}
                   r="5"
@@ -7981,12 +8085,13 @@ function BodyTrendChart({
               {bodyFatVisible && activeFatPoint && (
                 <circle
                   className="selected-fat-point"
+                  aria-hidden="true"
                   cx={activeFatPoint.x}
                   cy={activeFatPoint.y}
                   r="4.5"
                 />
               )}
-              <g className="measurement-tooltip">
+              <g className="measurement-tooltip" aria-hidden="true">
                 <rect
                   x={tooltipX}
                   y={tooltipY}
@@ -8012,6 +8117,34 @@ function BodyTrendChart({
                     </tspan>
                   )}
                 </text>
+              </g>
+              <g
+                className="measurement-tooltip-close"
+                role="button"
+                tabIndex={0}
+                aria-label="Close measurement details"
+                transform={`translate(${tooltipX + tooltipWidth - 7} ${tooltipY + 7})`}
+                onPointerDown={(event) => {
+                  event.stopPropagation();
+                  setActivePointIndex(null);
+                }}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setActivePointIndex(null);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key !== 'Enter' && event.key !== ' ') return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setActivePointIndex(null);
+                }}
+              >
+                <circle className="tooltip-close-hit-area" r="7" />
+                <circle className="tooltip-close-circle" r="4.5" />
+                <path
+                  className="tooltip-close-icon"
+                  d="M -1.6 -1.6 L 1.6 1.6 M 1.6 -1.6 L -1.6 1.6"
+                />
               </g>
             </g>
           )}
@@ -8613,7 +8746,6 @@ function HistoryScreen({
   workouts,
   measurements,
   exercises,
-  currentBodyweight,
   onEdit,
   onDelete,
   personalRecords,
@@ -8633,7 +8765,6 @@ function HistoryScreen({
   workouts: TrackedWorkout[];
   measurements: BodyMeasurement[];
   exercises: Exercise[];
-  currentBodyweight: number | null;
   onEdit: (workout: TrackedWorkout) => void;
   onDelete: (workout: TrackedWorkout) => void;
   personalRecords: PersonalRecord[];
@@ -8716,7 +8847,6 @@ function HistoryScreen({
       {section === 'progress' ? (
         <ProgressScreen
           exercises={exercises}
-          currentBodyweight={currentBodyweight}
           onOpenWorkout={(workoutId, exerciseId) => {
             const page = workoutPageForId(workouts, workoutId, HISTORY_PAGE_SIZE);
             if (page === null) return;

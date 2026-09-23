@@ -1554,6 +1554,47 @@ button.metric-card:focus-visible {
   font-size: 7px;
 }
 
+.body-chart .measurement-tooltip .tooltip-detail {
+  fill: var(--muted-ink);
+  font-size: 6.5px;
+  font-weight: 700;
+}
+
+.body-chart .measurement-tooltip-close {
+  cursor: pointer;
+  outline: none;
+}
+
+.body-chart .measurement-tooltip-close .tooltip-close-hit-area {
+  fill: transparent;
+  pointer-events: all;
+}
+
+.body-chart .measurement-tooltip-close .tooltip-close-circle {
+  fill: #676d6b;
+  stroke: #858b88;
+  stroke-width: 0.6;
+}
+
+.body-chart .measurement-tooltip-close .tooltip-close-icon {
+  fill: none;
+  stroke: #e2e1df;
+  stroke-linecap: round;
+  stroke-width: 1.1;
+  pointer-events: none;
+}
+
+.body-chart .measurement-tooltip-close:hover .tooltip-close-circle,
+.body-chart .measurement-tooltip-close:focus .tooltip-close-circle {
+  fill: #7a817e;
+  stroke: #b0b4b2;
+}
+
+.body-chart .measurement-tooltip-close:focus-visible .tooltip-close-circle {
+  stroke: var(--ink);
+  stroke-width: 1.2;
+}
+
 .body-chart > .body-chart-legend {
   display: flex;
   flex-wrap: wrap;
@@ -3453,64 +3494,6 @@ button.metric-card:focus-visible {
   cursor: crosshair;
   touch-action: pan-y;
   user-select: none;
-}
-
-.chart-wrap polyline {
-  fill: none;
-  stroke: var(--accent);
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 3;
-}
-
-.chart-area {
-  fill: url(#chart-fill);
-}
-
-.chart-wrap circle {
-  fill: white;
-  stroke: var(--accent);
-  stroke-width: 3;
-}
-
-.chart-wrap .selection-guide {
-  stroke: color-mix(in srgb, var(--ink) 35%, transparent);
-  stroke-dasharray: 2 3;
-  stroke-width: 0.9;
-}
-
-.chart-wrap .selected-exercise-point {
-  fill: var(--accent);
-  stroke: var(--page);
-  stroke-width: 2;
-}
-
-.chart-wrap .exercise-chart-tooltip {
-  pointer-events: none;
-  filter: drop-shadow(0 5px 9px rgb(0 0 0 / 30%));
-}
-
-.chart-wrap .exercise-chart-tooltip rect {
-  fill: #161d1a;
-  stroke: #3a4641;
-  stroke-width: 0.8;
-}
-
-.chart-wrap .exercise-chart-tooltip text {
-  fill: var(--ink);
-  font-size: 7.5px;
-  font-weight: 800;
-}
-
-.chart-wrap .exercise-chart-tooltip .tooltip-date,
-.chart-wrap .exercise-chart-tooltip .tooltip-detail {
-  fill: var(--muted-ink);
-  font-size: 6.5px;
-  font-weight: 700;
-}
-
-.chart-wrap .exercise-chart-tooltip .tooltip-value {
-  fill: var(--accent-dark);
 }
 
 .history-section-tabs {
@@ -7795,6 +7778,28 @@ body,
   font-size: 1.65rem;
 }
 
+.dashboard-shortcuts button > .dashboard-shortcut-icon {
+  width: 2.75rem;
+  min-width: 2.75rem;
+  height: 2.75rem;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  transition: transform 150ms ease;
+}
+
+.dashboard-shortcut-icon img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
+}
+
+.dashboard-shortcuts button:hover > .dashboard-shortcut-icon,
+.dashboard-shortcuts button:focus-visible > .dashboard-shortcut-icon {
+  transform: translateY(-1px) scale(1.04);
+}
+
 .dashboard-shortcuts strong,
 .dashboard-shortcuts small {
   min-width: 0;
@@ -8621,17 +8626,6 @@ body,
 .dashboard-shortcuts button:last-child {
   width: auto;
   grid-column: auto;
-}
-
-.dashboard-shortcuts .dashboard-video-shortcut {
-  grid-column: 1 / -1;
-}
-
-.dashboard-shortcuts button > .dashboard-shortcut-copy {
-  min-width: 0;
-  color: inherit;
-  font-size: inherit;
-  text-align: left;
 }
 
 .set-details.completed,
@@ -11551,5 +11545,290 @@ html {
   .progress-screen .progress-row {
     margin-top: 0.45rem;
     padding: 0.65rem;
+  }
+}
+
+/* Compact exercise progress layout: stat strip, shallow trend, and session table. */
+.progress-screen .progress-controls {
+  padding: 0.58rem 0.65rem;
+}
+
+.progress-stat-strip {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 0.55rem;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.progress-stat {
+  min-width: 0;
+  padding: 0.72rem 0.7rem 0.68rem;
+}
+
+.progress-stat + .progress-stat {
+  border-left: 1px solid var(--line);
+}
+
+.progress-stat strong,
+.progress-stat b,
+.progress-stat small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.progress-stat strong {
+  color: var(--accent-dark);
+  font-size: clamp(1.5rem, 6vw, 2rem);
+  line-height: 1;
+  letter-spacing: -0.055em;
+}
+
+.progress-stat strong span {
+  display: inline;
+  font-size: 0.68em;
+  letter-spacing: -0.025em;
+}
+
+.progress-stat b {
+  margin-top: 0.34rem;
+  color: var(--ink);
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.075em;
+  text-transform: uppercase;
+}
+
+.progress-stat small {
+  margin-top: 0.14rem;
+  color: var(--muted-ink);
+  font-size: 0.58rem;
+}
+
+.progress-trend-panel {
+  margin-top: 0;
+  border-bottom: 1px solid var(--line);
+  padding: 0.6rem 0 0.25rem;
+}
+
+.progress-trend-panel .landscape-chart-toolbar {
+  align-items: center;
+  gap: 0.38rem;
+  margin: 0 0.35rem;
+}
+
+.progress-trend-panel .landscape-chart-options {
+  display: grid;
+  grid-template-columns: auto minmax(7.5rem, 1fr) 4.2rem auto;
+  align-items: center;
+  gap: 0.38rem;
+}
+
+.progress-trend-kicker {
+  color: var(--accent-dark);
+  font-size: 0.64rem;
+  font-weight: 900;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+}
+
+.progress-trend-panel .chart-option-field select {
+  width: 100%;
+  min-height: 2.2rem;
+  padding: 0.42rem 1.35rem 0.42rem 0.52rem;
+  font-size: 0.65rem;
+}
+
+.progress-session-count {
+  min-width: 2.45rem;
+  display: grid;
+  justify-items: center;
+  color: var(--ink);
+  line-height: 1;
+}
+
+.progress-session-count strong {
+  font-size: 0.95rem;
+}
+
+.progress-session-count small {
+  margin-top: 0.16rem;
+  color: var(--muted-ink);
+  font-size: 0.48rem;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.progress-trend-panel .landscape-chart-toggle {
+  width: 2.25rem;
+  min-height: 2.2rem;
+  padding-inline: 0;
+  font-size: 0;
+}
+
+.progress-trend-panel .landscape-chart-toggle > span {
+  font-size: 1rem;
+}
+
+.progress-trend-panel .body-chart-count,
+.progress-trend-panel .body-chart > .body-chart-legend {
+  display: none;
+}
+
+.progress-trend-panel .body-chart svg {
+  border-radius: 0;
+  background: transparent;
+}
+
+.progress-history {
+  margin-top: 0.1rem;
+  border-top: 1px solid var(--line);
+}
+
+.progress-history-header,
+.progress-history-row {
+  display: grid;
+  grid-template-columns:
+    minmax(6.4rem, 1.35fr) minmax(2.2rem, 0.46fr)
+    minmax(2rem, 0.42fr) minmax(5.2rem, 0.95fr) 0.8rem;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.progress-history-header {
+  min-height: 2.15rem;
+  border-bottom: 1px solid var(--line);
+  padding: 0.38rem 0.3rem;
+  color: var(--muted-ink);
+  font-size: 0.55rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.progress-history-header span:nth-child(4) {
+  text-align: right;
+}
+
+.progress-history-row {
+  width: 100%;
+  min-height: 3.15rem;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  padding: 0.48rem 0.3rem;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  transition: background 140ms ease;
+}
+
+.progress-history-row:hover,
+.progress-history-row:focus-visible {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  outline: none;
+}
+
+.progress-history-row > strong:first-child {
+  overflow: hidden;
+  font-size: 0.77rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.progress-history-row > span {
+  color: var(--ink);
+  font-size: 0.74rem;
+}
+
+.progress-history-value {
+  color: var(--accent-dark);
+  font-size: 0.8rem;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.progress-history-row .progress-history-chevron {
+  color: var(--muted-ink);
+  font-size: 1.28rem;
+  line-height: 1;
+  text-align: right;
+}
+
+.progress-trend-panel .landscape-chart-expanded .landscape-chart-options {
+  display: flex;
+  align-items: center;
+}
+
+.progress-trend-panel .landscape-chart-expanded .progress-trend-kicker,
+.progress-trend-panel .landscape-chart-expanded .progress-session-count {
+  display: none;
+}
+
+.progress-trend-panel .landscape-chart-expanded .chart-option-field {
+  min-width: 8rem;
+  flex: 1 1 auto;
+}
+
+.progress-trend-panel .landscape-chart-expanded .landscape-chart-toggle {
+  width: auto;
+  padding-inline: 0.65rem;
+  font-size: 0.63rem;
+}
+
+.progress-trend-panel .landscape-chart-expanded .body-chart-count {
+  display: block;
+}
+
+.progress-trend-panel .landscape-chart-expanded .body-chart > .body-chart-legend {
+  display: flex;
+}
+
+@media (max-width: 620px) {
+  .progress-stat {
+    padding-inline: 0.48rem;
+  }
+
+  .progress-stat strong {
+    font-size: clamp(1.42rem, 7.2vw, 1.78rem);
+  }
+
+  .progress-stat b {
+    font-size: 0.61rem;
+  }
+
+  .progress-history-header,
+  .progress-history-row {
+    grid-template-columns:
+      minmax(5rem, 1.25fr) minmax(1.8rem, 0.42fr)
+      minmax(1.65rem, 0.38fr) minmax(4.55rem, 0.9fr) 0.65rem;
+    gap: 0.32rem;
+  }
+}
+
+@media (max-width: 360px) {
+  .progress-trend-panel .landscape-chart-options {
+    grid-template-columns: auto minmax(0, 1fr) 3.85rem;
+  }
+
+  .progress-session-count {
+    display: none;
+  }
+
+  .progress-history-header,
+  .progress-history-row {
+    grid-template-columns:
+      minmax(4.8rem, 1.2fr) minmax(1.65rem, 0.38fr)
+      minmax(1.55rem, 0.35fr) minmax(4.2rem, 0.85fr) 0.55rem;
+    gap: 0.22rem;
+  }
+
+  .progress-history-row > strong:first-child,
+  .progress-history-row > span,
+  .progress-history-value {
+    font-size: 0.68rem;
   }
 }

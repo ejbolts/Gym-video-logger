@@ -40,6 +40,7 @@ describe('App startup', () => {
         workoutStartedAt={Date.now() - 65_000}
         onHistory={vi.fn()}
         onExercises={vi.fn()}
+        onCardio={vi.fn()}
         onMeasurements={vi.fn()}
         onSettings={vi.fn()}
         onVideos={vi.fn()}
@@ -60,9 +61,12 @@ describe('App startup', () => {
     expect(markup).toContain('Workout live');
     expect(markup).toContain('dashboard-live-duration');
     expect(markup).toContain('1:05');
-    expect(markup).toContain('Measurements');
+    expect(markup).toContain('Measure');
     expect(markup).toContain('Video logger');
-    expect(markup).toContain('Upload and combine set clips');
+    expect(markup).not.toContain('Upload and combine set clips');
+    expect(markup).toContain('Cardio');
+    expect(markup).not.toContain('Sessions and trends');
+    expect(markup.match(/dashboard-shortcut-icon/g)).toHaveLength(6);
     expect(markup).toContain('DAILY CHECK-IN');
     expect(markup).toContain('Quick select bodyweight');
     expect(markup).not.toContain('Fat-energy equivalent');
@@ -83,6 +87,7 @@ describe('App startup', () => {
         workoutStartedAt={null}
         onHistory={vi.fn()}
         onExercises={vi.fn()}
+        onCardio={vi.fn()}
         onMeasurements={vi.fn()}
         onSettings={vi.fn()}
         onVideos={vi.fn()}

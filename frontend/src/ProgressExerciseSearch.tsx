@@ -18,6 +18,7 @@ export function ProgressExerciseSearch({
   const listId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
   const handledOpenRequestRef = useRef(openRequest);
+  const blurFrameRef = useRef<number | null>(null);
   const [query, setQuery] = useState(selected?.name ?? '');
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -26,6 +27,15 @@ export function ProgressExerciseSearch({
   useEffect(() => {
     setQuery(selected?.name ?? '');
   }, [selected?.id, selected?.name]);
+
+  useEffect(
+    () => () => {
+      if (blurFrameRef.current !== null) {
+        window.cancelAnimationFrame(blurFrameRef.current);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     if (openRequest === handledOpenRequestRef.current) return;
@@ -41,6 +51,10 @@ export function ProgressExerciseSearch({
   }, [openRequest]);
 
   function choose(exercise: Exercise) {
+    if (blurFrameRef.current !== null) {
+      window.cancelAnimationFrame(blurFrameRef.current);
+      blurFrameRef.current = null;
+    }
     onChange(exercise.id);
     setQuery(exercise.name);
     setOpen(false);
@@ -60,8 +74,17 @@ export function ProgressExerciseSearch({
         ) {
           return;
         }
-        setOpen(false);
-        setQuery(selected?.name ?? '');
+        if (blurFrameRef.current !== null) {
+          window.cancelAnimationFrame(blurFrameRef.current);
+        }
+        // iOS often reports no relatedTarget when the search input blurs as
+        // an option is tapped. Wait until the activating click has run before
+        // dismissing the results so the option can still be selected.
+        blurFrameRef.current = window.requestAnimationFrame(() => {
+          blurFrameRef.current = null;
+          setOpen(false);
+          setQuery(selected?.name ?? '');
+        });
       }}
     >
       <label htmlFor={inputId}>Exercise</label>
@@ -142,6 +165,7 @@ export function ProgressExerciseSearch({
               onPointerMove={(event) => {
                 if (event.pointerType === 'mouse') setActiveIndex(index);
               }}
+              onMouseDown={(event) => event.preventDefault()}
               onClick={() => choose(exercise)}
             >
               <strong>{exercise.name}</strong>
