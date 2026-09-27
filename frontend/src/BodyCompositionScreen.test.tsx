@@ -41,8 +41,9 @@ describe('BodyCompositionScreen', () => {
     expect(markup).toContain('<option value="1m" selected="">1 month</option>');
     expect(markup).toContain('<option value="3m">3 months</option>');
     expect(markup).toContain('⌁ Add Goal');
-    expect(markup).not.toContain('⌁ Goals');
-    expect(markup).not.toContain('Training phase');
+    expect(markup).toContain('role="tab" aria-selected="true">Daily</button>');
+    expect(markup).toContain('role="tab" aria-selected="false">Avg Week</button>');
+    expect(markup).toContain('role="tab" aria-selected="false">Avg Monthly</button>');
   });
 
   it('shows the configured bodyweight trend statistic and duration as dropdowns', () => {
@@ -84,5 +85,7 @@ describe('BodyCompositionScreen', () => {
     expect(markup).toContain('<option value="6m">6 months</option>');
     expect(markup).toContain('<option value="1y">1 year</option>');
     expect(markup).toContain('<strong>84.0 kg</strong>');
+    expect(markup).toContain('role="tab" aria-selected="false">Median Week</button>');
+    expect(markup).toContain('role="tab" aria-selected="false">Median Monthly</button>');
   });
 });

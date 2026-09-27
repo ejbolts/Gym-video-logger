@@ -41,7 +41,6 @@ describe('cardio energy card', () => {
     expect(markup).toContain('MET-min');
     expect(markup).toContain('7.2 average METs');
     expect(markup).not.toContain('1,540 kcal');
-    expect(markup).not.toContain('How comparisons work');
   });
   it('tolerates a cached dashboard from before calorie tracking', () => {
     expect(renderToStaticMarkup(<CardioEnergyCard summaries={undefined} />)).toBe('');

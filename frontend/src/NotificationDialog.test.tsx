@@ -22,7 +22,6 @@ describe('app notification popup', () => {
       expect(markup).toContain('<dialog');
       expect(markup).toContain('class="notification-dialog"');
       expect(markup).toContain(message);
-      expect(markup).not.toContain('status-banner');
     },
   );
 

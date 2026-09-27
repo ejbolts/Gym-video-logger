@@ -47,10 +47,13 @@ import type {
 import {
   BODY_TREND_DURATION_OPTIONS,
   bodyweightEntryPlaceholder,
+  clipBodyWeightGoalPath,
   filterMeasurementsByRange,
   summarizeBodyWeightTrend,
 } from './bodyTrend';
 import type { BodyTrendDuration, BodyTrendRange, BodyTrendStatistic } from './bodyTrend';
+import { summarizeBodyHistory } from './bodyMeasurementHistory';
+import type { BodyHistoryPeriod } from './bodyMeasurementHistory';
 import {
   DEFAULT_BODY_TREND_PREFERENCE,
   loadBodyTrendPreference,
@@ -143,6 +146,7 @@ import {
 } from './workoutMovements';
 import { applySupersetSelection, clearSuperset } from './workoutSupersets';
 import { upsertWorkoutByRecency, workoutPageForId } from './workoutHistory';
+import { calculateDraftPrs } from './workoutPr';
 import { isWorkoutSetAutoSavable, workoutSetForAutoSave } from './workoutAutoSave';
 import { readDashboardCache, writeDashboardCache } from './workoutCache';
 import { trainingDataActivityLabel } from './trainingDataRefresh';
@@ -180,6 +184,7 @@ const categoryColors: Record<WorkoutCategory, string> = {
 
 const restOptions = [60, 90, 120, 150, 180, 210, 240, 270, 300];
 const HISTORY_PAGE_SIZE = 8;
+const CARDIO_HISTORY_PAGE_SIZE = 5;
 const IMPORTED_BODYWEIGHT_NOTE = 'Imported from workout CSV.';
 
 function emptySet(
@@ -266,121 +271,6 @@ function SetDragHandle({
       </span>
     </button>
   );
-}
-
-function calculateDraftPrs(
-  movements: DraftMovement[],
-  records: PersonalRecord[],
-  historicalWorkouts: TrackedWorkout[],
-  excludedWorkoutId: string | null,
-): Map<string, Map<string, string[]>> {
-  type State = {
-    weight: number;
-    e1rm: number;
-    duration: number;
-    distance: number;
-    reps: Map<number, number>;
-    unit: 'kg' | 'lb';
-  };
-  const states = new Map<string, State>();
-  for (const record of records.filter((item) => item.workout_id !== excludedWorkoutId)) {
-    const state = states.get(record.exercise_id) ?? {
-      weight: -1,
-      e1rm: -1,
-      duration: -1,
-      distance: -1,
-      reps: new Map(),
-      unit: record.unit === 'lb' ? 'lb' : 'kg',
-    };
-    if (record.record_type === 'weight') state.weight = Math.max(state.weight, record.value);
-    if (record.record_type === 'estimated_1rm') state.e1rm = Math.max(state.e1rm, record.value);
-    if (record.record_type === 'duration') state.duration = Math.max(state.duration, record.value);
-    if (record.record_type === 'distance') state.distance = Math.max(state.distance, record.value);
-    if (record.record_type === 'reps_at_weight' && record.normalized_weight !== null)
-      state.reps.set(
-        record.normalized_weight,
-        Math.max(state.reps.get(record.normalized_weight) ?? -1, record.value),
-      );
-    states.set(record.exercise_id, state);
-  }
-  for (const workout of historicalWorkouts.filter((item) => item.id !== excludedWorkoutId)) {
-    for (const movement of workout.movements) {
-      const state = states.get(movement.exercise.id) ?? {
-        weight: -1,
-        e1rm: -1,
-        duration: -1,
-        distance: -1,
-        reps: new Map(),
-        unit: 'kg' as const,
-      };
-      for (const item of movement.sets) {
-        if (!item.completed || item.set_type === 'warmup' || item.warmup) continue;
-        if (item.failed && (item.target_reps === null || (item.reps ?? 0) < item.target_reps))
-          continue;
-        if (item.weight_kg !== null && item.reps !== null) {
-          const weight =
-            Math.round(item.weight_kg * (state.unit === 'lb' ? 2.2046226218 : 1) * 10) / 10;
-          state.reps.set(weight, Math.max(state.reps.get(weight) ?? 0, item.reps));
-        }
-      }
-      states.set(movement.exercise.id, state);
-    }
-  }
-  const result = new Map<string, Map<string, string[]>>();
-  for (const movement of movements) {
-    const state = states.get(movement.exercise.id) ?? {
-      weight: -1,
-      e1rm: -1,
-      duration: -1,
-      distance: -1,
-      reps: new Map(),
-      unit: 'kg' as const,
-    };
-    const badges = new Map<string, string[]>();
-    for (const item of movement.sets) {
-      const labels: string[] = [];
-      const eligible =
-        item.completed &&
-        item.set_type !== 'warmup' &&
-        !item.warmup &&
-        (!item.failed || (item.target_reps != null && (item.reps ?? 0) >= item.target_reps));
-      if (!eligible) continue;
-      const weight =
-        item.weight_kg === null
-          ? null
-          : Math.round(item.weight_kg * (state.unit === 'lb' ? 2.2046226218 : 1) * 10) / 10;
-      if (weight !== null && weight > state.weight) {
-        state.weight = weight;
-        labels.push('Weight PR');
-      }
-      if (weight !== null && item.reps !== null) {
-        const previousReps = state.reps.get(weight);
-        if (previousReps !== undefined && item.reps > previousReps) {
-          labels.push(`Rep PR @ ${weight} ${state.unit}`);
-        }
-        state.reps.set(weight, Math.max(previousReps ?? 0, item.reps));
-        if (item.reps >= 1 && item.reps <= 30) {
-          const e1rm = Math.round(weight * (1 + item.reps / 30) * 10) / 10;
-          if (e1rm > state.e1rm) {
-            state.e1rm = e1rm;
-            labels.push('Estimated 1RM PR');
-          }
-        }
-      }
-      if ((item.duration_seconds ?? -1) > state.duration) {
-        state.duration = item.duration_seconds ?? -1;
-        labels.push('Duration PR');
-      }
-      if ((item.distance_km ?? -1) > state.distance) {
-        state.distance = item.distance_km ?? -1;
-        labels.push('Distance PR');
-      }
-      if (labels.length) badges.set(item.key, labels);
-    }
-    states.set(movement.exercise.id, state);
-    result.set(movement.key, badges);
-  }
-  return result;
 }
 
 function formatDuration(totalSeconds: number): string {
@@ -1444,17 +1334,17 @@ export function DashboardScreen({
           <DashboardShortcutIcon name="measurements" />
           <strong>Measure</strong>
         </button>
-        <button type="button" onClick={onSettings}>
-          <DashboardShortcutIcon name="settings" />
-          <strong>Settings</strong>
+        <button className="dashboard-cardio-shortcut" type="button" onClick={onCardio}>
+          <DashboardShortcutIcon name="cardio" />
+          <strong>Cardio</strong>
         </button>
         <button className="dashboard-video-shortcut" type="button" onClick={onVideos}>
           <DashboardShortcutIcon name="video" />
           <strong>Video logger</strong>
         </button>
-        <button className="dashboard-cardio-shortcut" type="button" onClick={onCardio}>
-          <DashboardShortcutIcon name="cardio" />
-          <strong>Cardio</strong>
+        <button type="button" onClick={onSettings}>
+          <DashboardShortcutIcon name="settings" />
+          <strong>Settings</strong>
         </button>
       </div>
 
@@ -1468,11 +1358,6 @@ export function DashboardScreen({
       />
     </section>
   );
-}
-
-function quickBodyweightOptions(reference: number | null): number[] {
-  const center = Math.round((reference ?? 80) * 10) / 10;
-  return [-0.2, -0.1, 0, 0.1, 0.2].map((offset) => Number((center + offset).toFixed(1)));
 }
 
 export function DashboardQuickBodyweight({
@@ -1489,7 +1374,6 @@ export function DashboardQuickBodyweight({
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const options = quickBodyweightOptions(latestBodyweight);
   const selectedWeight = Number(weight);
 
   useEffect(() => {
@@ -1527,27 +1411,6 @@ export function DashboardQuickBodyweight({
           {todayBodyweight === null ? 'Not logged' : `Today · ${todayBodyweight.toFixed(1)} kg`}
         </span>
       </header>
-      <p className="dashboard-bodyweight-hint">Quick select, adjust if needed, then save.</p>
-      <div
-        className="dashboard-bodyweight-options"
-        role="group"
-        aria-label="Quick select bodyweight"
-      >
-        {options.map((option) => (
-          <button
-            type="button"
-            key={option}
-            aria-pressed={Math.abs(selectedWeight - option) < 0.01}
-            onClick={() => {
-              setWeight(option.toFixed(1));
-              setError(null);
-              setMessage(null);
-            }}
-          >
-            {option.toFixed(1)}
-          </button>
-        ))}
-      </div>
       <form
         className="dashboard-bodyweight-save"
         onSubmit={(event) => {
@@ -6341,7 +6204,6 @@ function ProgressScreen({
                 title={`${progress.exercise.name} progress`}
                 controls={
                   <>
-                    <span className="progress-trend-kicker">Trend</span>
                     <label className="chart-option-field progress-metric-field">
                       <span className="sr-only">Metric</span>
                       <select
@@ -7253,12 +7115,22 @@ export function BodyCompositionScreen({
   const [editSaving, setEditSaving] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
   const [checkInPage, setCheckInPage] = useState(1);
+  const [historyView, setHistoryView] = useState<'daily' | BodyHistoryPeriod>('daily');
   const [trendDuration, setTrendDuration] = useState<BodyTrendDuration>(trendPreference.duration);
   const [trendStatistic, setTrendStatistic] = useState<BodyTrendStatistic>(
     trendPreference.statistic,
   );
-  const checkInPageCount = Math.max(1, Math.ceil(measurements.length / HISTORY_PAGE_SIZE));
+  const historySummaries =
+    historyView === 'daily'
+      ? []
+      : summarizeBodyHistory(measurements, historyView, trendStatistic);
+  const historyCount = historyView === 'daily' ? measurements.length : historySummaries.length;
+  const checkInPageCount = Math.max(1, Math.ceil(historyCount / HISTORY_PAGE_SIZE));
   const pagedMeasurements = measurements.slice(
+    (checkInPage - 1) * HISTORY_PAGE_SIZE,
+    checkInPage * HISTORY_PAGE_SIZE,
+  );
+  const pagedSummaries = historySummaries.slice(
     (checkInPage - 1) * HISTORY_PAGE_SIZE,
     checkInPage * HISTORY_PAGE_SIZE,
   );
@@ -7617,133 +7489,187 @@ export function BodyCompositionScreen({
       )}
 
       <div className="body-log-tabs" role="tablist" aria-label="Bodyweight records">
-        <button className="active" type="button" role="tab" aria-selected="true">
-          ▣ Bodyweights
-        </button>
+        {(
+          [
+            ['daily', 'Daily'],
+            ['week', `${trendStatistic === 'average' ? 'Avg' : 'Median'} Week`],
+            ['month', `${trendStatistic === 'average' ? 'Avg' : 'Median'} Monthly`],
+          ] as const
+        ).map(([view, label]) => (
+          <button
+            key={view}
+            className={historyView === view ? 'active' : ''}
+            type="button"
+            role="tab"
+            aria-selected={historyView === view}
+            onClick={() => {
+              setHistoryView(view);
+              setCheckInPage(1);
+              setEditingMeasurement(null);
+            }}
+          >
+            {label}
+          </button>
+        ))}
       </div>
 
-      <section className="panel body-history-panel">
+      <section className="panel body-history-panel" role="tabpanel">
         <div className="panel-heading">
           <div>
             <p className="section-kicker">HISTORY</p>
             <h2>Check-ins</h2>
           </div>
         </div>
-        {!measurements.length && (
-          <p className="body-empty">Your first check-in will appear here.</p>
-        )}
-        {measurements.length > 0 && (
-          <div className="body-history-table-head" aria-hidden="true">
-            <span>Date</span>
+        {!historyCount && <p className="body-empty">Your first check-in will appear here.</p>}
+        {historyCount > 0 && (
+          <div
+            className={`body-history-table-head${historyView === 'daily' ? '' : ' body-history-summary-grid'}`}
+            aria-hidden="true"
+          >
+            <span>
+              {historyView === 'daily' ? 'Date' : historyView === 'week' ? 'Week' : 'Month'}
+            </span>
             <span>Bodyweight</span>
             <span>Body Fat</span>
-            <span />
+            {historyView === 'daily' && <span />}
           </div>
         )}
-        {pagedMeasurements.map((measurement) => (
-          <Fragment key={measurement.id}>
-            <article>
+        {historyView === 'daily' &&
+          pagedMeasurements.map((measurement) => (
+            <Fragment key={measurement.id}>
+              <article>
+                <div className="body-history-date">
+                  <strong>
+                    {new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(
+                      new Date(`${measurement.measurement_date}T12:00:00`),
+                    )}
+                  </strong>
+                  <small>{measurement.measurement_date.slice(0, 4)}</small>
+                </div>
+                <div className="body-history-weight">
+                  <strong>{measurement.weight_kg} kg</strong>
+                  <small>{measurement.is_sample && 'Sample'}</small>
+                  {measurement.notes && <p>{measurement.notes}</p>}
+                </div>
+                <div className="body-history-fat">
+                  <strong>
+                    {measurement.body_fat_pct !== null ? `${measurement.body_fat_pct}%` : '–'}
+                  </strong>
+                  <small>{measurement.body_fat_pct !== null ? 'estimate' : ''}</small>
+                </div>
+                <details className="body-row-menu">
+                  <summary aria-label={`Actions for ${prettyDate(measurement.measurement_date)}`}>
+                    ⋮
+                  </summary>
+                  <div className="body-history-actions">
+                    <button type="button" onClick={() => beginMeasurementEdit(measurement)}>
+                      Edit
+                    </button>
+                    <InlineConfirmButton
+                      label="Delete"
+                      confirmLabel="Delete check-in"
+                      onConfirm={() => onDelete(measurement.id)}
+                    />
+                  </div>
+                </details>
+              </article>
+              {editingMeasurement?.id === measurement.id && (
+                <form
+                  className="body-edit-form"
+                  aria-label={`Edit check-in for ${prettyDate(editingMeasurement.measurement_date)}`}
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void submitMeasurementEdit();
+                  }}
+                >
+                  <header>
+                    <div>
+                      <p className="section-kicker">EDIT CHECK-IN</p>
+                      <h2>{prettyDate(editingMeasurement.measurement_date)}</h2>
+                    </div>
+                  </header>
+                  <div className="body-edit-content">
+                    <div className="body-edit-fields">
+                      <label>
+                        Weight (kg)
+                        <input
+                          inputMode="decimal"
+                          type="number"
+                          min="1"
+                          max="500"
+                          step="0.1"
+                          value={editWeight}
+                          onChange={(event) => setEditWeight(event.target.value)}
+                        />
+                      </label>
+                      <label>
+                        Body fat %
+                        <input
+                          inputMode="decimal"
+                          type="number"
+                          min="1"
+                          max="70"
+                          step="0.1"
+                          value={editBodyFat}
+                          onChange={(event) => setEditBodyFat(event.target.value)}
+                          placeholder="Optional"
+                        />
+                      </label>
+                    </div>
+                    {editError && <p className="inline-error">{editError}</p>}
+                  </div>
+                  <div className="body-edit-actions">
+                    <button
+                      type="button"
+                      disabled={editSaving}
+                      onClick={() => setEditingMeasurement(null)}
+                    >
+                      Cancel
+                    </button>
+                    <button type="submit" disabled={editSaving}>
+                      {editSaving ? 'Saving…' : 'Save changes'}
+                    </button>
+                  </div>
+                </form>
+              )}
+            </Fragment>
+          ))}
+        {historyView !== 'daily' &&
+          pagedSummaries.map((summary) => (
+            <article className="body-history-summary-grid" key={summary.start_date}>
               <div className="body-history-date">
                 <strong>
-                  {new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(
-                    new Date(`${measurement.measurement_date}T12:00:00`),
-                  )}
+                  {historyView === 'week'
+                    ? `${new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short' }).format(new Date(`${summary.start_date}T12:00:00`))} – ${new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short' }).format(new Date(`${summary.end_date}T12:00:00`))}`
+                    : new Intl.DateTimeFormat(undefined, { month: 'long' }).format(
+                        new Date(`${summary.start_date}T12:00:00`),
+                      )}
                 </strong>
-                <small>{measurement.measurement_date.slice(0, 4)}</small>
+                <small>
+                  {summary.start_date.slice(0, 4)}
+                  {summary.start_date.slice(0, 4) !== summary.end_date.slice(0, 4)
+                    ? `–${summary.end_date.slice(0, 4)}`
+                    : ''}
+                </small>
               </div>
               <div className="body-history-weight">
-                <strong>{measurement.weight_kg} kg</strong>
-                <small>{measurement.is_sample && 'Sample'}</small>
-                {measurement.notes && <p>{measurement.notes}</p>}
+                <strong>{summary.weight_kg.toFixed(1)} kg</strong>
+                <small>
+                  {summary.count} {summary.count === 1 ? 'check-in' : 'check-ins'}
+                </small>
               </div>
               <div className="body-history-fat">
                 <strong>
-                  {measurement.body_fat_pct !== null ? `${measurement.body_fat_pct}%` : '–'}
+                  {summary.body_fat_pct === null ? '–' : `${summary.body_fat_pct.toFixed(1)}%`}
                 </strong>
-                <small>{measurement.body_fat_pct !== null ? 'estimate' : ''}</small>
               </div>
-              <details className="body-row-menu">
-                <summary aria-label={`Actions for ${prettyDate(measurement.measurement_date)}`}>
-                  ⋮
-                </summary>
-                <div className="body-history-actions">
-                  <button type="button" onClick={() => beginMeasurementEdit(measurement)}>
-                    Edit
-                  </button>
-                  <InlineConfirmButton
-                    label="Delete"
-                    confirmLabel="Delete check-in"
-                    onConfirm={() => onDelete(measurement.id)}
-                  />
-                </div>
-              </details>
             </article>
-            {editingMeasurement?.id === measurement.id && (
-              <form
-                className="body-edit-form"
-                aria-label={`Edit check-in for ${prettyDate(editingMeasurement.measurement_date)}`}
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  void submitMeasurementEdit();
-                }}
-              >
-                <header>
-                  <div>
-                    <p className="section-kicker">EDIT CHECK-IN</p>
-                    <h2>{prettyDate(editingMeasurement.measurement_date)}</h2>
-                  </div>
-                </header>
-                <div className="body-edit-content">
-                  <div className="body-edit-fields">
-                    <label>
-                      Weight (kg)
-                      <input
-                        inputMode="decimal"
-                        type="number"
-                        min="1"
-                        max="500"
-                        step="0.1"
-                        value={editWeight}
-                        onChange={(event) => setEditWeight(event.target.value)}
-                      />
-                    </label>
-                    <label>
-                      Body fat %
-                      <input
-                        inputMode="decimal"
-                        type="number"
-                        min="1"
-                        max="70"
-                        step="0.1"
-                        value={editBodyFat}
-                        onChange={(event) => setEditBodyFat(event.target.value)}
-                        placeholder="Optional"
-                      />
-                    </label>
-                  </div>
-                  {editError && <p className="inline-error">{editError}</p>}
-                </div>
-                <div className="body-edit-actions">
-                  <button
-                    type="button"
-                    disabled={editSaving}
-                    onClick={() => setEditingMeasurement(null)}
-                  >
-                    Cancel
-                  </button>
-                  <button type="submit" disabled={editSaving}>
-                    {editSaving ? 'Saving…' : 'Save changes'}
-                  </button>
-                </div>
-              </form>
-            )}
-          </Fragment>
-        ))}
+          ))}
         <PaginationControls
           currentPage={checkInPage}
           totalPages={checkInPageCount}
           onPageChange={setCheckInPage}
-          label="check-in history"
+          label={`${historyView} bodyweight history`}
         />
       </section>
     </section>
@@ -7774,15 +7700,34 @@ function BodyTrendChart({
   const fatValues = ordered.map((item) => item.body_fat_pct);
   const dateTime = (value: string) => new Date(`${value}T12:00:00`).getTime();
   const firstMeasurementTime = dateTime(ordered[0].measurement_date);
+  const selectedDateRange = dateRangeForDates(
+    measurements.map((item) => item.measurement_date),
+    displayRange,
+  );
   const relevantGoals = goals
     .filter((item) => item.active || dateTime(item.target_date) >= firstMeasurementTime)
     .sort((first, second) => dateTime(first.target_date) - dateTime(second.target_date));
+  const visibleGoalPaths = relevantGoals.flatMap((goal) => {
+    const path = clipBodyWeightGoalPath(
+      goal,
+      selectedDateRange.start_date,
+      selectedDateRange.end_date,
+    );
+    return path ? [{ goal, path }] : [];
+  });
   const domainTimes = [
     ...ordered.map((item) => dateTime(item.measurement_date)),
-    ...relevantGoals.flatMap((item) => [dateTime(item.start_date), dateTime(item.target_date)]),
+    ...visibleGoalPaths.flatMap(({ path }) => [
+      dateTime(path.start_date),
+      dateTime(path.target_date),
+    ]),
   ];
-  const domainStart = Math.min(...domainTimes);
-  const domainEnd = Math.max(...domainTimes);
+  const domainStart = selectedDateRange.start_date
+    ? dateTime(selectedDateRange.start_date)
+    : Math.min(...domainTimes);
+  const domainEnd = selectedDateRange.end_date
+    ? dateTime(selectedDateRange.end_date)
+    : Math.max(...domainTimes);
   const domainSpan = Math.max(domainEnd - domainStart, 1);
   const xForTime = (value: number) =>
     left +
@@ -7791,7 +7736,7 @@ function BodyTrendChart({
 
   const weightRange = paddedChartRange([
     ...weightValues,
-    ...relevantGoals.flatMap((item) => [item.start_weight_kg, item.target_weight_kg]),
+    ...visibleGoalPaths.flatMap(({ path }) => [path.start_weight_kg, path.target_weight_kg]),
   ])!;
   const fatRange = paddedChartRange(fatValues);
   const weightVisible = showWeight || fatRange === null;
@@ -7987,17 +7932,19 @@ function BodyTrendChart({
               <circle className="weight-point" key={point.date} cx={point.x} cy={point.y} r="2.8" />
             ))}
           {weightVisible &&
-            relevantGoals.map((goal, index) => {
+            visibleGoalPaths.map(({ goal, path }, index) => {
               const startRatio =
-                (goal.start_weight_kg - weightRange.min) /
+                (path.start_weight_kg - weightRange.min) /
                 Math.max(weightRange.max - weightRange.min, 1);
               const targetRatio =
-                (goal.target_weight_kg - weightRange.min) /
+                (path.target_weight_kg - weightRange.min) /
                 Math.max(weightRange.max - weightRange.min, 1);
-              const startX = xForTime(dateTime(goal.start_date));
-              const targetX = xForTime(dateTime(goal.target_date));
+              const startX = xForTime(dateTime(path.start_date));
+              const targetX = xForTime(dateTime(path.target_date));
               const startY = height - bottom - startRatio * (height - top - bottom);
               const targetY = height - bottom - targetRatio * (height - top - bottom);
+              const includesGoalStart = path.start_date === goal.start_date;
+              const includesGoalTarget = path.target_date === goal.target_date;
               const labelAtEnd = targetX > width - right - 82;
               const labelY = Math.max(
                 top + 7,
@@ -8009,16 +7956,22 @@ function BodyTrendChart({
                   key={goal.id}
                 >
                   <line x1={startX} y1={startY} x2={targetX} y2={targetY} />
-                  <circle className="goal-start-point" cx={startX} cy={startY} r="2.5" />
-                  <circle className="goal-target-point" cx={targetX} cy={targetY} r="3" />
-                  <text
-                    className="goal-line-label"
-                    x={targetX + (labelAtEnd ? -4 : 4)}
-                    y={labelY}
-                    textAnchor={labelAtEnd ? 'end' : 'start'}
-                  >
-                    Goal {goal.target_weight_kg} kg
-                  </text>
+                  {includesGoalStart && (
+                    <circle className="goal-start-point" cx={startX} cy={startY} r="2.5" />
+                  )}
+                  {includesGoalTarget && (
+                    <>
+                      <circle className="goal-target-point" cx={targetX} cy={targetY} r="3" />
+                      <text
+                        className="goal-line-label"
+                        x={targetX + (labelAtEnd ? -4 : 4)}
+                        y={labelY}
+                        textAnchor={labelAtEnd ? 'end' : 'start'}
+                      >
+                        Goal {goal.target_weight_kg} kg
+                      </text>
+                    </>
+                  )}
                 </g>
               );
             })}
@@ -8165,7 +8118,7 @@ function BodyTrendChart({
               <i className="fat" /> Body fat
             </span>
           )}
-          {weightVisible && relevantGoals.length > 0 && (
+          {weightVisible && visibleGoalPaths.length > 0 && (
             <span>
               <i className="goal" /> Goal path
             </span>
@@ -8219,6 +8172,7 @@ function CardioScreen({
   const [historyFilter, setHistoryFilter] = useState<'all' | 'pure_cardio' | 'workout_plus_cardio'>(
     'all',
   );
+  const [historyPage, setHistoryPage] = useState(1);
   const [error, setError] = useState<string | null>(null);
   const load = () =>
     api
@@ -8233,6 +8187,27 @@ function CardioScreen({
     window.addEventListener('training-preferences-updated', reloadPreferences);
     return () => window.removeEventListener('training-preferences-updated', reloadPreferences);
   }, []);
+  const filteredSessions =
+    overview?.sessions.filter(
+      (session) =>
+        historyFilter === 'all' ||
+        (session.workout_context === 'workout_plus_cardio'
+          ? 'workout_plus_cardio'
+          : 'pure_cardio') === historyFilter,
+    ) ?? [];
+  const historyPageCount = Math.max(
+    1,
+    Math.ceil(filteredSessions.length / CARDIO_HISTORY_PAGE_SIZE),
+  );
+  const currentHistoryPage = Math.min(historyPage, historyPageCount);
+  const pagedSessions = filteredSessions.slice(
+    (currentHistoryPage - 1) * CARDIO_HISTORY_PAGE_SIZE,
+    currentHistoryPage * CARDIO_HISTORY_PAGE_SIZE,
+  );
+
+  useEffect(() => {
+    setHistoryPage((page) => Math.min(page, historyPageCount));
+  }, [historyPageCount]);
   async function importScreenshot(file: File) {
     if (scanning) return;
     setError(null);
@@ -8334,13 +8309,6 @@ function CardioScreen({
       0,
     ),
   }));
-  const filteredSessions = overview.sessions.filter(
-    (session) =>
-      historyFilter === 'all' ||
-      (session.workout_context === 'workout_plus_cardio'
-        ? 'workout_plus_cardio'
-        : 'pure_cardio') === historyFilter,
-  );
   return (
     <div className="cardio-screen">
       {error && <p className="inline-error">{error}</p>}
@@ -8611,9 +8579,10 @@ function CardioScreen({
                 key={value}
                 type="button"
                 aria-pressed={historyFilter === value}
-                onClick={() =>
-                  setHistoryFilter(value as 'all' | 'pure_cardio' | 'workout_plus_cardio')
-                }
+                onClick={() => {
+                  setHistoryFilter(value as 'all' | 'pure_cardio' | 'workout_plus_cardio');
+                  setHistoryPage(1);
+                }}
               >
                 {label}
               </button>
@@ -8623,7 +8592,7 @@ function CardioScreen({
         {filteredSessions.length === 0 && (
           <p className="cardio-history-empty">No cardio sessions match this filter.</p>
         )}
-        {filteredSessions.map((session) => {
+        {pagedSessions.map((session) => {
           const workoutContext =
             session.workout_context === 'workout_plus_cardio'
               ? 'workout_plus_cardio'
@@ -8728,6 +8697,12 @@ function CardioScreen({
             </article>
           );
         })}
+        <PaginationControls
+          currentPage={currentHistoryPage}
+          totalPages={historyPageCount}
+          onPageChange={setHistoryPage}
+          label="cardio history"
+        />
       </section>
       <section className="panel previous-zone2">
         <h2>Previous weeks</h2>

@@ -4642,43 +4642,11 @@ html.edge-swipe-active .edge-swipe-indicator {
   color: #67c8f3;
 }
 
-.dashboard-bodyweight-hint {
-  padding-top: 0.35rem;
-  color: #9da7ab;
-  font-size: 0.78rem;
-}
-
-.dashboard-bodyweight-options {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 0.4rem;
-  margin-top: 0.85rem;
-}
-
-.dashboard-bodyweight-options button {
-  min-width: 0;
-  min-height: 2.65rem;
-  border: 1px solid #3e515a;
-  border-radius: 7px;
-  padding: 0.4rem 0.15rem;
-  background: #172126;
-  color: #c8ced0;
-  font-size: clamp(0.78rem, 3.4vw, 0.95rem);
-  font-variant-numeric: tabular-nums;
-  font-weight: 700;
-}
-
-.dashboard-bodyweight-options button[aria-pressed='true'] {
-  border-color: #35b5ec;
-  background: #117cac;
-  color: white;
-}
-
 .dashboard-bodyweight-save {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(7rem, 0.7fr);
   gap: 0.55rem;
-  margin-top: 0.6rem;
+  margin-top: 0.75rem;
 }
 
 .dashboard-bodyweight-save label {
@@ -5482,6 +5450,7 @@ html.edge-swipe-active .edge-swipe-indicator {
   gap: 0.35rem;
   margin-top: 1.35rem;
   border-bottom: 1px solid #444a4d;
+  overflow-x: auto;
 }
 
 .body-log-tabs button {
@@ -5492,6 +5461,7 @@ html.edge-swipe-active .edge-swipe-indicator {
   padding: 0.6rem 0.8rem;
   background: transparent;
   color: #d2cfcb;
+  white-space: nowrap;
 }
 
 .body-log-tabs button.active {
@@ -5518,6 +5488,11 @@ html.edge-swipe-active .edge-swipe-indicator {
   grid-template-columns: 1.05fr 1.15fr 0.8fr 2rem;
   gap: 0.45rem;
   align-items: start;
+}
+
+.body-history-table-head.body-history-summary-grid,
+.body-history-panel > article.body-history-summary-grid {
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 0.7fr);
 }
 
 .body-history-table-head {
@@ -6593,6 +6568,20 @@ body,
   font-size: 0.62rem;
   font-weight: 800;
 }
+.cardio-fields label,
+.cardio-fields input,
+.cardio-fields select {
+  min-width: 0;
+}
+.cardio-fields input,
+.cardio-fields select {
+  width: 100%;
+}
+.cardio-fields select {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .cardio-form textarea {
   width: 100%;
   margin: 0.7rem 0;
@@ -6696,7 +6685,8 @@ body,
 .cardio-history .cardio-session-summary {
   margin-top: 0.08rem;
 }
-.cardio-history button,
+.cardio-history .cardio-session-actions button,
+.cardio-history .cardio-history-workout-link,
 .previous-zone2 button {
   border: 0;
   background: transparent;
@@ -11615,29 +11605,21 @@ html {
 
 .progress-trend-panel .landscape-chart-toolbar {
   align-items: center;
-  gap: 0.38rem;
-  margin: 0 0.35rem;
+  gap: 0.32rem;
+  margin: 0 0.2rem;
 }
 
 .progress-trend-panel .landscape-chart-options {
   display: grid;
-  grid-template-columns: auto minmax(7.5rem, 1fr) 4.2rem auto;
+  grid-template-columns: minmax(0, 1fr) 6.2rem auto;
   align-items: center;
-  gap: 0.38rem;
-}
-
-.progress-trend-kicker {
-  color: var(--accent-dark);
-  font-size: 0.64rem;
-  font-weight: 900;
-  letter-spacing: 0.15em;
-  text-transform: uppercase;
+  gap: 0.32rem;
 }
 
 .progress-trend-panel .chart-option-field select {
   width: 100%;
   min-height: 2.2rem;
-  padding: 0.42rem 1.35rem 0.42rem 0.52rem;
+  padding: 0.42rem 1.15rem 0.42rem 0.46rem;
   font-size: 0.65rem;
 }
 
@@ -11763,7 +11745,6 @@ html {
   align-items: center;
 }
 
-.progress-trend-panel .landscape-chart-expanded .progress-trend-kicker,
 .progress-trend-panel .landscape-chart-expanded .progress-session-count {
   display: none;
 }
@@ -11811,7 +11792,7 @@ html {
 
 @media (max-width: 360px) {
   .progress-trend-panel .landscape-chart-options {
-    grid-template-columns: auto minmax(0, 1fr) 3.85rem;
+    grid-template-columns: minmax(0, 1fr) 6.2rem;
   }
 
   .progress-session-count {

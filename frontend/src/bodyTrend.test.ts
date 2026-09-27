@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   BODY_TREND_DURATION_OPTIONS,
   bodyTrendCutoffDate,
+  clipBodyWeightGoalPath,
   filterMeasurementsByRange,
   nearestChartPointIndex,
   summarizeBodyWeightTrend,
@@ -42,6 +43,39 @@ describe('body-composition chart ranges and scrubbing', () => {
     expect(nearestChartPointIndex(42, 42, 302, 4)).toBe(0);
     expect(nearestChartPointIndex(175, 42, 302, 4)).toBe(2);
     expect(nearestChartPointIndex(999, 42, 302, 4)).toBe(3);
+  });
+
+  it('clips a goal path to the selected chart window', () => {
+    const clipped = clipBodyWeightGoalPath(
+      {
+        start_date: '2026-07-31',
+        target_date: '2026-09-25',
+        start_weight_kg: 87,
+        target_weight_kg: 82,
+      },
+      '2026-08-23',
+      '2026-09-23',
+    );
+
+    expect(clipped?.start_date).toBe('2026-08-23');
+    expect(clipped?.target_date).toBe('2026-09-23');
+    expect(clipped?.start_weight_kg).toBeCloseTo(84.946, 3);
+    expect(clipped?.target_weight_kg).toBeCloseTo(82.179, 3);
+  });
+
+  it('omits goal paths that do not overlap the selected chart window', () => {
+    expect(
+      clipBodyWeightGoalPath(
+        {
+          start_date: '2026-07-01',
+          target_date: '2026-07-31',
+          start_weight_kg: 87,
+          target_weight_kg: 85,
+        },
+        '2026-08-23',
+        '2026-09-23',
+      ),
+    ).toBeNull();
   });
 });
 

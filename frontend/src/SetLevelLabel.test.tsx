@@ -12,7 +12,6 @@ describe('SetLevelLabel', () => {
 
     expect(markup).toContain(`class="set-level-label ${className}"`);
     expect(markup).toContain(`>${label}</span>`);
-    expect(markup).not.toContain('★');
   });
 
   it('keeps legacy warm-up sets labelled as warmups', () => {

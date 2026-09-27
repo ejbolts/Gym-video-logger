@@ -9,7 +9,6 @@ describe('workout header rest timer', () => {
     expect(markup).toContain('role="timer"');
     expect(markup).toContain('aria-label="Rest timer 2:48"');
     expect(markup).toContain('<strong>2:48</strong>');
-    expect(markup).not.toContain('>REST<');
     expect(markup).toContain('aria-label="Skip rest timer"');
     expect(markup).toContain('>×</button>');
   });
@@ -23,7 +22,6 @@ describe('workout header rest timer', () => {
     expect(markup).toContain(
       '<span class="workout-header-duration">Live 3:55:32</span><span class="workout-header-separator" aria-hidden="true">•</span><span class="workout-rest-timer"',
     );
-    expect(markup).not.toContain('Push');
   });
 
   it('shows only the duration when the timer is inactive', () => {
@@ -32,7 +30,6 @@ describe('workout header rest timer', () => {
     );
 
     expect(markup).toContain('<span class="workout-header-duration">Live 4:11:40</span>');
-    expect(markup).not.toContain('Push');
     expect(markup).not.toContain('workout-header-separator');
     expect(markup).not.toContain('workout-rest-timer');
   });

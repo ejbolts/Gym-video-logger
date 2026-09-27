@@ -33,9 +33,43 @@ export interface DatedMeasurement {
   measurement_date: string;
 }
 
+export interface BodyWeightGoalPath {
+  start_date: string;
+  target_date: string;
+  start_weight_kg: number;
+  target_weight_kg: number;
+}
+
 function dateOnlyUtc(date: string): Date {
   const [year, month, day] = date.split('-').map(Number);
   return new Date(Date.UTC(year, month - 1, day));
+}
+
+export function clipBodyWeightGoalPath(
+  goal: BodyWeightGoalPath,
+  startDate?: string,
+  endDate?: string,
+): BodyWeightGoalPath | null {
+  const goalStart = dateOnlyUtc(goal.start_date).getTime();
+  const goalEnd = dateOnlyUtc(goal.target_date).getTime();
+  const clippedStart = startDate
+    ? Math.max(goalStart, dateOnlyUtc(startDate).getTime())
+    : goalStart;
+  const clippedEnd = endDate ? Math.min(goalEnd, dateOnlyUtc(endDate).getTime()) : goalEnd;
+  if (clippedStart > clippedEnd) return null;
+
+  const weightAt = (time: number) => {
+    if (goalEnd === goalStart) return goal.target_weight_kg;
+    const ratio = (time - goalStart) / (goalEnd - goalStart);
+    return goal.start_weight_kg + ratio * (goal.target_weight_kg - goal.start_weight_kg);
+  };
+
+  return {
+    start_date: new Date(clippedStart).toISOString().slice(0, 10),
+    target_date: new Date(clippedEnd).toISOString().slice(0, 10),
+    start_weight_kg: weightAt(clippedStart),
+    target_weight_kg: weightAt(clippedEnd),
+  };
 }
 
 export function bodyTrendCutoffDate(latestDate: string, duration: BodyTrendDuration): string {

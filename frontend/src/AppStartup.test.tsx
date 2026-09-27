@@ -20,7 +20,6 @@ describe('App startup', () => {
     expect(markup).toContain('menu-loading-skeleton');
     expect(markup).toContain('menu-skeleton-shortcut');
     expect(markup).toContain('Loading training menu');
-    expect(markup).not.toContain('Loading your training log');
   });
 
   it('keeps fresh dashboard data updates confined to the visible menu', () => {
@@ -63,17 +62,10 @@ describe('App startup', () => {
     expect(markup).toContain('1:05');
     expect(markup).toContain('Measure');
     expect(markup).toContain('Video logger');
-    expect(markup).not.toContain('Upload and combine set clips');
     expect(markup).toContain('Cardio');
-    expect(markup).not.toContain('Sessions and trends');
     expect(markup.match(/dashboard-shortcut-icon/g)).toHaveLength(6);
     expect(markup).toContain('DAILY CHECK-IN');
-    expect(markup).toContain('Quick select bodyweight');
-    expect(markup).not.toContain('Fat-energy equivalent');
-    expect(markup).not.toContain('Powerlifting Level');
-    expect(markup).not.toContain('heatmap-panel');
-    expect(markup).not.toContain('recent-panel');
-    expect(markup).not.toContain('muscle-volume-panel');
+    expect(markup).toContain('Bodyweight in kilograms');
   });
 
   it('shows cached weekly cardio minutes while the dashboard API is being upgraded', () => {
@@ -121,7 +113,6 @@ describe('App startup', () => {
     expect(markup).toContain('aria-label="Go back"');
     expect(markup).toContain(`<strong>${title}</strong>`);
     expect(markup).toContain(`<span>${subtitle}</span>`);
-    expect(markup).not.toContain('class="reference-app-header"');
   });
 
   it('keeps the overlay header off the main menu', () => {

@@ -80,7 +80,9 @@ from .tracker_schemas import (
     Zone2WeekRead,
 )
 from .training_metrics import (
+    estimated_one_rep_max,
     get_setting,
+    is_pr_eligible,
     is_working_set,
     muscle_credits,
     muscle_volume,
@@ -1629,7 +1631,14 @@ def exercise_progress(exercise_id: str, db: DbSession) -> ExerciseProgressRead:
         if not sets:
             continue
         best_set = max(sets, key=lambda item: ((item.weight_kg or 0), (item.reps or 0)))
-        best_e1rm = max((item.weight_kg or 0) * (1 + (item.reps or 0) / 30) for item in sets)
+        best_e1rm = max(
+            (
+                estimated_one_rep_max(item.weight_kg or 0, item.reps or 0)
+                for item in sets
+                if is_pr_eligible(item)
+            ),
+            default=0.0,
+        )
         points.append(
             ProgressPoint(
                 workout_date=workout_date,

@@ -1028,6 +1028,72 @@ def test_pr_types_warmups_failed_sets_and_unit_conversion(client):
     assert weight_record["value"] == 220.5
 
 
+def test_estimated_1rm_pr_tracks_new_high_across_different_weights_and_reps(client):
+    bench = next(
+        item
+        for item in client.get("/api/exercises").json()
+        if item["name"] == "Barbell Bench Press"
+    )
+    payload = workout_payload(bench["id"])
+
+    def log_set(day: str, weight_kg: float, reps: int) -> dict:
+        payload["workout_date"] = day
+        payload["movements"][0]["sets"] = [
+            {"weight_kg": weight_kg, "reps": reps, "completed": True}
+        ]
+        response = client.post("/api/workouts", json=payload)
+        assert response.status_code == 201
+        return response.json()
+
+    first = log_set("2026-01-01", 100, 8)
+    lower = log_set("2026-01-08", 90, 12)
+    higher = log_set("2026-01-15", 90, 13)
+    tied = log_set("2026-01-22", 90, 13)
+
+    def records_for(workout: dict) -> list[dict]:
+        response = client.get("/api/personal-records", params={"workout_id": workout["id"]})
+        assert response.status_code == 200
+        return response.json()
+
+    first_1rm = [item for item in records_for(first) if item["record_type"] == "estimated_1rm"]
+    assert len(first_1rm) == 1
+    assert first_1rm[0]["value"] == 126.7  # Epley: 100 * (1 + 8/30)
+    assert first_1rm[0]["formula"] is not None
+
+    assert not any(item["record_type"] == "estimated_1rm" for item in records_for(lower))
+    higher_records = records_for(higher)
+    assert {item["record_type"] for item in higher_records} == {"reps_at_weight", "estimated_1rm"}
+    higher_1rm = next(item for item in higher_records if item["record_type"] == "estimated_1rm")
+    assert higher_1rm["value"] == 129.0  # Epley: 90 * (1 + 13/30)
+    assert higher_1rm["normalized_weight"] == 90.0
+    assert not any(item["record_type"] == "estimated_1rm" for item in records_for(tied))
+
+    progress = client.get(f"/api/progress/{bench['id']}").json()
+    assert [point["estimated_1rm"] for point in progress["points"]] == [126.7, 126.0, 129.0, 129.0]
+    assert progress["personal_best_estimated_1rm"] == 129.0
+
+
+def test_progress_1rm_excludes_sets_that_cannot_earn_a_pr(client):
+    bench = next(
+        item
+        for item in client.get("/api/exercises").json()
+        if item["name"] == "Barbell Bench Press"
+    )
+    payload = workout_payload(bench["id"])
+    payload["movements"][0]["sets"] = [
+        {"weight_kg": 90, "reps": 13, "completed": True},
+        {"weight_kg": 130, "reps": 8, "set_type": "warmup", "completed": True},
+        {"weight_kg": 120, "reps": 4, "target_reps": 6, "failed": True, "completed": True},
+        {"weight_kg": 50, "reps": 31, "completed": True},
+    ]
+    assert client.post("/api/workouts", json=payload).status_code == 201
+
+    progress = client.get(f"/api/progress/{bench['id']}").json()
+    assert progress["personal_best_estimated_1rm"] == 129.0
+    records = client.get("/api/personal-records", params={"exercise_id": bench["id"]}).json()
+    assert max(item["value"] for item in records if item["record_type"] == "estimated_1rm") == 129.0
+
+
 def test_fractional_muscle_volume_and_pr_rebuild_after_edit_delete(client):
     bench = next(
         item

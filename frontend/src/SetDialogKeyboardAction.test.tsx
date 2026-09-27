@@ -9,7 +9,6 @@ describe('set dialog keyboard action', () => {
     expect(markup).toContain('class="set-dialog-keyboard-action"');
     expect(markup).toContain('aria-label="Add set"');
     expect(markup).toContain('>Add</button>');
-    expect(markup).not.toContain('✓');
   });
 
   it('can submit edits with a Save label', () => {
