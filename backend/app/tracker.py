@@ -77,6 +77,7 @@ from .tracker_schemas import (
     WorkoutCacheRevisionRead,
     WorkoutRecommendationRead,
     WorkoutSnapshotRead,
+    WorkoutTypeColors,
     Zone2WeekRead,
 )
 from .training_metrics import (
@@ -97,6 +98,16 @@ router = APIRouter(prefix="/api", tags=["workout tracking"])
 DbSession = Annotated[Session, Depends(get_db)]
 SettingsDependency = Annotated[Settings, Depends(get_settings)]
 WORKOUT_CACHE_REVISION_KEY = "workout_cache_revision"
+WORKOUT_TYPE_COLORS_KEY = "workout_type_colors"
+DEFAULT_WORKOUT_TYPE_COLORS = WorkoutTypeColors(
+    upper="#8b5cf6",
+    lower="#f59e0b",
+    push="#ef476f",
+    pull="#3b82f6",
+    full_body="#14b8a6",
+    cardio="#22c55e",
+    other="#94a3b8",
+)
 
 
 def workout_cache_revision(db: Session) -> str:
@@ -914,6 +925,24 @@ def zone2_week(
 @router.get("/training-preferences", response_model=TrainingPreferencesRead)
 def get_training_preferences(db: DbSession) -> TrainingPreferencesRead:
     return training_preferences(db)
+
+
+@router.get("/workout-type-colors", response_model=WorkoutTypeColors)
+def get_workout_type_colors(db: DbSession) -> WorkoutTypeColors:
+    stored = get_setting(db, WORKOUT_TYPE_COLORS_KEY, "")
+    if stored:
+        try:
+            return WorkoutTypeColors.model_validate_json(stored)
+        except ValueError:
+            pass
+    return DEFAULT_WORKOUT_TYPE_COLORS
+
+
+@router.put("/workout-type-colors", response_model=WorkoutTypeColors)
+def update_workout_type_colors(payload: WorkoutTypeColors, db: DbSession) -> WorkoutTypeColors:
+    set_setting(db, WORKOUT_TYPE_COLORS_KEY, payload.model_dump_json())
+    db.commit()
+    return payload
 
 
 @router.put("/training-preferences", response_model=TrainingPreferencesRead)

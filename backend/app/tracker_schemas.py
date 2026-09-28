@@ -481,6 +481,16 @@ class TrainingPreferencesRead(TrainingPreferencesUpdate):
     pass
 
 
+class WorkoutTypeColors(BaseModel):
+    upper: str = Field(pattern=r"^#[0-9a-fA-F]{6}$")
+    lower: str = Field(pattern=r"^#[0-9a-fA-F]{6}$")
+    push: str = Field(pattern=r"^#[0-9a-fA-F]{6}$")
+    pull: str = Field(pattern=r"^#[0-9a-fA-F]{6}$")
+    full_body: str = Field(pattern=r"^#[0-9a-fA-F]{6}$")
+    cardio: str = Field(pattern=r"^#[0-9a-fA-F]{6}$")
+    other: str = Field(pattern=r"^#[0-9a-fA-F]{6}$")
+
+
 class Zone2WeekRead(BaseModel):
     week_start: date
     week_end: date

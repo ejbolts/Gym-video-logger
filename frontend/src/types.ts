@@ -74,6 +74,8 @@ export interface LocalClip {
 export type WorkoutCategory =
   'upper' | 'lower' | 'push' | 'pull' | 'full_body' | 'cardio' | 'other';
 
+export type WorkoutTypeColors = Record<WorkoutCategory, string>;
+
 export type ExerciseKind = 'strength' | 'cardio';
 
 export type SetType = 'warmup' | 'normal' | 'drop';

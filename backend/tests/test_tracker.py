@@ -42,6 +42,24 @@ def workout_payload(exercise_id: str) -> dict:
     }
 
 
+def test_workout_type_colors_can_be_saved_and_reloaded(client):
+    response = client.get("/api/workout-type-colors")
+    assert response.status_code == 200
+    defaults = response.json()
+    assert defaults["push"] == "#ef476f"
+    assert len(defaults) == 7
+
+    updated = {**defaults, "push": "#123ABC", "cardio": "#abcdef"}
+    response = client.put("/api/workout-type-colors", json=updated)
+    assert response.status_code == 200
+    assert response.json() == updated
+    assert client.get("/api/workout-type-colors").json() == updated
+
+    invalid = client.put("/api/workout-type-colors", json={**updated, "push": "red"})
+    assert invalid.status_code == 422
+    assert client.get("/api/workout-type-colors").json() == updated
+
+
 def test_default_exercise_library_is_seeded(client):
     response = client.get("/api/exercises")
 

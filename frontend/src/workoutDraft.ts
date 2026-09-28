@@ -26,6 +26,8 @@ export interface StoredDraftMovement {
 export interface ActiveWorkoutDraft {
   version: 1;
   startedAt: number;
+  resumingWorkoutId?: string;
+  previousDurationMinutes?: number;
   updatedAt: number;
   lastActiveAt?: number;
   inactiveFinishAt?: number;
@@ -92,6 +94,13 @@ function isActiveWorkoutDraft(value: unknown): value is ActiveWorkoutDraft {
     typeof value.startedAt === 'number' &&
     Number.isFinite(value.startedAt) &&
     value.startedAt > 0 &&
+    (value.resumingWorkoutId === undefined ||
+      (typeof value.resumingWorkoutId === 'string' && value.resumingWorkoutId.length > 0)) &&
+    (value.previousDurationMinutes === undefined ||
+      (typeof value.previousDurationMinutes === 'number' &&
+        Number.isInteger(value.previousDurationMinutes) &&
+        value.previousDurationMinutes >= 0 &&
+        value.previousDurationMinutes <= 1440)) &&
     (value.lastActiveAt === undefined ||
       (typeof value.lastActiveAt === 'number' &&
         Number.isFinite(value.lastActiveAt) &&
@@ -172,6 +181,7 @@ export function savedWorkoutMatchesOldDraft(
   workout: TrackedWorkout,
   now = Date.now(),
 ): boolean {
+  if (draft.resumingWorkoutId) return false;
   if (now - draft.startedAt < 24 * 60 * 60 * 1000) return false;
   if (
     workout.workout_date !== draft.workoutDate ||

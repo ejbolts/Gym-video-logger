@@ -141,6 +141,13 @@ describe('active workout draft persistence', () => {
       ],
     };
     expect(savedWorkoutMatchesOldDraft(stored, saved, Date.UTC(2026, 8, 12))).toBe(true);
+    expect(
+      savedWorkoutMatchesOldDraft(
+        { ...stored, resumingWorkoutId: saved.id, previousDurationMinutes: 72 },
+        saved,
+        Date.UTC(2026, 8, 12),
+      ),
+    ).toBe(false);
     expect(savedWorkoutMatchesOldDraft(stored, saved, Date.UTC(2026, 7, 23, 1))).toBe(false);
     saved.movements[0].sets[2].reps = 8;
     expect(savedWorkoutMatchesOldDraft(stored, saved, Date.UTC(2026, 8, 12))).toBe(false);
@@ -161,6 +168,19 @@ describe('active workout draft persistence', () => {
 
     clearActiveWorkoutDraft(storage);
     expect(readActiveWorkoutDraft(storage)).toBeNull();
+  });
+
+  it('keeps the saved workout identity and previous duration when a resumed session reloads', () => {
+    const storage = new MemoryStorage();
+    writeActiveWorkoutDraft(
+      { ...draft, resumingWorkoutId: 'saved-workout', previousDurationMinutes: 45 },
+      storage,
+    );
+    expect(readActiveWorkoutDraft(storage)).toMatchObject({
+      resumingWorkoutId: 'saved-workout',
+      previousDurationMinutes: 45,
+      startedAt: draft.startedAt,
+    });
   });
 
   it('persists the inactivity deadline and rejects one before the workout began', () => {

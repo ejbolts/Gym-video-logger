@@ -40,6 +40,7 @@ import type {
   TrackedWorkout,
   TrainingPreferences,
   WorkoutCategory,
+  WorkoutTypeColors,
   WorkoutInput,
   WorkoutRecommendation,
   WorkoutSetInput,
@@ -147,6 +148,7 @@ import {
 import { applySupersetSelection, clearSuperset } from './workoutSupersets';
 import { upsertWorkoutByRecency, workoutPageForId } from './workoutHistory';
 import { calculateDraftPrs } from './workoutPr';
+import { completedWorkoutDurationMinutes } from './workoutResume';
 import { isWorkoutSetAutoSavable, workoutSetForAutoSave } from './workoutAutoSave';
 import { readDashboardCache, writeDashboardCache } from './workoutCache';
 import { trainingDataActivityLabel } from './trainingDataRefresh';
@@ -172,7 +174,7 @@ const categoryNames: Record<WorkoutCategory, string> = {
   other: 'Other',
 };
 
-const categoryColors: Record<WorkoutCategory, string> = {
+const defaultCategoryColors: WorkoutTypeColors = {
   upper: '#8b5cf6',
   lower: '#f59e0b',
   push: '#ef476f',
@@ -181,6 +183,18 @@ const categoryColors: Record<WorkoutCategory, string> = {
   cardio: '#22c55e',
   other: '#94a3b8',
 };
+
+function calendarTextColor(colors: string[]): string {
+  const luminance =
+    colors.reduce((total, color) => {
+      const channels = [1, 3, 5].map((start) => {
+        const value = parseInt(color.slice(start, start + 2), 16) / 255;
+        return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+      });
+      return total + channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+    }, 0) / colors.length;
+  return luminance > 0.179 ? '#101513' : '#ffffff';
+}
 
 const restOptions = [60, 90, 120, 150, 180, 210, 240, 270, 300];
 const HISTORY_PAGE_SIZE = 8;
@@ -407,8 +421,13 @@ export function App() {
   const [completionRecords, setCompletionRecords] = useState<PersonalRecord[]>([]);
   const [restTimerEnabled, setRestTimerEnabled] = useState(restTimerPreferenceEnabled);
   const [bodyTrendPreference, setBodyTrendPreference] = useState(loadBodyTrendPreference);
+  const [workoutTypeColors, setWorkoutTypeColors] =
+    useState<WorkoutTypeColors>(defaultCategoryColors);
   const [workoutStartDate, setWorkoutStartDate] = useState(localDate());
   const [editingWorkout, setEditingWorkout] = useState<TrackedWorkout | null>(null);
+  const [resumingWorkoutId, setResumingWorkoutId] = useState<string | null>(
+    () => readActiveWorkoutDraft()?.resumingWorkoutId ?? null,
+  );
   const [activeWorkoutStartedAt, setActiveWorkoutStartedAt] = useState<number | null>(() => {
     const storedDraft = readActiveWorkoutDraft();
     if (storedDraft) return storedDraft.startedAt;
@@ -431,6 +450,7 @@ export function App() {
     if (!draft || !workouts.some((workout) => savedWorkoutMatchesOldDraft(draft, workout))) return;
     clearActiveWorkoutDraft();
     setActiveWorkoutStartedAt(null);
+    setResumingWorkoutId(null);
     if (tab === 'log') {
       navigationActionRef.current = 'replace';
       setTabState('dashboard');
@@ -440,6 +460,9 @@ export function App() {
     activeWorkoutStartedAt === null
       ? null
       : (readActiveWorkoutDraft()?.workoutDate ?? workoutStartDate);
+  const resumingWorkout = resumingWorkoutId
+    ? (workouts.find((workout) => workout.id === resumingWorkoutId) ?? null)
+    : null;
   const dashboardWorkoutCount =
     workouts.length > 0 || !loading
       ? workouts.length
@@ -566,6 +589,13 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    void api
+      .getWorkoutTypeColors()
+      .then(setWorkoutTypeColors)
+      .catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
     // Navigation only reveals an already-cached screen. Training data is refreshed at startup
     // and by the mutation handlers below, never as a side effect of changing views.
     setVisitedTabs((current) => {
@@ -616,18 +646,24 @@ export function App() {
 
   async function saveWorkout(payload: WorkoutInput) {
     const wasEditing = editingWorkout !== null;
+    const resumedId = resumingWorkoutId;
     const saved = await withBackgroundActivity(
-      wasEditing ? 'Saving workout changes…' : 'Saving workout…',
+      wasEditing || resumedId ? 'Saving workout changes…' : 'Saving workout…',
       () =>
-        editingWorkout ? api.updateWorkout(editingWorkout.id, payload) : api.createWorkout(payload),
+        editingWorkout
+          ? api.updateWorkout(editingWorkout.id, payload)
+          : resumedId
+            ? api.updateWorkout(resumedId, payload)
+            : api.createWorkout(payload),
     );
 
     setWorkouts((current) => upsertWorkoutByRecency(current, saved));
     if (!wasEditing) {
       clearActiveWorkoutDraft();
       setActiveWorkoutStartedAt(null);
+      setResumingWorkoutId(null);
     }
-    setTab(wasEditing ? 'history' : 'dashboard', { replace: true });
+    setTab(wasEditing || resumedId ? 'history' : 'dashboard', { replace: true });
     setEditingWorkout(null);
 
     void api
@@ -641,6 +677,11 @@ export function App() {
     try {
       await withBackgroundActivity('Deleting workout…', async () => {
         await api.deleteWorkout(workout.id);
+        if (workout.id === resumingWorkoutId) {
+          clearActiveWorkoutDraft();
+          setActiveWorkoutStartedAt(null);
+          setResumingWorkoutId(null);
+        }
         await refreshData({ activityLabel: null });
       });
     } catch (error) {
@@ -702,6 +743,7 @@ export function App() {
     const storedDraft = replaceActiveWorkout ? null : readActiveWorkoutDraft();
     const startedAt = storedDraft?.startedAt ?? Date.now();
     setEditingWorkout(null);
+    setResumingWorkoutId(storedDraft?.resumingWorkoutId ?? null);
     setActiveWorkoutStartedAt(startedAt);
     setWorkoutStartDate(storedDraft?.workoutDate ?? workoutDate);
     setTab('log');
@@ -712,6 +754,17 @@ export function App() {
     setEditingWorkout(workout);
     setWorkoutStartDate(workout.workout_date);
     setTab('log');
+  }
+
+  function resumeWorkout(workout: TrackedWorkout) {
+    if (activeWorkoutStartedAt !== null) return;
+    clearActiveWorkoutDraft();
+    setEditingWorkout(null);
+    setResumingWorkoutId(workout.id);
+    setActiveWorkoutStartedAt(Date.now());
+    setWorkoutStartDate(workout.workout_date);
+    setTab('log');
+    if (navigator.storage?.persist) void navigator.storage.persist().catch(() => false);
   }
 
   async function saveMeasurement(payload: {
@@ -899,10 +952,12 @@ export function App() {
                 recommendation={dashboard?.recommendation ?? null}
                 initialDate={workoutStartDate}
                 initialWorkout={editingWorkout}
+                resumingWorkout={resumingWorkout}
                 currentBodyweight={measurements[0]?.weight_kg ?? null}
                 personalRecords={personalRecords}
                 historicalWorkouts={workouts}
                 restTimerEnabled={restTimerEnabled}
+                categoryColors={workoutTypeColors}
                 onExerciseHistory={(exerciseId) => {
                   setHistoryOpenId(null);
                   setHistoryExerciseId(exerciseId);
@@ -924,6 +979,7 @@ export function App() {
                   } else {
                     clearActiveWorkoutDraft();
                     setActiveWorkoutStartedAt(null);
+                    setResumingWorkoutId(null);
                     setTab('dashboard');
                   }
                   setEditingWorkout(null);
@@ -948,9 +1004,11 @@ export function App() {
             <HistoryScreen
               key={`${historyOpenId ?? 'history'}-${historyExerciseId ?? 'all'}`}
               workouts={workouts}
+              categoryColors={workoutTypeColors}
               measurements={measurements}
               exercises={exercises}
               onEdit={editWorkout}
+              onResume={resumeWorkout}
               onDelete={deleteWorkout}
               personalRecords={personalRecords}
               onDataChange={refreshAfterMutation}
@@ -973,6 +1031,8 @@ export function App() {
             <SettingsScreen
               workouts={workouts}
               measurements={measurements}
+              workoutTypeColors={workoutTypeColors}
+              onWorkoutTypeColorsChange={setWorkoutTypeColors}
               restTimerEnabled={restTimerEnabled}
               onRestTimerEnabledChange={updateRestTimerPreference}
               bodyTrendPreference={bodyTrendPreference}
@@ -1571,11 +1631,13 @@ function CalendarCreateWorkoutDialog({
 
 function WorkoutHeatmap({
   entries,
+  categoryColors,
   activeWorkoutDate = null,
   onActiveWorkoutClick,
   onDayClick,
 }: {
   entries: DashboardData['heatmap'];
+  categoryColors: WorkoutTypeColors;
   activeWorkoutDate?: string | null;
   onActiveWorkoutClick?: () => void;
   onDayClick: (workoutDate: string, entry: DashboardData['heatmap'][number] | undefined) => void;
@@ -1645,7 +1707,11 @@ function WorkoutHeatmap({
                   type="button"
                   className={`calendar-day ${entry ? 'trained' : ''} ${inProgress ? 'in-progress' : ''} ${key === todayKey ? 'today' : ''} ${key > todayKey ? 'future' : ''}`}
                   key={key}
-                  style={!inProgress && background ? { background } : undefined}
+                  style={
+                    !inProgress && background
+                      ? { background, color: calendarTextColor(colours) }
+                      : undefined
+                  }
                   onClick={() => {
                     if (inProgress && onActiveWorkoutClick) onActiveWorkoutClick();
                     else onDayClick(key, entry);
@@ -1679,11 +1745,13 @@ function WorkoutHeatmap({
 
 function CalendarDayDetail({
   day,
+  categoryColors,
   onClose,
   onStartWorkout,
   onEditWorkout,
 }: {
   day: DashboardData['heatmap'][number];
+  categoryColors: WorkoutTypeColors;
   onClose: () => void;
   onStartWorkout: (workoutDate: string) => void;
   onEditWorkout: (workoutId: string) => void;
@@ -1801,9 +1869,11 @@ function localCalendarDate(value: Date): string {
 
 function WorkoutLogger({
   exercises,
+  categoryColors,
   recommendation,
   initialDate,
   initialWorkout,
+  resumingWorkout,
   currentBodyweight,
   personalRecords,
   historicalWorkouts,
@@ -1818,9 +1888,11 @@ function WorkoutLogger({
   onDelete,
 }: {
   exercises: Exercise[];
+  categoryColors: WorkoutTypeColors;
   recommendation: WorkoutRecommendation | null;
   initialDate: string;
   initialWorkout: TrackedWorkout | null;
+  resumingWorkout: TrackedWorkout | null;
   currentBodyweight: number | null;
   personalRecords: PersonalRecord[];
   historicalWorkouts: TrackedWorkout[];
@@ -1835,14 +1907,25 @@ function WorkoutLogger({
   onDelete: () => void;
 }) {
   const restoredDraft = useState(() => (initialWorkout ? null : readActiveWorkoutDraft()))[0];
-  const [name, setName] = useState(initialWorkout?.name ?? restoredDraft?.name ?? '');
+  const [name, setName] = useState(
+    initialWorkout?.name ?? restoredDraft?.name ?? resumingWorkout?.name ?? '',
+  );
   const [workoutDate, setWorkoutDate] = useState(
-    initialWorkout?.workout_date ?? restoredDraft?.workoutDate ?? initialDate,
+    initialWorkout?.workout_date ??
+      restoredDraft?.workoutDate ??
+      resumingWorkout?.workout_date ??
+      initialDate,
   );
   const [category, setCategory] = useState<WorkoutCategory>(
-    initialWorkout?.category ?? restoredDraft?.category ?? recommendation?.category ?? 'push',
+    initialWorkout?.category ??
+      restoredDraft?.category ??
+      resumingWorkout?.category ??
+      recommendation?.category ??
+      'push',
   );
-  const [notes, setNotes] = useState(initialWorkout?.notes ?? restoredDraft?.notes ?? '');
+  const [notes, setNotes] = useState(
+    initialWorkout?.notes ?? restoredDraft?.notes ?? resumingWorkout?.notes ?? '',
+  );
   const [durationOverrideMinutes, setDurationOverrideMinutes] = useState<number | null>(
     restoredDraft?.durationOverrideMinutes ?? null,
   );
@@ -1853,9 +1936,10 @@ function WorkoutLogger({
     workoutTimeInputValue(initialWorkout?.start_time ?? null),
   );
   const [endTime, setEndTime] = useState(workoutTimeInputValue(initialWorkout?.end_time ?? null));
+  const sourceWorkout = initialWorkout ?? (restoredDraft ? null : resumingWorkout);
   const [movements, setMovements] = useState<DraftMovement[]>(() =>
-    initialWorkout
-      ? initialWorkout.movements.map((movement) => ({
+    sourceWorkout
+      ? sourceWorkout.movements.map((movement) => ({
           key: crypto.randomUUID(),
           exercise: movement.exercise,
           notes: movement.notes ?? '',
@@ -1907,6 +1991,7 @@ function WorkoutLogger({
   const [switchingMovementKey, setSwitchingMovementKey] = useState<string | null>(null);
   const [supersetPickerKey, setSupersetPickerKey] = useState<string | null>(null);
   const [deleteConfirmationOpen, setDeleteConfirmationOpen] = useState(false);
+  const [finishConfirmationOpen, setFinishConfirmationOpen] = useState(false);
   const [nameEditorOpen, setNameEditorOpen] = useState(false);
   const [nameDraft, setNameDraft] = useState(name);
   const [saving, setSaving] = useState(false);
@@ -1914,6 +1999,10 @@ function WorkoutLogger({
   const deleteButtonRef = useRef<HTMLButtonElement>(null);
   const supersetButtonRef = useRef<HTMLButtonElement>(null);
   const startedAt = useState(() => restoredDraft?.startedAt ?? activeStartedAt ?? Date.now())[0];
+  const resumedWorkoutId = restoredDraft?.resumingWorkoutId ?? resumingWorkout?.id ?? null;
+  const previousDurationMinutes = useState(
+    () => restoredDraft?.previousDurationMinutes ?? resumingWorkout?.duration_minutes ?? 0,
+  )[0];
   const initialActivity = useState(() => {
     const lastActiveAt = Math.max(
       startedAt,
@@ -1965,6 +2054,10 @@ function WorkoutLogger({
       writeActiveWorkoutDraft({
         version: 1,
         startedAt,
+        ...(resumedWorkoutId && {
+          resumingWorkoutId: resumedWorkoutId,
+          previousDurationMinutes,
+        }),
         updatedAt: Date.now(),
         lastActiveAt: lastActiveAtRef.current,
         inactiveFinishAt: inactiveFinishAtRef.current,
@@ -2021,6 +2114,8 @@ function WorkoutLogger({
     movements,
     name,
     notes,
+    previousDurationMinutes,
+    resumedWorkoutId,
     startedAt,
     workoutDate,
     durationOverrideMinutes,
@@ -2374,6 +2469,15 @@ function WorkoutLogger({
 
   async function finishWorkout(automaticEndAt?: number) {
     if (savingRef.current) return;
+    const finishedAt = automaticEndAt ?? Date.now();
+    const durationMinutes = initialWorkout
+      ? editedDurationMinutes
+      : completedWorkoutDurationMinutes(
+          previousDurationMinutes,
+          startedAt,
+          finishedAt,
+          durationOverrideMinutes,
+        );
     const movementsToSave =
       automaticEndAt === undefined
         ? movements
@@ -2392,29 +2496,20 @@ function WorkoutLogger({
       setError('Enter both a workout start time and end time, or leave both blank.');
       return;
     }
-    if (
-      !initialWorkout &&
-      automaticEndAt === undefined &&
-      durationOverrideMinutes === null &&
-      elapsed > 1440 * 60
-    ) {
+    if (!initialWorkout && durationOverrideMinutes === null && durationMinutes > 1440) {
       setError(
-        'This workout was left running for more than 24 hours. Enter its actual duration below before saving.',
+        'The total workout duration is over 24 hours. Enter the actual total duration below before saving.',
       );
       return;
     }
     savingRef.current = true;
     setSaving(true);
     setError(null);
-    const liveElapsed = Math.max(
-      0,
-      Math.floor(((automaticEndAt ?? Date.now()) - startedAt) / 1000),
-    );
     const completedIdentity = finalizeWorkoutIdentity(
       movements.map((movement) => movement.exercise),
       category,
       name,
-      !initialWorkout,
+      !initialWorkout && !resumedWorkoutId,
     );
     try {
       cancelRestTimer();
@@ -2423,9 +2518,7 @@ function WorkoutLogger({
         workout_date: workoutDate,
         category: completedIdentity.category,
         notes: notes.trim() || null,
-        duration_minutes: initialWorkout
-          ? editedDurationMinutes
-          : (durationOverrideMinutes ?? Math.max(1, Math.round(liveElapsed / 60))),
+        duration_minutes: durationMinutes,
         start_time: initialWorkout && startTime && endTime ? startTime : null,
         end_time: initialWorkout && startTime && endTime ? endTime : null,
         movements: movementsToSave.map((movement) => ({
@@ -2526,7 +2619,7 @@ function WorkoutLogger({
     ? editedDurationMinutes * 60
     : durationOverrideMinutes !== null
       ? durationOverrideMinutes * 60
-      : elapsed;
+      : previousDurationMinutes * 60 + elapsed;
   const openNameEditor = () => {
     setNameDraft(name);
     setNameEditorOpen(true);
@@ -2560,7 +2653,7 @@ function WorkoutLogger({
               className="overlay-header-action delete"
               type="button"
               onClick={() => setDeleteConfirmationOpen(true)}
-              aria-label="Delete workout"
+              aria-label={resumedWorkoutId ? 'Discard resumed session' : 'Delete workout'}
             >
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M4 7h16M9 7V4h6v3m-8 0 1 13h8l1-13M10 11v5m4-5v5" />
@@ -2724,7 +2817,9 @@ function WorkoutLogger({
                 ? hasCompleteTimeRange
                   ? `${formatWorkoutTimeRange(startTime, endTime)} · duration calculated automatically`
                   : 'Add both times to calculate duration automatically, including workouts ending after midnight.'
-                : 'Leave both blank to use the live timer. Change them only if the timer is wrong.'}
+                : resumedWorkoutId
+                  ? `${previousDurationMinutes} min already logged. The live timer started when you resumed; the gap is excluded. Change these fields only to correct the total duration.`
+                  : 'Leave both blank to use the live timer. Change them only if the timer is wrong.'}
             </small>
           </fieldset>
         </div>
@@ -2848,7 +2943,10 @@ function WorkoutLogger({
       <button
         className="primary-action finish-workout-bottom"
         disabled={saving}
-        onClick={() => void finishWorkout()}
+        onClick={() => {
+          if (initialWorkout) void finishWorkout();
+          else setFinishConfirmationOpen(true);
+        }}
       >
         {saving ? 'Saving…' : initialWorkout ? 'Save workout' : 'Finish workout'}
       </button>
@@ -2856,6 +2954,7 @@ function WorkoutLogger({
       {deleteConfirmationOpen && (
         <WorkoutCloseDialog
           editing={Boolean(initialWorkout)}
+          resuming={Boolean(resumedWorkoutId)}
           onCancel={() => {
             setDeleteConfirmationOpen(false);
             window.requestAnimationFrame(() => deleteButtonRef.current?.focus());
@@ -2865,6 +2964,33 @@ function WorkoutLogger({
             onDelete();
           }}
         />
+      )}
+
+      {finishConfirmationOpen && (
+        <PopupDialog
+          title="Finish workout?"
+          kicker="PLEASE CONFIRM"
+          className="workout-finish-dialog"
+          onClose={() => setFinishConfirmationOpen(false)}
+        >
+          <p>This saves your workout and stops the live timer. You can resume it from History.</p>
+          <div className="popup-dialog-actions workout-finish-actions">
+            <button type="button" autoFocus onClick={() => setFinishConfirmationOpen(false)}>
+              Keep working out
+            </button>
+            <button
+              type="button"
+              className="popup-primary-action"
+              disabled={saving}
+              onClick={() => {
+                setFinishConfirmationOpen(false);
+                void finishWorkout();
+              }}
+            >
+              Finish workout
+            </button>
+          </div>
+        </PopupDialog>
       )}
 
       {nameEditorOpen && (
@@ -3144,10 +3270,12 @@ function SupersetPicker({
 
 function WorkoutCloseDialog({
   editing,
+  resuming,
   onCancel,
   onConfirm,
 }: {
   editing: boolean;
+  resuming: boolean;
   onCancel: () => void;
   onConfirm: () => void;
 }) {
@@ -3196,19 +3324,25 @@ function WorkoutCloseDialog({
         </div>
         <p className="section-kicker">PLEASE CONFIRM</p>
         <h2 id="workout-close-title">
-          {editing ? 'Delete this saved workout?' : 'Delete this workout?'}
+          {editing
+            ? 'Delete this saved workout?'
+            : resuming
+              ? 'Discard this resumed session?'
+              : 'Delete this workout?'}
         </h2>
         <p id="workout-close-description">
           {editing
             ? 'This workout will be permanently removed from your history. This cannot be undone.'
-            : 'Your active workout, sets, and notes will be permanently removed. This cannot be undone.'}
+            : resuming
+              ? 'Changes made since resuming will be lost. The saved workout will stay in History.'
+              : 'Your active workout, sets, and notes will be permanently removed. This cannot be undone.'}
         </p>
         <div className="workout-close-actions">
           <button ref={safeButtonRef} type="button" onClick={onCancel}>
             Keep workout
           </button>
           <button className="discard-workout-button" type="button" onClick={onConfirm}>
-            Delete workout
+            {resuming ? 'Discard session' : 'Delete workout'}
           </button>
         </div>
       </section>
@@ -6591,6 +6725,8 @@ function ExportTimeFrame({
 function SettingsScreen({
   workouts,
   measurements,
+  workoutTypeColors,
+  onWorkoutTypeColorsChange,
   restTimerEnabled,
   onRestTimerEnabledChange,
   bodyTrendPreference,
@@ -6602,6 +6738,8 @@ function SettingsScreen({
 }: {
   workouts: TrackedWorkout[];
   measurements: BodyMeasurement[];
+  workoutTypeColors: WorkoutTypeColors;
+  onWorkoutTypeColorsChange: (colors: WorkoutTypeColors) => void;
   restTimerEnabled: boolean;
   onRestTimerEnabledChange: (enabled: boolean) => void;
   bodyTrendPreference: BodyTrendPreference;
@@ -6630,6 +6768,15 @@ function SettingsScreen({
   const [trainingPreferencesStatus, setTrainingPreferencesStatus] = useState<string | null>(null);
   const [trainingPreferencesError, setTrainingPreferencesError] = useState<string | null>(null);
   const [savingTrainingPreferences, setSavingTrainingPreferences] = useState(false);
+  const [colorDraft, setColorDraft] = useState<WorkoutTypeColors>(workoutTypeColors);
+  const [colorsDirty, setColorsDirty] = useState(false);
+  const [savingColors, setSavingColors] = useState(false);
+  const [colorsStatus, setColorsStatus] = useState<string | null>(null);
+  const [colorsError, setColorsError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!colorsDirty) setColorDraft(workoutTypeColors);
+  }, [colorsDirty, workoutTypeColors]);
 
   useEffect(() => {
     void api
@@ -6711,6 +6858,25 @@ function SettingsScreen({
       );
     } finally {
       setSavingTrainingPreferences(false);
+    }
+  }
+
+  async function saveWorkoutTypeColors() {
+    if (savingColors || !colorsDirty) return;
+    setSavingColors(true);
+    setColorsStatus(null);
+    setColorsError(null);
+    try {
+      const saved = await api.updateWorkoutTypeColors(colorDraft);
+      onWorkoutTypeColorsChange(saved);
+      setColorsDirty(false);
+      setColorsStatus('Workout type colours saved.');
+    } catch (reason) {
+      setColorsError(
+        reason instanceof Error ? reason.message : 'Could not save workout type colours.',
+      );
+    } finally {
+      setSavingColors(false);
     }
   }
 
@@ -6923,6 +7089,70 @@ function SettingsScreen({
         )}
       </section>
 
+      <section className="settings-panel panel" aria-labelledby="workout-type-colors-title">
+        <header>
+          <div>
+            <p className="section-kicker">APPEARANCE</p>
+            <h2 id="workout-type-colors-title">Workout type colours</h2>
+          </div>
+        </header>
+        <p>Choose the colours shown in the workout calendar and history.</p>
+        <div className="workout-type-color-grid">
+          {(Object.entries(categoryNames) as [WorkoutCategory, string][]).map(
+            ([category, label]) => (
+              <label className="workout-type-color-row" key={category}>
+                <span>{label}</span>
+                <input
+                  type="color"
+                  aria-label={`${label} workout colour`}
+                  value={colorDraft[category]}
+                  disabled={savingColors}
+                  onChange={(event) => {
+                    setColorDraft((current) => ({ ...current, [category]: event.target.value }));
+                    setColorsDirty(true);
+                    setColorsStatus(null);
+                    setColorsError(null);
+                  }}
+                />
+                <code>{colorDraft[category].toUpperCase()}</code>
+              </label>
+            ),
+          )}
+        </div>
+        <div className="workout-type-color-actions">
+          <button
+            type="button"
+            className="color-reset-button"
+            disabled={savingColors}
+            onClick={() => {
+              setColorDraft(defaultCategoryColors);
+              setColorsDirty(true);
+              setColorsStatus(null);
+              setColorsError(null);
+            }}
+          >
+            Reset defaults
+          </button>
+          <button
+            type="button"
+            disabled={savingColors || !colorsDirty}
+            onClick={() => void saveWorkoutTypeColors()}
+          >
+            {savingColors ? 'Saving…' : 'Save colours'}
+          </button>
+        </div>
+        {colorsStatus && (
+          <p className="training-preference-status" role="status">
+            {colorsStatus}
+          </p>
+        )}
+        {colorsError && (
+          <p className="inline-error" role="alert">
+            {colorsError}
+          </p>
+        )}
+      </section>
+
       <section className="settings-panel panel" aria-labelledby="bodyweight-trend-title">
         <header>
           <div>
@@ -7121,9 +7351,7 @@ export function BodyCompositionScreen({
     trendPreference.statistic,
   );
   const historySummaries =
-    historyView === 'daily'
-      ? []
-      : summarizeBodyHistory(measurements, historyView, trendStatistic);
+    historyView === 'daily' ? [] : summarizeBodyHistory(measurements, historyView, trendStatistic);
   const historyCount = historyView === 'daily' ? measurements.length : historySummaries.length;
   const checkInPageCount = Math.max(1, Math.ceil(historyCount / HISTORY_PAGE_SIZE));
   const pagedMeasurements = measurements.slice(
@@ -8719,9 +8947,11 @@ function CardioScreen({
 
 function HistoryScreen({
   workouts,
+  categoryColors,
   measurements,
   exercises,
   onEdit,
+  onResume,
   onDelete,
   personalRecords,
   onDataChange,
@@ -8738,9 +8968,11 @@ function HistoryScreen({
   onReplaceActiveWorkout,
 }: {
   workouts: TrackedWorkout[];
+  categoryColors: WorkoutTypeColors;
   measurements: BodyMeasurement[];
   exercises: Exercise[];
   onEdit: (workout: TrackedWorkout) => void;
+  onResume: (workout: TrackedWorkout) => void;
   onDelete: (workout: TrackedWorkout) => void;
   personalRecords: PersonalRecord[];
   onDataChange: () => Promise<void>;
@@ -8877,6 +9109,7 @@ function HistoryScreen({
             </div>
             <WorkoutHeatmap
               entries={heatmap}
+              categoryColors={categoryColors}
               activeWorkoutDate={activeWorkoutDate}
               onActiveWorkoutClick={onResumeWorkout}
               onDayClick={(workoutDate, entry) => {
@@ -8940,6 +9173,15 @@ function HistoryScreen({
                 {open && (
                   <div className="history-detail">
                     <div className="workout-actions">
+                      {!activeWorkout && (
+                        <button
+                          className="resume-workout-button"
+                          type="button"
+                          onClick={() => onResume(workout)}
+                        >
+                          Resume workout from now
+                        </button>
+                      )}
                       <button onClick={() => onEdit(workout)}>Edit workout</button>
                       <InlineConfirmButton
                         className="delete-workout"
@@ -9074,6 +9316,7 @@ function HistoryScreen({
       {section === 'history' && selectedCalendarDay && (
         <CalendarDayDetail
           day={selectedCalendarDay}
+          categoryColors={categoryColors}
           onClose={() => setSelectedCalendarDay(null)}
           onStartWorkout={(workoutDate) => {
             setSelectedCalendarDay(null);
