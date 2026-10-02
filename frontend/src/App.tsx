@@ -2732,96 +2732,98 @@ function WorkoutLogger({
               ))}
             </select>
           </label>
-          <fieldset
-            className={`workout-duration-editor${initialWorkout ? '' : ' live-workout-duration-editor'}`}
-            aria-label={initialWorkout ? undefined : 'Workout duration'}
-          >
-            {initialWorkout && <legend>Workout timing</legend>}
-            {initialWorkout && (
-              <>
-                <label>
-                  Start time
-                  <input
-                    type="time"
-                    value={startTime}
-                    onChange={(event) => updateWorkoutTimes(event.target.value, endTime)}
-                    aria-label="Workout start time"
-                  />
-                </label>
-                <label>
-                  End time
-                  <input
-                    type="time"
-                    value={endTime}
-                    onChange={(event) => updateWorkoutTimes(startTime, event.target.value)}
-                    aria-label="Workout end time"
-                  />
-                </label>
-              </>
-            )}
-            <label>
-              Duration hours
-              <input
-                type="number"
-                min="0"
-                max="24"
-                inputMode="numeric"
-                disabled={Boolean(initialWorkout && hasCompleteTimeRange)}
-                value={initialWorkout ? editedDurationHours || '' : overrideDurationHours}
-                placeholder="0"
-                onChange={(event) => {
-                  if (!initialWorkout) {
-                    updateDurationOverride(event.target.value, String(overrideDurationRemainder));
-                    return;
-                  }
-                  const hours = Number.isNaN(event.target.valueAsNumber)
-                    ? 0
-                    : event.target.valueAsNumber;
-                  setEditedDurationMinutes(
-                    Math.min(1440, Math.max(0, Math.floor(hours)) * 60 + editedDurationRemainder),
-                  );
-                }}
-                aria-label="Workout duration hours"
-              />
-            </label>
-            <label>
-              Duration minutes
-              <input
-                type="number"
-                min="0"
-                max="59"
-                inputMode="numeric"
-                disabled={Boolean(initialWorkout && hasCompleteTimeRange)}
-                value={initialWorkout ? editedDurationRemainder || '' : overrideDurationRemainder}
-                placeholder="0"
-                onChange={(event) => {
-                  if (!initialWorkout) {
-                    updateDurationOverride(String(overrideDurationHours), event.target.value);
-                    return;
-                  }
-                  const minutes = Number.isNaN(event.target.valueAsNumber)
-                    ? 0
-                    : event.target.valueAsNumber;
-                  setEditedDurationMinutes(
-                    Math.min(
-                      1440,
-                      editedDurationHours * 60 + Math.min(59, Math.max(0, Math.floor(minutes))),
-                    ),
-                  );
-                }}
-                aria-label="Workout duration minutes"
-              />
-            </label>
-            <small className="workout-timing-help">
-              {initialWorkout
-                ? hasCompleteTimeRange
-                  ? `${formatWorkoutTimeRange(startTime, endTime)} · duration calculated automatically`
-                  : 'Add both times to calculate duration automatically, including workouts ending after midnight.'
-                : resumedWorkoutId
-                  ? `${previousDurationMinutes} min already logged. The live timer started when you resumed; the gap is excluded. Change these fields only to correct the total duration.`
-                  : 'Leave both blank to use the live timer. Change them only if the timer is wrong.'}
-            </small>
-          </fieldset>
+          {initialWorkout && (
+            <fieldset
+              className={`workout-duration-editor${initialWorkout ? '' : ' live-workout-duration-editor'}`}
+              aria-label={initialWorkout ? undefined : 'Workout duration'}
+            >
+              {initialWorkout && <legend>Workout timing</legend>}
+              {initialWorkout && (
+                <>
+                  <label>
+                    Start time
+                    <input
+                      type="time"
+                      value={startTime}
+                      onChange={(event) => updateWorkoutTimes(event.target.value, endTime)}
+                      aria-label="Workout start time"
+                    />
+                  </label>
+                  <label>
+                    End time
+                    <input
+                      type="time"
+                      value={endTime}
+                      onChange={(event) => updateWorkoutTimes(startTime, event.target.value)}
+                      aria-label="Workout end time"
+                    />
+                  </label>
+                </>
+              )}
+              <label>
+                Duration hours
+                <input
+                  type="number"
+                  min="0"
+                  max="24"
+                  inputMode="numeric"
+                  disabled={Boolean(initialWorkout && hasCompleteTimeRange)}
+                  value={initialWorkout ? editedDurationHours || '' : overrideDurationHours}
+                  placeholder="0"
+                  onChange={(event) => {
+                    if (!initialWorkout) {
+                      updateDurationOverride(event.target.value, String(overrideDurationRemainder));
+                      return;
+                    }
+                    const hours = Number.isNaN(event.target.valueAsNumber)
+                      ? 0
+                      : event.target.valueAsNumber;
+                    setEditedDurationMinutes(
+                      Math.min(1440, Math.max(0, Math.floor(hours)) * 60 + editedDurationRemainder),
+                    );
+                  }}
+                  aria-label="Workout duration hours"
+                />
+              </label>
+              <label>
+                Duration minutes
+                <input
+                  type="number"
+                  min="0"
+                  max="59"
+                  inputMode="numeric"
+                  disabled={Boolean(initialWorkout && hasCompleteTimeRange)}
+                  value={initialWorkout ? editedDurationRemainder || '' : overrideDurationRemainder}
+                  placeholder="0"
+                  onChange={(event) => {
+                    if (!initialWorkout) {
+                      updateDurationOverride(String(overrideDurationHours), event.target.value);
+                      return;
+                    }
+                    const minutes = Number.isNaN(event.target.valueAsNumber)
+                      ? 0
+                      : event.target.valueAsNumber;
+                    setEditedDurationMinutes(
+                      Math.min(
+                        1440,
+                        editedDurationHours * 60 + Math.min(59, Math.max(0, Math.floor(minutes))),
+                      ),
+                    );
+                  }}
+                  aria-label="Workout duration minutes"
+                />
+              </label>
+              <small className="workout-timing-help">
+                {initialWorkout
+                  ? hasCompleteTimeRange
+                    ? `${formatWorkoutTimeRange(startTime, endTime)} · duration calculated automatically`
+                    : 'Add both times to calculate duration automatically, including workouts ending after midnight.'
+                  : resumedWorkoutId
+                    ? `${previousDurationMinutes} min already logged. The live timer started when you resumed; the gap is excluded. Change these fields only to correct the total duration.`
+                    : 'Leave both blank to use the live timer. Change them only if the timer is wrong.'}
+              </small>
+            </fieldset>
+          )}
         </div>
         <div className="workout-summary-metrics" aria-label="Workout totals">
           <span>
