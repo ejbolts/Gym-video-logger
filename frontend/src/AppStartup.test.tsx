@@ -1,110 +1,165 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { App, DashboardScreen } from './App';
-import type { DashboardData } from './types';
+import { App } from './App';
+import { AppTabBar } from './AppTabBar';
+import { TodayScreen } from './TodayScreen';
+import type { DashboardData, WorkoutTypeColors } from './types';
 
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+const colors: WorkoutTypeColors = {
+  upper: '#8b5cf6',
+  lower: '#f59e0b',
+  push: '#ef476f',
+  pull: '#3b82f6',
+  full_body: '#14b8a6',
+  cardio: '#22c55e',
+  other: '#94a3b8',
+};
+
+function stubWindow(hash: string) {
+  vi.stubGlobal('window', {
+    history: { state: null },
+    location: { hash },
+    localStorage: { getItem: () => null },
+  });
+}
+
+function renderToday(overrides: Partial<Parameters<typeof TodayScreen>[0]> = {}) {
+  return renderToStaticMarkup(
+    <TodayScreen
+      data={
+        {
+          workouts_this_week: 4,
+          sets_this_week: 25,
+          volume_this_week_kg: 23057.5,
+          current_streak: 4,
+          cardio_minutes_this_week: 30,
+          zone2: {
+            week_start: '2026-10-05',
+            week_end: '2026-10-11',
+            goal_minutes: 150,
+            completed_minutes: 30,
+            remaining_minutes: 120,
+            percentage: 20,
+            complete: false,
+          },
+          weekly_sets: {
+            week_start: '2026-10-05',
+            week_end: '2026-10-11',
+            raw_sets: 25,
+            effective_sets: 25,
+            unrated_sets: 0,
+            low_rpe_sets: 0,
+            rpe_logging_percent: 33.3,
+            muscle_groups: [
+              { muscle_group: 'Quadriceps', raw_sets: 10, effective_sets: 10, average_rpe: null },
+              { muscle_group: 'Side delts', raw_sets: 0, effective_sets: 0, average_rpe: null },
+            ],
+          },
+          recommendation: {
+            category: 'pull',
+            session_name: 'Pull workout',
+            rotation_next: 'pull',
+            reason: 'Next in your Push → Pull → Legs rotation.',
+            muscle_frequency: [],
+          },
+        } as unknown as DashboardData
+      }
+      workouts={[]}
+      measurements={[]}
+      personalRecords={[]}
+      categoryColors={colors}
+      workoutStartedAt={null}
+      todayBodyweight={null}
+      onSaveBodyweight={vi.fn()}
+      onStartTemplate={vi.fn()}
+      onStartEmpty={vi.fn()}
+      onResumeWorkout={vi.fn()}
+      onOpenHistory={vi.fn()}
+      onOpenProgress={vi.fn()}
+      onOpenCardio={vi.fn()}
+      onOpenBody={vi.fn()}
+      onOpenSettings={vi.fn()}
+      onOpenVideos={vi.fn()}
+      today="2026-10-06"
+      {...overrides}
+    />,
+  );
+}
+
 describe('App startup', () => {
-  it('renders an animated menu-shaped skeleton before training data has loaded', () => {
-    vi.stubGlobal('window', {
-      history: { state: null },
-      location: { hash: '' },
-      localStorage: { getItem: () => null },
-    });
+  it('renders a Today-shaped skeleton before training data has loaded', () => {
+    stubWindow('');
 
     const markup = renderToStaticMarkup(<App />);
 
-    expect(markup).toContain('menu-loading-skeleton');
-    expect(markup).toContain('menu-skeleton-shortcut');
-    expect(markup).toContain('Loading training menu');
+    expect(markup).toContain('today-loading-skeleton');
+    expect(markup).toContain('Loading your training summary');
+    expect(markup).toContain('aria-label="Main navigation"');
   });
 
-  it('keeps fresh dashboard data updates confined to the visible menu', () => {
-    const markup = renderToStaticMarkup(
-      <DashboardScreen
-        data={
-          {
-            total_cardio_sessions: 14,
-            cardio_minutes_this_week: 95,
-            workouts_this_week: 4,
-          } as DashboardData
-        }
-        totalWorkouts={120}
-        bodyweight={82.6}
-        bodyweightTrend={82.15}
-        bodyweightTrendStatistic="average"
-        workoutStartedAt={Date.now() - 65_000}
-        onHistory={vi.fn()}
-        onExercises={vi.fn()}
-        onCardio={vi.fn()}
-        onMeasurements={vi.fn()}
-        onSettings={vi.fn()}
-        onVideos={vi.fn()}
-        onWorkoutLive={vi.fn()}
-        todayBodyweight={null}
-        onSaveBodyweight={vi.fn()}
-      />,
-    );
+  it('shows the recommendation, weekly totals, muscles, Zone 2 and quick check-in on Today', () => {
+    const markup = renderToday();
 
-    expect(markup).toContain('Total workouts</span><strong>120</strong>');
-    expect(markup).toContain('Bodyweight</span><strong>82.6 kg</strong>');
-    expect(markup).toContain('Cardio sessions</span><strong>14</strong>');
-    expect(markup).toContain('Weekly cardio</span><strong>95 min</strong>');
-    expect(markup).toContain('BW average</span><strong>82.2 kg</strong>');
-    expect(markup).toContain('Weeks workouts</span><strong>4</strong>');
-    expect(markup).toContain('dashboard-shortcuts');
-    expect(markup).toContain('dashboard-live-workout');
-    expect(markup).toContain('Workout live');
-    expect(markup).toContain('dashboard-live-duration');
-    expect(markup).toContain('1:05');
-    expect(markup).toContain('Measure');
-    expect(markup).toContain('Video logger');
-    expect(markup).toContain('Cardio');
-    expect(markup.match(/dashboard-shortcut-icon/g)).toHaveLength(6);
-    expect(markup).toContain('DAILY CHECK-IN');
+    expect(markup).toContain('<h1>Today</h1>');
+    expect(markup).toContain('Up next');
+    expect(markup).toContain('Next in your Push → Pull → Legs rotation.');
+    expect(markup).toContain('Pull day');
+    expect(markup).toContain('Working sets</span><strong>25</strong>');
+    expect(markup).toContain('Workouts</span><strong>4</strong>');
+    expect(markup).toContain('23.1 t');
+    expect(markup).toContain('Quadriceps');
+    expect(markup).not.toContain('Side delts</span>');
+    expect(markup).toContain('1 muscles not trained yet');
+    expect(markup).toContain('120 min to go · 6 days left');
+    expect(markup).toContain('4 days');
     expect(markup).toContain('Bodyweight in kilograms');
+    expect(markup).toContain('aria-label="Video logger"');
+    expect(markup).toContain('aria-label="Settings"');
+    expect(markup).not.toContain('live-workout-card');
   });
 
-  it('shows cached weekly cardio minutes while the dashboard API is being upgraded', () => {
-    const markup = renderToStaticMarkup(
-      <DashboardScreen
-        data={{ zone2: { completed_minutes: 50 } } as DashboardData}
-        totalWorkouts={1}
-        bodyweight={84.2}
-        bodyweightTrend={84.2}
-        bodyweightTrendStatistic="median"
-        workoutStartedAt={null}
-        onHistory={vi.fn()}
-        onExercises={vi.fn()}
-        onCardio={vi.fn()}
-        onMeasurements={vi.fn()}
-        onSettings={vi.fn()}
-        onVideos={vi.fn()}
-        onWorkoutLive={vi.fn()}
-        todayBodyweight={84.1}
-        onSaveBodyweight={vi.fn()}
-      />,
+  it('replaces the recommendation with a resumable live workout', () => {
+    const markup = renderToday({ workoutStartedAt: Date.now() - 65_000, todayBodyweight: 84.1 });
+
+    expect(markup).toContain('live-workout-card');
+    expect(markup).toContain('Workout live');
+    expect(markup).toContain('1:05');
+    expect(markup).toContain('Today · 84.1 kg');
+    expect(markup).not.toContain('next-session-title');
+  });
+
+  it('marks the active tab and shows live time on the Start button', () => {
+    const idle = renderToStaticMarkup(
+      <AppTabBar active="progress" workoutStartedAt={null} onSelect={vi.fn()} onStart={vi.fn()} />,
+    );
+    expect(idle.match(/class="app-tab /g)).toHaveLength(5);
+    expect(idle).toContain('aria-label="Start workout"');
+    expect(idle).toMatch(
+      /class="app-tab active" aria-current="page"><svg[^>]*>.*?<\/svg><span>Progress<\/span>/,
     );
 
-    expect(markup).toContain('Weekly cardio</span><strong>50 min</strong>');
-    expect(markup).toContain('Today · 84.1 kg');
-    expect(markup).not.toContain('dashboard-live-workout');
+    const live = renderToStaticMarkup(
+      <AppTabBar
+        active={null}
+        workoutStartedAt={Date.now() - 125_000}
+        onSelect={vi.fn()}
+        onStart={vi.fn()}
+      />,
+    );
+    expect(live).toContain('aria-label="Resume active workout"');
+    expect(live).toContain('2:05');
+    expect(live).not.toContain('aria-current="page"');
   });
 
   it.each([
-    ['body', 'Measurements', 'Bodyweight • goals • trends'],
-    ['history', 'Workouts', 'History • exercise progress • cardio'],
     ['settings', 'Settings', 'Timers • notifications • data'],
     ['videos', 'Videos', 'Workout clips • uploads'],
   ])('renders the overlay header on the %s screen', (tab, title, subtitle) => {
-    vi.stubGlobal('window', {
-      history: { state: null },
-      location: { hash: `#${tab}` },
-      localStorage: { getItem: () => null },
-    });
+    stubWindow(`#${tab}`);
 
     const markup = renderToStaticMarkup(<App />);
 
@@ -115,29 +170,24 @@ describe('App startup', () => {
     expect(markup).toContain(`<span>${subtitle}</span>`);
   });
 
-  it('keeps the overlay header off the main menu', () => {
-    vi.stubGlobal('window', {
-      history: { state: null },
-      location: { hash: '#dashboard' },
-      localStorage: { getItem: () => null },
-    });
+  it.each(['dashboard', 'history', 'progress', 'cardio', 'body'])(
+    'uses the in-page title and tab bar instead of an overlay header on %s',
+    (tab) => {
+      stubWindow(`#${tab}`);
+
+      const markup = renderToStaticMarkup(<App />);
+
+      expect(markup).not.toContain('overlay-screen-header');
+      expect(markup).not.toContain('with-overlay-header');
+      expect(markup).toContain('class="tracker-app has-tab-bar"');
+    },
+  );
+
+  it('hides the tab bar during a live workout', () => {
+    stubWindow('#log');
 
     const markup = renderToStaticMarkup(<App />);
 
-    expect(markup).not.toContain('overlay-screen-header');
-    expect(markup).not.toContain('with-overlay-header');
-  });
-
-  it('adds the bodyweight shortcut to the Measurements overlay header', () => {
-    vi.stubGlobal('window', {
-      history: { state: null },
-      location: { hash: '#body' },
-      localStorage: { getItem: () => null },
-    });
-
-    const markup = renderToStaticMarkup(<App />);
-
-    expect(markup).toContain('aria-label="Add bodyweight"');
-    expect(markup).toContain('class="overlay-header-action add"');
+    expect(markup).not.toContain('aria-label="Main navigation"');
   });
 });

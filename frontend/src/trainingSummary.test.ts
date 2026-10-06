@@ -1,0 +1,231 @@
+import { describe, expect, it } from 'vitest';
+import {
+  compactSetSummary,
+  groupWorkoutsByWeek,
+  heatLevel,
+  mostTrainedExerciseId,
+  niceTicks,
+  recentStrengthRecords,
+  sessionTemplateFor,
+  trainingDayGrid,
+  weekGroupLabel,
+  weekStartFor,
+  weeklyBestPoints,
+  weeklyTrainingTotals,
+  workoutDisplayName,
+} from './trainingSummary';
+import type {
+  Exercise,
+  PersonalRecord,
+  TrackedSet,
+  TrackedWorkout,
+  WorkoutCategory,
+} from './types';
+
+function exercise(id: string, name: string, kind: Exercise['kind'] = 'strength'): Exercise {
+  return {
+    id,
+    name,
+    category: 'pull',
+    kind,
+    muscle_group: 'Back',
+    equipment: 'Barbell',
+    is_custom: false,
+    is_favorite: false,
+    muscle_contributions: [],
+  };
+}
+
+function trackedSet(weight: number, reps: number, extra: Partial<TrackedSet> = {}): TrackedSet {
+  return {
+    id: crypto.randomUUID(),
+    order_index: 0,
+    reps,
+    weight_kg: weight,
+    rpe: null,
+    rest_seconds: null,
+    duration_seconds: null,
+    distance_km: null,
+    incline_percent: null,
+    speed_kph: null,
+    bodyweight_kg: null,
+    percentile: null,
+    warmup: false,
+    set_type: 'normal',
+    failed: false,
+    target_reps: null,
+    notes: null,
+    completed: true,
+    ...extra,
+  };
+}
+
+function workout(
+  id: string,
+  date: string,
+  category: WorkoutCategory,
+  movements: Array<{ exercise: Exercise; sets: TrackedSet[] }>,
+  name = `Imported workout · ${date}`,
+): TrackedWorkout {
+  return {
+    id,
+    name,
+    workout_date: date,
+    category,
+    notes: null,
+    duration_minutes: 60,
+    start_time: null,
+    end_time: null,
+    is_sample: false,
+    created_at: `${date}T10:00:00Z`,
+    updated_at: `${date}T10:00:00Z`,
+    movements: movements.map((movement, index) => ({
+      id: `${id}-${index}`,
+      order_index: index,
+      notes: null,
+      exercise: movement.exercise,
+      sets: movement.sets,
+      machine_photos: [],
+      superset_group_id: null,
+      superset_name: null,
+    })),
+  };
+}
+
+const deadlift = exercise('deadlift', 'Deadlift');
+const row = exercise('row', 'Seated Cable Row');
+const squat = exercise('squat', 'Back Squat');
+
+const workouts = [
+  workout('w3', '2026-10-05', 'lower', [
+    {
+      exercise: squat,
+      sets: [trackedSet(60, 8, { warmup: true, set_type: 'warmup' }), trackedSet(125, 7)],
+    },
+  ]),
+  workout('w2', '2026-10-03', 'pull', [
+    {
+      exercise: deadlift,
+      sets: [trackedSet(157.5, 5), trackedSet(157.5, 5), trackedSet(157.5, 4)],
+    },
+    { exercise: row, sets: [trackedSet(68, 10)] },
+  ]),
+  workout('w1', '2026-09-26', 'pull', [{ exercise: deadlift, sets: [trackedSet(155, 5)] }]),
+];
+
+describe('training summary helpers', () => {
+  it('finds week starts for Monday and Sunday weeks', () => {
+    expect(weekStartFor('2026-10-06', 1)).toBe('2026-10-05');
+    expect(weekStartFor('2026-10-05', 1)).toBe('2026-10-05');
+    expect(weekStartFor('2026-10-06', 0)).toBe('2026-10-04');
+  });
+
+  it('totals working sets and volume per week, excluding warmups and future workouts', () => {
+    const future = workout('future', '2026-10-09', 'push', [
+      { exercise: row, sets: [trackedSet(50, 10)] },
+    ]);
+    const weeks = weeklyTrainingTotals([...workouts, future], '2026-10-06', 1, 3);
+
+    expect(weeks.map((week) => week.weekStart)).toEqual(['2026-09-21', '2026-09-28', '2026-10-05']);
+    expect(weeks[2]).toMatchObject({ workouts: 1, sets: 1, volumeKg: 875 });
+    expect(weeks[1]).toMatchObject({ workouts: 1, sets: 4, volumeKg: 2885 });
+    expect(weeks[0]).toMatchObject({ workouts: 1, sets: 1 });
+  });
+
+  it('builds a week-by-day heatmap grid ending in the current week', () => {
+    const grid = trainingDayGrid(workouts, '2026-10-06', 1, 2);
+
+    expect(grid).toHaveLength(2);
+    expect(grid[0][0].date).toBe('2026-09-28');
+    expect(grid[1][0]).toMatchObject({ date: '2026-10-05', sets: 1, categories: ['lower'] });
+    expect(grid[1][2].future).toBe(true);
+    expect(grid[0][5]).toMatchObject({ date: '2026-10-03', sets: 4 });
+    expect([0, 5, 15, 25].map(heatLevel)).toEqual([0, 1, 2, 3]);
+  });
+
+  it('chooses clean 1/2/5 axis ticks', () => {
+    expect(niceTicks(114.9, 159.3)).toEqual([110, 120, 130, 140, 150, 160]);
+    expect(niceTicks(80.3, 84.6)).toEqual([80, 81, 82, 83, 84, 85]);
+    expect(niceTicks(0, 150, 3)).toEqual([0, 50, 100, 150]);
+  });
+
+  it('names imported workouts by their type', () => {
+    expect(workoutDisplayName({ name: 'Imported workout · 2026-10-05', category: 'lower' })).toBe(
+      'Lower body',
+    );
+    expect(workoutDisplayName({ name: 'Heavy pulls', category: 'pull' })).toBe('Heavy pulls');
+  });
+
+  it('templates the next session from the newest workout of that type', () => {
+    const template = sessionTemplateFor(workouts, 'pull', '2026-10-06');
+
+    expect(template?.sourceWorkout.id).toBe('w2');
+    expect(template?.exercises.map((item) => item.exercise.name)).toEqual([
+      'Deadlift',
+      'Seated Cable Row',
+    ]);
+    expect(template?.exercises[0].topSet).toMatchObject({ weight_kg: 157.5, reps: 5 });
+    expect(sessionTemplateFor(workouts, 'push', '2026-10-06')).toBeNull();
+  });
+
+  it('collapses repeated sets for the last-session summary', () => {
+    expect(compactSetSummary(workouts[1].movements[0].sets)).toBe('157.5×5 ×2, 157.5×4');
+    expect(compactSetSummary(workouts[0].movements[0].sets)).toBe('125×7');
+  });
+
+  it('groups history by week with labels relative to today', () => {
+    const groups = groupWorkoutsByWeek(workouts, 1);
+
+    expect(groups.map((group) => [group.weekStart, group.workouts.length])).toEqual([
+      ['2026-10-05', 1],
+      ['2026-09-28', 1],
+      ['2026-09-21', 1],
+    ]);
+    expect(weekGroupLabel('2026-10-05', '2026-10-06', 1)).toBe('This week');
+    expect(weekGroupLabel('2026-09-28', '2026-10-06', 1)).toBe('Last week');
+    expect(weekGroupLabel('2026-09-21', '2026-10-06', 1)).toBe('21–27 Sep');
+  });
+
+  it('defaults progress to the most-trained strength exercise', () => {
+    expect(mostTrainedExerciseId(workouts, '2026-10-06')).toBe('deadlift');
+  });
+
+  it('keeps the best point per week for strength trends', () => {
+    const points = [
+      { workout_date: '2026-09-30', value: 151 },
+      { workout_date: '2026-10-03', value: 120 },
+      { workout_date: '2026-10-05', value: 154 },
+    ];
+    expect(weeklyBestPoints(points, (point) => point.value)).toEqual([
+      { workout_date: '2026-09-30', value: 151 },
+      { workout_date: '2026-10-05', value: 154 },
+    ]);
+  });
+
+  it('surfaces the newest weight and estimated 1RM records first', () => {
+    const record = (
+      id: string,
+      date: string,
+      type: PersonalRecord['record_type'],
+    ): PersonalRecord => ({
+      id,
+      exercise_id: 'squat',
+      workout_id: 'w3',
+      set_id: 's',
+      achieved_date: date,
+      record_type: type,
+      value: 100,
+      unit: 'kg',
+      normalized_weight: null,
+      formula: null,
+      exercise_name: 'Back Squat',
+    });
+    const records = [
+      record('a', '2026-09-01', 'weight'),
+      record('b', '2026-10-05', 'reps_at_weight'),
+      record('c', '2026-10-05', 'weight'),
+      record('d', '2026-10-05', 'estimated_1rm'),
+    ];
+    expect(recentStrengthRecords(records, 2).map((item) => item.id)).toEqual(['d', 'c']);
+  });
+});

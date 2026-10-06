@@ -49,13 +49,15 @@ export default defineConfig({
         clientsClaim: true,
         cleanupOutdatedCaches: true,
         importScripts: ['push-notifications.js'],
+        // The bundled Inter font must be precached so the installed PWA renders offline.
+        globPatterns: ['**/*.{js,css,html,woff2}'],
       },
       manifest: {
         name: 'Gym Logger',
         short_name: 'Gym Logger',
         description: 'Private workout tracking, progress, and video logging',
-        theme_color: '#121516',
-        background_color: '#121516',
+        theme_color: '#0b0d0f',
+        background_color: '#0b0d0f',
         display: 'standalone',
         start_url: '/',
         icons: [

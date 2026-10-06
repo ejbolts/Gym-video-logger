@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import { registerAppUpdates } from './appUpdates';
 import './styles.css';
+import './pulse.css';
 
 registerAppUpdates();
 
