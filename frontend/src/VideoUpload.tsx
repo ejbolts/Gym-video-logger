@@ -440,7 +440,6 @@ export function VideoUpload() {
           <button className="picker" onClick={() => pickerRef.current?.click()}>
             <span aria-hidden="true">＋</span>
             Add set videos
-            <small>MP4, MOV, or M4V · choose more than once if needed</small>
           </button>
           <div
             className="drop-target"
@@ -520,9 +519,6 @@ export function VideoUpload() {
           <button className="primary" disabled={uploadDisabled} onClick={() => void startUpload()}>
             Upload session
           </button>
-          <p className="privacy-note">
-            This app has no sign-in. Use it only through your private Tailnet.
-          </p>
         </section>
       )}
 

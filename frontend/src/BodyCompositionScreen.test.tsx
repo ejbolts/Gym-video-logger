@@ -38,9 +38,14 @@ describe('BodyCompositionScreen', () => {
 
     expect(bodyweightEntryPlaceholder(measurements)).toBe('84.2');
     expect(markup).toContain('<strong>84.2 kg</strong>');
-    expect(markup).toContain('<option value="1m" selected="">1 month</option>');
-    expect(markup).toContain('<option value="3m">3 months</option>');
-    expect(markup).toContain('⌁ Add Goal');
+    expect(markup).toContain('aria-label="Body composition range"');
+    expect(markup).toContain(
+      'aria-selected="true" aria-label="3 months" class="active">3M</button>',
+    );
+    expect(markup).toContain('7-day average');
+    expect(markup).toContain('Set a goal');
+    expect(markup).toContain('aria-label="Add bodyweight"');
+    expect(markup).toContain('<h1>Body</h1>');
     expect(markup).toContain('role="tab" aria-selected="true">Daily</button>');
     expect(markup).toContain('role="tab" aria-selected="false">Avg Week</button>');
     expect(markup).toContain('role="tab" aria-selected="false">Avg Monthly</button>');
