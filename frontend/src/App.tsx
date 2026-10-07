@@ -3304,15 +3304,17 @@ function MovementCard({
   }
 
   function renderRowCompleteButton(item: DraftSet, index: number) {
+    const open = isSetOpen(item);
     const label = !item.completed
       ? `Complete set ${index + 1}`
-      : isSetOpen(item)
+      : open
         ? `Done editing set ${index + 1}`
         : `Mark set ${index + 1} incomplete`;
     return (
       <button
         type="button"
-        className={`row-complete-button ${item.completed ? 'done' : ''}`}
+        // A logged set opened for editing shows the blue editing tick until it is confirmed.
+        className={`row-complete-button ${item.completed && !open ? 'done' : ''}`}
         aria-label={label}
         aria-pressed={item.completed}
         onClick={(event) => {

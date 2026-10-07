@@ -2780,9 +2780,8 @@ html.edge-swipe-ready .edge-swipe-indicator {
   transform: scale(0.9);
 }
 
-.logger-screen .set-details.completed .set-type-picker > .set-number-normal,
-.logger-screen .set-details.completed .completed-set-summary > .set-number-normal,
-.logger-screen .set-details.completed .set-editor > .set-number-normal {
+.logger-screen .set-details.completed:not(.is-open) .set-type-picker > .set-number-normal,
+.logger-screen .set-details.completed:not(.is-open) .completed-set-summary > .set-number-normal {
   background: rgb(35 166 62 / 22%);
   color: #7fdc92;
 }
@@ -2888,9 +2887,18 @@ html.edge-swipe-ready .edge-swipe-indicator {
   background: rgb(35 166 62 / 9%);
 }
 
-/* An open set is edited in place on a blue row. */
+/* An open set is edited in place on a blue row, and reads as being edited even if already logged. */
 .logger-screen .set-grid .set-details.is-open {
+  border-color: rgb(57 135 229 / 28%);
   background: var(--p-accent-soft);
+}
+
+.logger-screen .set-details.is-open .set-drag-handle {
+  color: #8c9692;
+}
+
+.logger-screen .set-details.is-open .completed-set-menu {
+  color: #5598e7;
 }
 
 .logger-screen .set-grid .set-editor {
