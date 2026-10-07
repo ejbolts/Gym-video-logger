@@ -169,3 +169,79 @@ export function useExpandAnimation(containerRef: RefObject<HTMLElement | null>) 
     heights.current = next;
   });
 }
+
+const COLLAPSE_ANIMATION_ID = 'collapse';
+
+/**
+ * Folds a card down to its header (and back) when `expanded` flips, using the same motion as set
+ * rows. While closing, `data-collapsing` keeps the body painted so it slides away instead of
+ * vanishing; pair with CSS that only hides collapsed content when that attribute is absent.
+ */
+export function useCollapseAnimation(ref: RefObject<HTMLElement | null>, expanded: boolean) {
+  const height = useRef<number | null>(null);
+  const previous = useRef(expanded);
+  const active = useRef<Animation | null>(null);
+
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    const changed = previous.current !== expanded;
+    previous.current = expanded;
+    const running = active.current?.playState === 'running' ? active.current : null;
+
+    if (!changed) {
+      if (!running) height.current = element.offsetHeight;
+      return;
+    }
+
+    const from = running ? element.getBoundingClientRect().height : height.current;
+    active.current = null;
+    running?.cancel();
+    element.getAnimations?.({ subtree: true }).forEach((animation) => {
+      if (animation.id === COLLAPSE_ANIMATION_ID) animation.cancel();
+    });
+    delete element.dataset.collapsing;
+    const to = element.offsetHeight;
+    height.current = to;
+    if (
+      from === null ||
+      Math.abs(from - to) < 1 ||
+      element.offsetWidth === 0 ||
+      motionReduced() ||
+      typeof element.animate !== 'function'
+    ) {
+      element.style.overflow = '';
+      return;
+    }
+
+    if (!expanded) element.dataset.collapsing = '';
+    element.style.overflow = 'clip';
+    const resize = element.animate([{ height: `${from}px` }, { height: `${to}px` }], {
+      duration: 340,
+      easing: EXPAND_EASING,
+      id: COLLAPSE_ANIMATION_ID,
+    });
+    active.current = resize;
+    for (const child of element.children) {
+      if (child.tagName === 'HEADER' || child.classList.contains('superset-ribbon')) continue;
+      child.animate(
+        expanded ? [{ opacity: 0 }, { opacity: 1 }] : [{ opacity: 1 }, { opacity: 0 }],
+        {
+          duration: expanded ? 260 : 200,
+          easing: 'ease-out',
+          fill: 'forwards',
+          id: COLLAPSE_ANIMATION_ID,
+        },
+      );
+    }
+    resize.onfinish = () => {
+      if (active.current !== resize) return;
+      active.current = null;
+      delete element.dataset.collapsing;
+      element.style.overflow = '';
+      element.getAnimations({ subtree: true }).forEach((animation) => {
+        if (animation.id === COLLAPSE_ANIMATION_ID) animation.cancel();
+      });
+    };
+  });
+}

@@ -2142,7 +2142,7 @@ button.metric-card:focus-visible {
   border-bottom: 0;
 }
 
-.movement-card.is-collapsed > :not(header):not(.superset-ribbon) {
+.movement-card.is-collapsed:not([data-collapsing]) > :not(header):not(.superset-ribbon) {
   display: none;
 }
 
