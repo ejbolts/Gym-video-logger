@@ -107,3 +107,65 @@ export function useFlipAnimation(containerRef: RefObject<HTMLElement | null>, or
     previousOrder.current = orderKey;
   });
 }
+
+const EXPAND_EASING = 'cubic-bezier(0.32, 0.72, 0, 1)';
+const EXPAND_ANIMATION_ID = 'expand';
+
+/**
+ * Smoothly resizes elements marked `data-expand-key` whenever their `data-expanded` value flips,
+ * so rows open and close instead of jumping; the newly shown content fades in as it is revealed.
+ */
+export function useExpandAnimation(containerRef: RefObject<HTMLElement | null>) {
+  const heights = useRef(new Map<string, { expanded: string; height: number }>());
+
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    if (container.offsetWidth === 0) {
+      heights.current = new Map();
+      return;
+    }
+    const next = new Map<string, { expanded: string; height: number }>();
+    container.querySelectorAll<HTMLElement>('[data-expand-key]').forEach((element) => {
+      const key = element.dataset.expandKey!;
+      const expanded = element.dataset.expanded ?? '';
+      const before = heights.current.get(key);
+      const running = element
+        .getAnimations?.()
+        .find((animation) => animation.id === EXPAND_ANIMATION_ID);
+
+      if (!before || before.expanded === expanded) {
+        // Mid-animation sizes are transient; remember where a running resize is heading.
+        const height = running && before ? before.height : element.offsetHeight;
+        next.set(key, { expanded, height });
+        return;
+      }
+
+      const from = running ? element.getBoundingClientRect().height : before.height;
+      running?.cancel();
+      const to = element.offsetHeight;
+      next.set(key, { expanded, height: to });
+      if (Math.abs(from - to) < 1 || motionReduced() || typeof element.animate !== 'function') {
+        return;
+      }
+
+      element.style.overflow = 'clip';
+      const resize = element.animate([{ height: `${from}px` }, { height: `${to}px` }], {
+        duration: 340,
+        easing: EXPAND_EASING,
+        id: EXPAND_ANIMATION_ID,
+      });
+      const release = () => {
+        if (!element.getAnimations().some((animation) => animation.id === EXPAND_ANIMATION_ID)) {
+          element.style.overflow = '';
+        }
+      };
+      resize.onfinish = release;
+      resize.oncancel = release;
+      for (const child of element.children) {
+        child.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 220, easing: 'ease-out' });
+      }
+    });
+    heights.current = next;
+  });
+}

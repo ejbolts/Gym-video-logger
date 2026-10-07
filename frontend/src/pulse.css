@@ -2076,6 +2076,34 @@ button.pulse-card:hover {
   background: var(--p-line);
 }
 
+/* ───────── Videos ───────── */
+
+/* iOS sizes native date fields to their content, which clipped the value; fill the field instead. */
+.video-content input[type='date'] {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  display: block;
+  box-sizing: border-box;
+  -webkit-appearance: none;
+  appearance: none;
+  text-align: left;
+}
+
+.video-content input[type='date']::-webkit-date-and-time-value {
+  text-align: left;
+}
+
+.video-content .picker {
+  border: 2px dotted rgb(57 135 229 / 75%);
+  background: rgb(57 135 229 / 8%);
+}
+
+.video-content .picker,
+.video-content .picker span {
+  color: #fff;
+}
+
 /* ───────── Edge swipe back ───────── */
 
 .edge-swipe-indicator {
@@ -2480,6 +2508,15 @@ html.edge-swipe-ready .edge-swipe-indicator {
   overflow: visible;
 }
 
+/* Nothing inside an exercise card paints square corners over its rounded border. */
+.logger-screen .movement-card.is-collapsed > header {
+  background: transparent;
+}
+
+.logger-screen .movement-card > .superset-ribbon {
+  border-radius: calc(var(--p-radius) - 1px) calc(var(--p-radius) - 1px) 0 0;
+}
+
 .logger-screen .movement-card > header {
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
@@ -2608,13 +2645,18 @@ html.edge-swipe-ready .edge-swipe-indicator {
   grid-column: 1 / -1;
 }
 
-.logger-screen .set-grid-strength {
+.logger-screen .set-grid {
   --set-cols: 1.875rem minmax(0, 1.35fr) minmax(0, 0.8fr) minmax(0, 0.75fr) 2.375rem 3rem;
 }
 
-.logger-screen .set-grid-strength .set-grid-head,
-.logger-screen .set-grid-strength .completed-set-summary,
-.logger-screen .set-grid-strength .set-details > .set-row {
+.logger-screen .set-grid-cardio {
+  --set-cols: 1.875rem minmax(0, 1fr) minmax(0, 1fr) minmax(0, 0.75fr) 2.375rem 3rem;
+}
+
+.logger-screen .set-grid .set-grid-head,
+.logger-screen .set-grid .completed-set-summary,
+.logger-screen .set-grid .set-editor {
+  display: grid;
   grid-template-columns: var(--set-cols);
   align-items: center;
   gap: 0.375rem;
@@ -2640,38 +2682,50 @@ html.edge-swipe-ready .edge-swipe-indicator {
   text-align: left;
 }
 
-.logger-screen .set-grid-strength .completed-set-summary {
+.logger-screen .set-grid .completed-set-summary {
   min-height: 3rem;
+  color: var(--p-ink);
+  cursor: pointer;
 }
 
-.logger-screen .set-grid-strength .completed-set-summary > .set-number-cell {
+.logger-screen .set-grid .completed-set-summary > :first-child,
+.logger-screen .set-grid .set-editor > :first-child {
   grid-column: 1;
 }
 
-.logger-screen .set-grid-strength .completed-set-summary > .completed-set-weight {
+.logger-screen .set-grid .completed-set-summary > .completed-set-weight {
   grid-column: 2;
 }
 
-.logger-screen .set-grid-strength .completed-set-summary > .completed-set-reps {
+.logger-screen .set-grid .completed-set-summary > .completed-set-reps {
   grid-column: 3;
 }
 
-.logger-screen .set-grid-strength .completed-set-summary > .completed-set-rpe {
+.logger-screen .set-grid .completed-set-summary > .completed-set-cardio {
+  grid-column: 2 / 4;
+}
+
+.logger-screen .set-grid .completed-set-summary > .completed-set-rpe {
   grid-column: 4;
 }
 
-.logger-screen .set-grid-strength .completed-set-summary > .row-complete-button {
+.logger-screen .set-grid .row-complete-button {
   grid-column: 5;
 }
 
-.logger-screen .set-grid-strength .completed-summary-actions {
+.logger-screen .set-grid .completed-summary-actions {
   width: 3rem;
   grid-column: 6;
   gap: 0;
 }
 
-.logger-screen .completed-set-value {
+.logger-screen .set-grid .completed-set-summary > .completed-set-value {
+  width: 100%;
+  min-width: 0;
   min-height: 2.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border: 0;
   border-radius: 9px;
   padding: 0 0.25rem;
@@ -2683,14 +2737,23 @@ html.edge-swipe-ready .edge-swipe-indicator {
   text-align: center;
 }
 
-.logger-screen .completed-set-value.completed-set-weight {
+.logger-screen .set-grid .completed-set-summary > .completed-set-weight,
+.logger-screen .set-grid .completed-set-summary > .completed-set-cardio {
+  justify-content: flex-start;
+  gap: 0.375rem;
   padding-left: 0.25rem;
   text-align: left;
 }
 
-.logger-screen .completed-set-value.completed-set-rpe {
+.logger-screen .set-grid .completed-set-summary > .completed-set-rpe {
   color: var(--p-ink-2);
   font-size: 0.875rem;
+}
+
+/* Set type lives in the set-number square: numbers for working sets, W, D or F otherwise. */
+.logger-screen .set-type-picker {
+  position: relative;
+  display: grid;
 }
 
 .logger-screen .set-number-cell {
@@ -2699,22 +2762,86 @@ html.edge-swipe-ready .edge-swipe-indicator {
   min-height: 0;
   display: grid;
   place-items: center;
-  border-radius: 8px;
+  border: 0;
+  border-radius: 7px;
   padding: 0;
   background: var(--p-surface-3);
   color: var(--p-ink-2);
   font-size: 0.75rem;
   font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  transition:
+    background-color 200ms ease,
+    color 200ms ease,
+    transform 160ms var(--ease-out);
+}
+
+.logger-screen button.set-number-cell:active {
+  transform: scale(0.9);
+}
+
+.logger-screen .set-details.completed .set-type-picker > .set-number-normal,
+.logger-screen .set-details.completed .completed-set-summary > .set-number-normal,
+.logger-screen .set-details.completed .set-editor > .set-number-normal {
+  background: rgb(35 166 62 / 22%);
+  color: #7fdc92;
 }
 
 .logger-screen .set-number-cell.set-number-warmup {
-  background: var(--p-gold-soft);
-  color: var(--p-gold);
+  background: rgb(240 140 40 / 20%);
+  color: #f59a3c;
 }
 
 .logger-screen .set-number-cell.set-number-drop {
-  background: var(--p-accent-soft);
-  color: var(--p-accent-text);
+  background: rgb(150 110 240 / 22%);
+  color: #b597ff;
+}
+
+.logger-screen .set-number-cell.set-number-failure {
+  background: rgb(230 103 103 / 20%);
+  color: #ff7a7a;
+}
+
+.logger-screen .set-type-menu {
+  position: absolute;
+  z-index: 95;
+  top: calc(100% + 0.375rem);
+  left: -0.25rem;
+  width: 11rem;
+  display: grid;
+  gap: 0.125rem;
+  border: 1px solid var(--p-line-strong);
+  border-radius: 14px;
+  padding: 0.25rem;
+  background: var(--p-surface-2);
+  box-shadow: 0 16px 40px rgb(0 0 0 / 55%);
+  transform-origin: top left;
+}
+
+.logger-screen .set-type-menu button {
+  min-height: 2.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  border: 0;
+  border-radius: 10px;
+  padding: 0 0.5rem;
+  background: transparent;
+  color: var(--p-ink);
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-align: left;
+}
+
+.logger-screen .set-type-menu button[aria-checked='true'] {
+  background: var(--p-surface-3);
+}
+
+.logger-screen .set-type-menu .set-number-cell {
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 6px;
+  font-size: 0.6875rem;
 }
 
 .row-complete-button {
@@ -2761,54 +2888,176 @@ html.edge-swipe-ready .edge-swipe-indicator {
   background: rgb(35 166 62 / 9%);
 }
 
-.logger-screen .set-details.completed > .completed-set-summary,
-.logger-screen .set-details.completed > .completed-set-summary > strong,
-.logger-screen .set-details.completed > .completed-set-summary > span {
-  color: var(--p-ink);
-}
-
-.logger-screen .set-details:not(.completed):not(.previous-set-details) > .set-row {
+/* An open set is edited in place on a blue row. */
+.logger-screen .set-grid .set-details.is-open {
   background: var(--p-accent-soft);
 }
 
-.logger-screen .set-grid-strength .set-row > .set-index {
-  display: grid;
-  place-items: center;
-  color: var(--p-ink-2);
-  font-size: 0.75rem;
-  font-weight: 700;
+.logger-screen .set-grid .set-editor {
+  row-gap: 0.5rem;
+  padding-top: 0.5rem;
+  padding-bottom: 0.625rem;
 }
 
-.logger-screen .set-grid-strength .set-row > input,
-.logger-screen .set-grid-strength .set-row > select {
+.logger-screen .set-editor > input,
+.logger-screen .set-editor > select {
+  width: 100%;
+  min-width: 0;
   height: 2.375rem;
+  box-sizing: border-box;
+  margin: 0;
   border: 1px solid var(--p-line-strong);
   border-radius: 10px;
+  padding: 0 0.25rem;
   background: var(--p-surface-2);
   color: var(--p-ink);
+  font: inherit;
   font-size: 0.9375rem;
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
   text-align: center;
+  -webkit-appearance: none;
+  appearance: none;
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease;
 }
 
-.logger-screen .set-row > .complete-set {
-  width: 2.25rem;
-  height: 2.25rem;
-  border: 1.5px solid var(--p-accent);
-  border-radius: 10px;
-  background: transparent;
+.logger-screen .set-grid-strength .set-editor > input[data-set-field='weight'] {
+  padding-left: 0.5rem;
+  text-align: left;
+}
+
+.logger-screen .set-editor > select {
+  text-align-last: center;
+}
+
+.logger-screen .set-editor > select.is-empty {
+  color: var(--p-muted);
+}
+
+.logger-screen .set-editor input:focus,
+.logger-screen .set-editor select:focus {
+  border-color: var(--p-accent);
+  outline: none;
+  box-shadow: 0 0 0 3px rgb(57 135 229 / 28%);
+}
+
+.logger-screen .set-editor .row-complete-button:not(.done) {
+  border-color: var(--p-accent);
   color: var(--p-accent-text);
 }
 
-.logger-screen .set-row.completed > .complete-set {
-  border-color: #23a63e;
-  background: #23a63e;
-  color: #fff;
+.logger-screen .set-editor-extras {
+  min-width: 0;
+  display: grid;
+  grid-column: 2 / -1;
+  gap: 0.375rem;
 }
 
-.logger-screen .set-grid-cardio .row-complete-button {
-  width: 2rem;
-  height: 2rem;
+.logger-screen .set-editor-note,
+.logger-screen .set-editor-metrics input {
+  width: 100%;
+  min-width: 0;
+  height: 2.25rem;
+  box-sizing: border-box;
+  margin: 0;
+  border: 1px solid var(--p-line);
+  border-radius: 10px;
+  padding: 0 0.625rem;
+  background: rgb(11 13 15 / 45%);
+  color: var(--p-ink);
+  font: inherit;
+  font-size: 0.8125rem;
+}
+
+.logger-screen .set-editor-note::placeholder {
+  color: var(--p-muted);
+}
+
+.logger-screen .set-editor-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(4.25rem, 1fr));
+  gap: 0.375rem;
+}
+
+.logger-screen .set-editor-metrics label {
+  min-width: 0;
+  display: grid;
+  gap: 0.1875rem;
+  color: var(--p-muted);
+  font-size: 0.6875rem;
+  font-weight: 600;
+}
+
+.logger-screen .set-editor-metrics input {
+  padding: 0 0.375rem;
+  text-align: center;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.logger-screen .set-editor > .pr-callout {
+  grid-column: 2 / -1;
+  margin: 0;
+  color: var(--p-gold);
+  font-size: 0.75rem;
+  font-weight: 650;
+}
+
+.logger-screen .set-editor .cardio-set-screenshot-upload > label {
+  position: relative;
+  min-height: 2.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border: 1px dashed rgb(57 135 229 / 55%);
+  border-radius: 10px;
+  padding: 0 0.75rem;
+  color: var(--p-accent-text);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.logger-screen .set-editor .cardio-set-screenshot-upload > label.disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.logger-screen .set-editor .cardio-set-screenshot-upload input[type='file'] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.logger-screen .set-editor .cardio-set-screenshot-upload > small {
+  color: #84e5a8;
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+.logger-screen .set-editor .cardio-set-screenshot-upload > small.warning {
+  color: var(--p-gold);
+}
+
+.logger-screen .set-details > .completed-set-note {
+  width: calc(100% - 3.5rem);
+  display: block;
+  margin: -0.375rem 0 0.375rem 2.75rem;
+  border: 0;
+  border-radius: 8px;
+  padding: 0.25rem 0.375rem;
+  background: transparent;
+  color: var(--p-ink-2);
+  font-size: 0.8125rem;
+  line-height: 1.35;
+  text-align: left;
+  outline: 0;
 }
 
 .logger-screen .rest-between {
@@ -2900,8 +3149,7 @@ html.edge-swipe-ready .edge-swipe-indicator {
 
 /* ───────── Popups: one sheet style everywhere ───────── */
 
-.modal-backdrop,
-.add-set-backdrop {
+.modal-backdrop {
   background: rgb(4 6 8 / 72%);
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
@@ -2914,7 +3162,6 @@ html.edge-swipe-ready .edge-swipe-indicator {
   -webkit-backdrop-filter: blur(6px);
 }
 
-.add-set-dialog,
 .popup-dialog,
 .notification-dialog,
 .exercise-picker,
@@ -2923,8 +3170,7 @@ html.edge-swipe-ready .edge-swipe-indicator {
 .calendar-day-detail,
 .superset-picker,
 .workout-close-dialog,
-.set-entry-confirmation,
-.set-delete-confirmation > div {
+.set-entry-confirmation {
   border: 1px solid var(--p-line-strong);
   border-radius: 24px;
   background: var(--p-surface);
@@ -2932,13 +3178,11 @@ html.edge-swipe-ready .edge-swipe-indicator {
   color: var(--p-ink);
 }
 
-.add-set-dialog > header,
 .popup-dialog > header,
 .notification-dialog > header {
   border-bottom: 1px solid var(--p-line);
 }
 
-.add-set-dialog h2,
 .popup-dialog h2,
 .notification-dialog h2,
 .workout-close-dialog h2,
@@ -2952,7 +3196,6 @@ html.edge-swipe-ready .edge-swipe-indicator {
   letter-spacing: -0.01em;
 }
 
-.add-set-dialog > header button,
 .popup-dialog-close,
 .notification-close {
   width: 2.25rem;
@@ -2963,13 +3206,6 @@ html.edge-swipe-ready .edge-swipe-indicator {
   color: var(--p-ink-2);
 }
 
-.add-set-dialog > header .set-dialog-delete {
-  border-color: rgb(230 103 103 / 25%);
-  background: rgb(230 103 103 / 12%);
-  color: var(--p-danger);
-}
-
-.add-set-confirm,
 .popup-primary-action,
 .notification-ok {
   min-height: 3rem;
@@ -2981,13 +3217,11 @@ html.edge-swipe-ready .edge-swipe-indicator {
   font-weight: 650;
 }
 
-.add-set-dialog > footer,
 .popup-dialog-actions,
 .notification-dialog > footer {
   border-top: 1px solid var(--p-line);
 }
 
-.add-set-dialog > footer button:not(.add-set-confirm),
 .popup-dialog-actions button:not(.popup-primary-action),
 .notification-dialog > footer button:not(.notification-ok) {
   min-height: 3rem;
@@ -2998,255 +3232,6 @@ html.edge-swipe-ready .edge-swipe-indicator {
   font-weight: 600;
 }
 
-@media (max-width: 620px) {
-  /* Set entry slides up from the bottom, where the thumb already is. */
-  .set-dialog-backdrop.add-set-backdrop {
-    align-items: end;
-    place-items: end center;
-    padding: 0;
-  }
-
-  .set-dialog-backdrop .add-set-dialog {
-    width: 100%;
-    max-height: calc(var(--set-dialog-viewport-height, 100dvh) - 2.5rem);
-    border-width: 1px 0 0;
-    border-radius: 24px 24px 0 0;
-    padding-bottom: env(safe-area-inset-bottom);
-  }
-
-  .set-dialog-backdrop .add-set-dialog > header {
-    position: relative;
-    padding-top: 1.375rem;
-  }
-
-  .set-dialog-backdrop .add-set-dialog > header::before {
-    position: absolute;
-    top: 0.5rem;
-    left: 50%;
-    width: 2.5rem;
-    height: 0.3125rem;
-    border-radius: 3px;
-    background: var(--p-axis);
-    content: '';
-    transform: translateX(-50%);
-  }
-}
-
-.add-set-previous {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.375rem 0.5rem;
-  border-radius: 14px;
-  padding: 0.625rem 0.75rem;
-  background: var(--p-surface-2);
-}
-
-.add-set-previous > strong {
-  width: 100%;
-  margin: 0;
-  color: var(--p-ink);
-  font-size: 0.875rem;
-  font-weight: 650;
-}
-
-.add-set-previous > div {
-  gap: 0.375rem;
-}
-
-.add-set-previous span {
-  border-radius: 8px;
-  padding: 0.25rem 0.5rem;
-  background: var(--p-surface-3);
-  color: var(--p-ink-2);
-  font-size: 0.75rem;
-  font-weight: 600;
-}
-
-.add-set-previous span:last-child {
-  background: var(--p-accent-soft);
-  color: var(--p-accent-text);
-}
-
-.add-set-fields {
-  grid-template-columns: minmax(0, 1fr);
-  gap: 0.875rem;
-}
-
-.add-set-fields .stepper-pair {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.625rem;
-}
-
-.stepper-field,
-.chip-field {
-  min-width: 0;
-  display: grid;
-  gap: 0.375rem;
-}
-
-.stepper-label {
-  color: var(--p-muted);
-  font-size: 0.75rem;
-  font-weight: 600;
-}
-
-.stepper-control {
-  display: grid;
-  grid-template-columns: 2.75rem minmax(0, 1fr) 2.75rem;
-  align-items: stretch;
-  overflow: hidden;
-  border: 1px solid var(--p-line-strong);
-  border-radius: 14px;
-  background: var(--p-surface-2);
-}
-
-.stepper-button {
-  min-height: 3.25rem;
-  border: 0;
-  padding: 0;
-  background: transparent;
-  color: var(--p-accent-text);
-  font-size: 1.5rem;
-  font-weight: 500;
-  line-height: 1;
-  touch-action: manipulation;
-  -webkit-tap-highlight-color: transparent;
-}
-
-.stepper-button:active {
-  background: var(--p-accent-soft);
-}
-
-.stepper-input {
-  position: relative;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-right: 1px solid var(--p-line);
-  border-left: 1px solid var(--p-line);
-}
-
-.add-set-dialog .stepper-input input,
-.stepper-input input {
-  width: 100%;
-  min-width: 0;
-  height: 100%;
-  border: 0;
-  border-radius: 0;
-  padding: 0 0.25rem;
-  background: transparent;
-  color: var(--p-ink);
-  font-size: 1.375rem;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  text-align: center;
-}
-
-.stepper-input input:focus {
-  outline: none;
-  background: var(--p-accent-soft);
-}
-
-.stepper-input b {
-  position: absolute;
-  right: 0.375rem;
-  bottom: 0.375rem;
-  color: var(--p-muted);
-  font-size: 0.625rem;
-  font-weight: 600;
-  pointer-events: none;
-}
-
-.rpe-chips {
-  display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 0.375rem;
-}
-
-.rpe-chips button {
-  min-height: 2.5rem;
-  border: 1px solid var(--p-line);
-  border-radius: 10px;
-  padding: 0;
-  background: var(--p-surface-2);
-  color: var(--p-ink-2);
-  font-size: 0.875rem;
-  font-weight: 650;
-  font-variant-numeric: tabular-nums;
-}
-
-.rpe-chips button.active {
-  border-color: transparent;
-  background: var(--p-accent);
-  color: #fff;
-}
-
-.set-type-segments {
-  margin: 0;
-}
-
-.set-dialog-secondary-fields:empty {
-  display: none;
-}
-
-.add-set-field-pair {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  align-items: end;
-  gap: 0.625rem;
-}
-
-.add-set-fields label,
-.set-dialog-secondary-fields label {
-  color: var(--p-muted);
-  font-size: 0.75rem;
-  font-weight: 600;
-}
-
-.add-set-fields select,
-.add-set-fields textarea {
-  border: 1px solid var(--p-line-strong);
-  border-radius: 12px;
-  background: var(--p-surface-2);
-  color: var(--p-ink);
-}
-
-.add-set-fields select {
-  min-height: 3.25rem;
-}
-
-.logger-screen .set-grid-strength .completed-set-summary > .set-number-cell {
-  width: 1.75rem;
-  height: 1.75rem;
-  min-height: 0;
-  display: grid;
-  place-items: center;
-  border-radius: 8px;
-  padding: 0;
-  background: var(--p-surface-3);
-  color: var(--p-ink-2);
-  font-size: 0.75rem;
-  font-weight: 700;
-}
-
-.logger-screen .set-grid-strength .completed-set-summary > .set-number-cell.set-number-warmup {
-  background: var(--p-gold-soft);
-  color: var(--p-gold);
-}
-
-.logger-screen .set-grid-strength .completed-set-summary > .set-number-cell.set-number-drop {
-  background: var(--p-accent-soft);
-  color: var(--p-accent-text);
-}
-
-.logger-screen .set-details.completed .completed-set-summary > .set-number-cell {
-  background: rgb(35 166 62 / 22%);
-  color: #7fdc92;
-}
-
 .logger-screen .workout-summary-metrics strong {
   overflow: hidden;
   font-size: 0.8125rem;
@@ -3255,36 +3240,6 @@ html.edge-swipe-ready .edge-swipe-indicator {
 
 .logger-screen .add-set-button {
   width: calc(100% - 1.75rem);
-}
-
-.set-dialog-secondary-fields {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 0.625rem;
-}
-
-.set-dialog-secondary-fields select,
-.add-set-field-pair select {
-  width: 100%;
-  min-height: 3.25rem;
-}
-
-.add-set-dialog > footer {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 0.625rem;
-}
-
-.add-set-dialog > footer .add-set-confirm {
-  width: 100%;
-}
-
-.add-set-dialog > footer button:not(.add-set-confirm) {
-  padding: 0 1.25rem;
-}
-
-.add-set-dialog > footer.set-dialog-footer {
-  grid-template-columns: minmax(0, 1fr);
 }
 
 /* Exercise picker */
@@ -3434,8 +3389,7 @@ html.edge-swipe-ready .edge-swipe-indicator {
   letter-spacing: 0.06em;
 }
 
-.workout-close-actions .discard-workout-button,
-.set-delete-confirmation .confirm-delete-set {
+.workout-close-actions .discard-workout-button {
   border: 0;
   background: var(--p-danger);
   color: #fff;
@@ -3498,10 +3452,9 @@ html.edge-swipe-ready .edge-swipe-indicator {
   --ease-ios: cubic-bezier(0.32, 0.72, 0, 1);
 }
 
-/* Buttons give their own press feedback, so the browser's tap flash is off. */
-button,
-[role='button'],
-summary {
+/* Controls give their own press feedback, so the browser's tap flash is off everywhere (it inherits,
+   and tappable rows and card headers would otherwise flash). */
+html {
   -webkit-tap-highlight-color: transparent;
 }
 
@@ -3549,19 +3502,6 @@ summary {
 
 .range-chips.slide-indicator {
   --indicator-radius: 9px;
-}
-
-.rpe-chips.slide-indicator {
-  --indicator-bg: var(--p-accent);
-}
-
-.rpe-chips.slide-indicator > button {
-  background: transparent;
-}
-
-.rpe-chips.slide-indicator > button.active {
-  border-color: transparent;
-  color: #fff;
 }
 
 /* Screens: forward navigation slides in from the right, back from the left. */
@@ -3634,13 +3574,6 @@ summary {
 }
 
 /* Sheets and popups */
-/* `translate` composes with the sheet's own drag `transform`, so the two never fight. */
-@keyframes sheet-up {
-  from {
-    translate: 0 100%;
-  }
-}
-
 @keyframes pop-in {
   from {
     opacity: 0;
@@ -3649,7 +3582,6 @@ summary {
 }
 
 .modal-backdrop,
-.add-set-backdrop,
 .popup-dialog[open]::backdrop,
 .notification-dialog[open]::backdrop {
   animation: fade-in 200ms ease backwards;
@@ -3659,41 +3591,41 @@ summary {
 .notification-dialog[open],
 .modal-backdrop > [role='dialog'],
 .modal-backdrop > [role='alertdialog'],
-.modal-backdrop > section,
-.set-delete-confirmation > div {
+.modal-backdrop > section {
   animation: pop-in 260ms var(--ease-out) backwards;
 }
 
-.set-dialog-backdrop .add-set-dialog,
 .exercise-picker-backdrop .exercise-picker {
   animation: pop-in 280ms var(--ease-out) backwards;
 }
 
-@media (max-width: 620px) {
-  .set-dialog-backdrop .add-set-dialog {
-    animation: sheet-up 380ms var(--ease-ios) backwards;
+@keyframes menu-pop {
+  from {
+    opacity: 0;
+    transform: translate3d(0, -0.25rem, 0) scale(0.94);
   }
 }
 
-/* An autofocused field would otherwise scroll the clipped backdrop and cancel the slide-in. */
-.set-dialog-backdrop {
-  overflow: clip;
+.logger-screen .set-type-menu,
+.logger-screen .set-actions-menu-popover {
+  animation: menu-pop 180ms var(--ease-out) backwards;
+}
+
+.logger-screen .set-actions-menu-popover {
+  transform-origin: top right;
 }
 
 /* Press feedback */
 .pulse-button,
 .icon-button-pulse,
 .row-complete-button,
-.stepper-button,
 .app-tab,
 .pulse-kpi,
 button.pulse-card,
 .history-card-summary,
-.rpe-chips button,
 .segmented-control button,
 .range-chips button,
 .body-log-tabs button,
-.add-set-confirm,
 .popup-primary-action,
 .overlay-header-back,
 .overlay-header-action,
@@ -3707,9 +3639,6 @@ button.pulse-card,
 
 .pulse-button:active,
 .icon-button-pulse:active,
-.stepper-button:active,
-.rpe-chips button:active,
-.add-set-confirm:active,
 .popup-primary-action:active,
 .overlay-header-back:active,
 .overlay-header-action:active {
@@ -3756,13 +3685,8 @@ button.pulse-card:active,
   }
 }
 
-.row-complete-button.done .pulse-icon,
-.logger-screen .set-row.completed > .complete-set {
+.row-complete-button.done .pulse-icon {
   animation: check-pop 340ms var(--ease-out) backwards;
-}
-
-.stepper-input input {
-  transition: background-color 160ms ease;
 }
 
 /* Data comes in: bars grow from their baseline, lines draw from left to right. */

@@ -2,31 +2,40 @@ import type { WorkoutSetInput } from './types';
 
 export const RPE_OPTIONS = [5, 6, 6.5, 7, 7.5, 8, 8.5, 9, 9.5, 10] as const;
 
-export type SetKind = 'normal' | 'warmup' | 'drop';
+export type SetKind = 'normal' | 'warmup' | 'drop' | 'failure';
 
-/** Adds `delta` to a numeric text value, clamped at `min`, without float noise. */
-export function steppedValue(value: string, delta: number, min = 0): string {
-  const current = Number(value.replace(',', '.'));
-  const base = value.trim() !== '' && Number.isFinite(current) ? current : 0;
-  const next = Math.max(min, base + delta);
-  return String(Number(next.toFixed(2)));
-}
+type SetKindFields = Pick<WorkoutSetInput, 'set_type' | 'warmup' | 'failed'>;
 
-export function setKindOf(item: Pick<WorkoutSetInput, 'set_type' | 'warmup'>): SetKind {
+/** The set types offered in the set-number menu, with the letter shown in place of a number. */
+export const SET_KINDS: Array<{ kind: SetKind; label: string; letter: string | null }> = [
+  { kind: 'normal', label: 'Working set', letter: null },
+  { kind: 'warmup', label: 'Warm-up', letter: 'W' },
+  { kind: 'drop', label: 'Drop set', letter: 'D' },
+  { kind: 'failure', label: 'Failure', letter: 'F' },
+];
+
+export function setKindOf(item: SetKindFields): SetKind {
   if (item.set_type === 'warmup' || item.warmup) return 'warmup';
   if (item.set_type === 'drop') return 'drop';
+  if (item.failed) return 'failure';
   return 'normal';
 }
 
-/** Working sets are numbered 1…n; warm-ups show W and drop sets D. */
-export function setNumberLabels(
-  sets: Array<Pick<WorkoutSetInput, 'set_type' | 'warmup'>>,
-): string[] {
+/** The fields to store when the lifter picks a set type. Failure uses the existing failed flag. */
+export function setKindUpdate(kind: SetKind): Required<SetKindFields> {
+  return {
+    set_type: kind === 'warmup' || kind === 'drop' ? kind : 'normal',
+    warmup: kind === 'warmup',
+    failed: kind === 'failure',
+  };
+}
+
+/** Working sets are numbered 1…n; warm-ups show W, drop sets D and sets to failure F. */
+export function setNumberLabels(sets: SetKindFields[]): string[] {
   let working = 0;
   return sets.map((item) => {
-    const kind = setKindOf(item);
-    if (kind === 'warmup') return 'W';
-    if (kind === 'drop') return 'D';
+    const letter = SET_KINDS.find((option) => option.kind === setKindOf(item))?.letter;
+    if (letter) return letter;
     working += 1;
     return String(working);
   });

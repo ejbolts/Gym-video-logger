@@ -5,14 +5,8 @@ import {
   MAX_INACTIVE_WORKOUT_MS,
 } from './activeWorkoutTimeout';
 import { Fragment, startTransition, useEffect, useMemo, useRef, useState } from 'react';
-import type {
-  CSSProperties,
-  FormEvent,
-  PointerEvent as ReactPointerEvent,
-  ReactNode,
-  RefObject,
-} from 'react';
-import { createPortal } from 'react-dom';
+import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode, RefObject } from 'react';
+import { createPortal, flushSync } from 'react-dom';
 import { api } from './api';
 import type {
   BodyMeasurement,
@@ -83,8 +77,7 @@ import {
   showRestTimerNotification,
   showWorkoutAutoSavedNotification,
 } from './push';
-import { RpeChips, SetTypeSegments, StepperInput } from './SetFields';
-import { useFlipAnimation, useSlidingIndicator } from './motionHooks';
+import { useExpandAnimation, useFlipAnimation, useSlidingIndicator } from './motionHooks';
 import {
   applyReduceMotion,
   motionReduced,
@@ -92,10 +85,14 @@ import {
   saveReduceMotionPreference,
   systemPrefersReducedMotion,
 } from './motion';
-import { setKindOf, setNumberLabels } from './setFieldValues';
-import { SetDialogKeyboardAction } from './SetDialogKeyboardAction';
+import {
+  RPE_OPTIONS,
+  SET_KINDS,
+  setKindOf,
+  setKindUpdate,
+  setNumberLabels,
+} from './setFieldValues';
 import { SwipeToDeleteSetRow } from './SwipeToDeleteSetRow';
-import { completesSetDialogDismissSwipe } from './setDialogSwipe';
 import { unusualSetEntryWarning, type SetEntryWarning } from './setEntryConfirmation';
 import {
   appTabFromHash,
@@ -179,7 +176,7 @@ import {
   type TimeRange,
 } from './dateRanges';
 
-type SetEditorFocus = 'weight' | 'reps' | 'type' | 'rpe' | 'notes' | null;
+type SetField = 'weight' | 'reps' | 'duration' | 'distance' | 'rpe' | 'notes';
 type RestAlertStatus =
   'checking' | 'available' | 'enabling' | 'enabled' | 'blocked' | 'unsupported';
 type BackgroundActivity = { id: number; label: string };
@@ -220,8 +217,8 @@ function emptySet(
   };
 }
 
-function setTypeTitle(item: Pick<DraftSet, 'set_type' | 'warmup'>): string {
-  return { normal: 'Working set', warmup: 'Warm-up set', drop: 'Drop set' }[setKindOf(item)];
+function setTypeTitle(item: Pick<DraftSet, 'set_type' | 'warmup' | 'failed'>): string {
+  return SET_KINDS.find((option) => option.kind === setKindOf(item))?.label ?? 'Working set';
 }
 
 /** Sets pre-filled from the exercise's most recent session, marked as suggestions. */
@@ -2131,37 +2128,14 @@ function WorkoutLogger({
     updateSet(movement.key, item.key, { completed: !item.completed });
   }
 
-  function addSet(movement: DraftMovement, count = 1, update: Partial<DraftSet> = {}) {
-    const completedRestSeconds =
-      movement.exercise.kind === 'strength' &&
-      update.completed &&
-      update.rest_seconds !== null &&
-      update.rest_seconds !== undefined
-        ? update.rest_seconds
-        : null;
+  function addSet(movement: DraftMovement) {
     setMovements((current) =>
       current.map((item) =>
         item.key === movement.key
-          ? {
-              ...item,
-              sets: Array.from({ length: Math.min(20, Math.max(1, count)) }).reduce<DraftSet[]>(
-                (sets) => {
-                  const created = {
-                    ...emptySet(item.exercise.kind, sets.at(-1)),
-                    ...update,
-                    key: crypto.randomUUID(),
-                  };
-                  return [...sets, created];
-                },
-                item.sets,
-              ),
-            }
+          ? { ...item, sets: [...item.sets, emptySet(item.exercise.kind, item.sets.at(-1))] }
           : item,
       ),
     );
-    if (completedRestSeconds !== null && completedRestSeconds > 0) {
-      startRestTimer(completedRestSeconds);
-    }
   }
 
   function removeMovement(key: string) {
@@ -2596,7 +2570,7 @@ function WorkoutLogger({
             }
             onUpdateSet={(setKey, update) => updateSet(movement.key, setKey, update)}
             onToggleSet={(item) => toggleSet(movement, item)}
-            onAddSet={(count, update) => addSet(movement, count, update)}
+            onAddSet={() => addSet(movement)}
             onSwitch={() => {
               setSwitchingMovementKey(movement.key);
               setPickerOpen(true);
@@ -3106,7 +3080,7 @@ function MovementCard({
   onExerciseComplete: (isComplete: boolean) => void;
   onUpdateSet: (setKey: string, update: Partial<DraftSet>) => void;
   onToggleSet: (item: DraftSet) => void;
-  onAddSet: (count: number, update: Partial<DraftSet>) => void;
+  onAddSet: () => void;
   onSwitch: () => void;
   onRemove: () => void;
   onMachinePhotos: (photoIds: string[]) => void;
@@ -3128,10 +3102,9 @@ function MovementCard({
   const lastSessionSummary = !cardio && history[0] ? compactSetSummary(history[0].sets) : '';
   const [expanded, setExpanded] = useState(!movement.isComplete);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [addSetOpen, setAddSetOpen] = useState(false);
   const [openSetActionsKey, setOpenSetActionsKey] = useState<string | null>(null);
-  const [editingSetKey, setEditingSetKey] = useState<string | null>(null);
-  const [editingSetFocus, setEditingSetFocus] = useState<SetEditorFocus>(null);
+  const [openOverrides, setOpenOverrides] = useState<Readonly<Record<string, boolean>>>({});
+  const [typeMenuSetKey, setTypeMenuSetKey] = useState<string | null>(null);
   const [draggingSetKey, setDraggingSetKey] = useState<string | null>(null);
   const [dragTargetSetKey, setDragTargetSetKey] = useState<string | null>(null);
   const [weightDrafts, setWeightDrafts] = useState<Record<string, string>>({});
@@ -3143,20 +3116,31 @@ function MovementCard({
   const dragTargetSetKeyRef = useRef<string | null>(null);
   const movementMenuRef = useRef<HTMLDetailsElement>(null);
   const movementNoteRef = useRef<HTMLInputElement>(null);
+  const setGridRef = useRef<HTMLDivElement>(null);
+  const setNumbers = setNumberLabels(movement.sets);
 
   useEffect(() => {
     if (!movement.isComplete) setExpanded(true);
   }, [movement.isComplete]);
 
   useEffect(() => {
-    if (!openSetActionsKey) return;
+    if (!openSetActionsKey && !typeMenuSetKey) return;
 
-    const closeOutside = (event: PointerEvent) => {
-      if (event.target instanceof Element && event.target.closest('.set-actions-menu')) return;
+    const closeMenus = () => {
       setOpenSetActionsKey(null);
+      setTypeMenuSetKey(null);
+    };
+    const closeOutside = (event: PointerEvent) => {
+      if (
+        event.target instanceof Element &&
+        event.target.closest('.set-actions-menu, .set-type-picker')
+      ) {
+        return;
+      }
+      closeMenus();
     };
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpenSetActionsKey(null);
+      if (event.key === 'Escape') closeMenus();
     };
 
     document.addEventListener('pointerdown', closeOutside);
@@ -3165,7 +3149,7 @@ function MovementCard({
       document.removeEventListener('pointerdown', closeOutside);
       document.removeEventListener('keydown', closeOnEscape);
     };
-  }, [openSetActionsKey]);
+  }, [openSetActionsKey, typeMenuSetKey]);
 
   function closeMovementMenu() {
     if (movementMenuRef.current) movementMenuRef.current.open = false;
@@ -3178,14 +3162,41 @@ function MovementCard({
     setDragTargetSetKey(null);
   }
 
-  function openSetEditor(setKey: string, focus: SetEditorFocus = null) {
-    setEditingSetFocus(focus);
-    setEditingSetKey(setKey);
+  /** New and unticked sets are edited in place; logged and suggested sets open on tap. */
+  function isSetOpen(item: DraftSet) {
+    return openOverrides[item.key] ?? (!item.completed && !item.fromPrevious);
   }
 
-  function closeSetEditor() {
-    setEditingSetKey(null);
-    setEditingSetFocus(null);
+  /** Pins a set open or closed; `null` returns it to the default for its state. */
+  function setOpenOverride(setKey: string, open: boolean | null) {
+    setOpenOverrides((current) => {
+      if (open === null ? !(setKey in current) : current[setKey] === open) return current;
+      const next = { ...current };
+      if (open === null) delete next[setKey];
+      else next[setKey] = open;
+      return next;
+    });
+  }
+
+  function openSet(setKey: string, focusField?: SetField) {
+    // Render synchronously so the field can take focus inside the tap (iOS keyboard rule).
+    flushSync(() => setOpenOverride(setKey, true));
+    if (!focusField) return;
+    setGridRef.current
+      ?.querySelector<HTMLElement>(`[data-set-key="${setKey}"] [data-set-field="${focusField}"]`)
+      ?.focus();
+  }
+
+  function completeSet(item: DraftSet) {
+    onToggleSet(item);
+    setOpenOverride(item.key, null);
+  }
+
+  /** The tick logs an open set and folds it away; on a folded logged set it unticks and opens it. */
+  function checkSet(item: DraftSet, index: number) {
+    const finishingEdit = item.completed && isSetOpen(item);
+    if (item.completed) setOpenOverride(item.key, null);
+    if (!finishingEdit) requestSetCompletion(item, index);
   }
 
   function requestSetCompletion(item: DraftSet, index: number) {
@@ -3218,7 +3229,7 @@ function MovementCard({
       setPendingSetCompletion({ item, warning });
       return;
     }
-    onToggleSet(item);
+    completeSet(item);
   }
 
   function beginSetDrag(event: ReactPointerEvent<HTMLButtonElement>, setKey: string) {
@@ -3293,18 +3304,21 @@ function MovementCard({
   }
 
   function renderRowCompleteButton(item: DraftSet, index: number) {
+    const label = !item.completed
+      ? `Complete set ${index + 1}`
+      : isSetOpen(item)
+        ? `Done editing set ${index + 1}`
+        : `Mark set ${index + 1} incomplete`;
     return (
       <button
         type="button"
         className={`row-complete-button ${item.completed ? 'done' : ''}`}
-        aria-label={
-          item.completed ? `Mark set ${index + 1} incomplete` : `Complete set ${index + 1}`
-        }
+        aria-label={label}
         aria-pressed={item.completed}
         onClick={(event) => {
           event.preventDefault();
           event.stopPropagation();
-          requestSetCompletion(item, index);
+          checkSet(item, index);
         }}
       >
         <Icon name="check" />
@@ -3327,24 +3341,27 @@ function MovementCard({
           className="completed-set-menu"
           aria-label={`Options for set ${index + 1}`}
           aria-expanded={openSetActionsKey === item.key}
-          onClick={() =>
-            setOpenSetActionsKey((current) => (current === item.key ? null : item.key))
-          }
+          onClick={() => {
+            setTypeMenuSetKey(null);
+            setOpenSetActionsKey((current) => (current === item.key ? null : item.key));
+          }}
         >
           ⋮
         </button>
         {openSetActionsKey === item.key && (
           <span className="set-actions-menu-popover">
-            <button
-              type="button"
-              onClick={() => {
-                openSetEditor(item.key);
-                setOpenSetActionsKey(null);
-              }}
-            >
-              <span aria-hidden="true">✎</span>
-              Edit set
-            </button>
+            {!isSetOpen(item) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setOpenSetActionsKey(null);
+                  openSet(item.key);
+                }}
+              >
+                <span aria-hidden="true">✎</span>
+                Edit set
+              </button>
+            )}
             <button
               type="button"
               disabled={index === 0}
@@ -3384,6 +3401,299 @@ function MovementCard({
     );
   }
 
+  function renderSetTypeButton(item: DraftSet, index: number) {
+    if (cardio) {
+      return <span className="set-number-cell set-number-normal">{index + 1}</span>;
+    }
+    const kind = setKindOf(item);
+    const menuOpen = typeMenuSetKey === item.key;
+    const workingNumber =
+      movement.sets.slice(0, index).filter((candidate) => setKindOf(candidate) === 'normal')
+        .length + 1;
+    return (
+      <span className="set-type-picker" onClick={(event) => event.stopPropagation()}>
+        <button
+          type="button"
+          className={`set-number-cell set-number-${kind}`}
+          aria-label={`Set ${index + 1} type: ${setTypeTitle(item)}`}
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          onClick={() => {
+            setOpenSetActionsKey(null);
+            setTypeMenuSetKey(menuOpen ? null : item.key);
+          }}
+        >
+          {setNumbers[index]}
+        </button>
+        {menuOpen && (
+          <span className="set-type-menu" role="menu" aria-label={`Type for set ${index + 1}`}>
+            {SET_KINDS.map((option) => (
+              <button
+                key={option.kind}
+                type="button"
+                role="menuitemradio"
+                aria-checked={option.kind === kind}
+                onClick={() => {
+                  if (option.kind !== kind) {
+                    // Editing clears the suggestion flag; keep a folded row folded.
+                    if (!isSetOpen(item)) setOpenOverride(item.key, false);
+                    onUpdateSet(item.key, setKindUpdate(option.kind));
+                  }
+                  setTypeMenuSetKey(null);
+                }}
+              >
+                <b className={`set-number-cell set-number-${option.kind}`} aria-hidden="true">
+                  {option.letter ?? workingNumber}
+                </b>
+                {option.label}
+              </button>
+            ))}
+          </span>
+        )}
+      </span>
+    );
+  }
+
+  function renderSetSummary(item: DraftSet, index: number) {
+    const valueButton = (field: SetField, label: string, className: string, value: ReactNode) => (
+      <button
+        type="button"
+        className={`completed-set-value ${className}`}
+        aria-label={`${label} for set ${index + 1}`}
+        onClick={(event) => {
+          event.stopPropagation();
+          openSet(item.key, field);
+        }}
+      >
+        {value}
+      </button>
+    );
+    return (
+      <>
+        <div className="completed-set-summary" onClick={() => openSet(item.key)}>
+          {renderSetTypeButton(item, index)}
+          {cardio ? (
+            valueButton(
+              'duration',
+              'Edit time and distance',
+              'completed-set-cardio',
+              completedSetPerformance(item, true),
+            )
+          ) : (
+            <>
+              {valueButton(
+                'weight',
+                'Edit weight',
+                'completed-set-weight',
+                <>
+                  {item.weight_kg === null ? '–' : `${item.weight_kg} kg`}
+                  {prBadges.has(item.key) && (
+                    <b className="pr-badge" title={prBadges.get(item.key)?.join(', ')}>
+                      PR
+                    </b>
+                  )}
+                </>,
+              )}
+              {valueButton('reps', 'Edit repetitions', 'completed-set-reps', item.reps ?? '–')}
+            </>
+          )}
+          {valueButton('rpe', 'Edit RPE', 'completed-set-rpe', item.rpe ?? '–')}
+          {renderRowCompleteButton(item, index)}
+          {renderCompletedSetActions(item, index)}
+        </div>
+        {item.notes && (
+          <button
+            type="button"
+            className="completed-set-note"
+            aria-label={`Edit note for set ${index + 1}`}
+            onClick={() => openSet(item.key, 'notes')}
+          >
+            {item.notes}
+          </button>
+        )}
+      </>
+    );
+  }
+
+  function renderSetEditor(item: DraftSet, index: number) {
+    const suggested = item.fromPrevious ? ', suggested from the last workout' : '';
+    return (
+      <div className={`set-editor ${item.completed ? 'completed' : ''}`}>
+        {renderSetTypeButton(item, index)}
+        {cardio ? (
+          <>
+            <input
+              data-set-field="duration"
+              inputMode="numeric"
+              type="number"
+              min="0"
+              value={item.duration_seconds === null ? '' : Math.round(item.duration_seconds / 60)}
+              onChange={(event) =>
+                onUpdateSet(item.key, {
+                  duration_seconds:
+                    numberOrNull(event.target.value) === null
+                      ? null
+                      : Number(event.target.value) * 60,
+                })
+              }
+              aria-label="Duration minutes"
+            />
+            <input
+              data-set-field="distance"
+              inputMode="decimal"
+              type="number"
+              min="0"
+              step="0.1"
+              value={item.distance_km ?? ''}
+              onChange={(event) =>
+                onUpdateSet(item.key, { distance_km: numberOrNull(event.target.value) })
+              }
+              aria-label="Distance kilometres"
+            />
+          </>
+        ) : (
+          <>
+            <input
+              data-set-field="weight"
+              inputMode="decimal"
+              type="text"
+              value={weightDrafts[item.key] ?? item.weight_kg ?? ''}
+              onFocus={(event) => {
+                // Read the value now: the updater can run after React has released the event.
+                const { value } = event.currentTarget;
+                setWeightDrafts((current) => ({ ...current, [item.key]: value }));
+                if (item.weight_kg !== null) event.currentTarget.select();
+              }}
+              onClick={(event) => {
+                if (item.weight_kg !== null) event.currentTarget.select();
+              }}
+              onChange={(event) => updateWeightDraft(item, event.target.value)}
+              onBlur={() => commitWeightDraft(item)}
+              aria-label={`Weight kilograms${suggested}`}
+            />
+            <input
+              data-set-field="reps"
+              inputMode="numeric"
+              type="text"
+              value={item.reps ?? ''}
+              onFocus={(event) => {
+                if (item.reps !== null) event.currentTarget.select();
+              }}
+              onClick={(event) => {
+                if (item.reps !== null) event.currentTarget.select();
+              }}
+              onChange={(event) =>
+                onUpdateSet(item.key, { reps: numberOrNull(event.target.value) })
+              }
+              aria-label={`Repetitions${suggested}`}
+            />
+          </>
+        )}
+        <select
+          data-set-field="rpe"
+          className={item.rpe === null ? 'is-empty' : ''}
+          value={item.rpe ?? ''}
+          onChange={(event) => onUpdateSet(item.key, { rpe: numberOrNull(event.target.value) })}
+          aria-label="RPE"
+        >
+          <option value="">–</option>
+          {RPE_OPTIONS.map((rpe) => (
+            <option key={rpe} value={rpe}>
+              {rpe}
+            </option>
+          ))}
+        </select>
+        {renderRowCompleteButton(item, index)}
+        {renderCompletedSetActions(item, index)}
+        <div className="set-editor-extras">
+          {cardio && (
+            <div className="set-editor-metrics">
+              <label>
+                kcal
+                <input
+                  inputMode="numeric"
+                  type="number"
+                  min="0"
+                  value={item.calories_kcal ?? ''}
+                  onChange={(event) =>
+                    onUpdateSet(item.key, { calories_kcal: numberOrNull(event.target.value) })
+                  }
+                  aria-label="Active calories"
+                />
+              </label>
+              <label>
+                Avg bpm
+                <input
+                  inputMode="numeric"
+                  type="number"
+                  min="20"
+                  max="250"
+                  value={item.average_heart_rate_bpm ?? ''}
+                  onChange={(event) =>
+                    onUpdateSet(item.key, {
+                      average_heart_rate_bpm: numberOrNull(event.target.value),
+                    })
+                  }
+                  aria-label="Average heart rate"
+                />
+              </label>
+              <label>
+                km/h
+                <input
+                  inputMode="decimal"
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.1"
+                  value={item.speed_kph ?? ''}
+                  onChange={(event) =>
+                    onUpdateSet(item.key, { speed_kph: numberOrNull(event.target.value) })
+                  }
+                  aria-label="Average speed kilometres per hour"
+                />
+              </label>
+              {treadmill && (
+                <label>
+                  Incline %
+                  <input
+                    inputMode="decimal"
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="0.5"
+                    value={item.incline_percent ?? ''}
+                    onChange={(event) =>
+                      onUpdateSet(item.key, { incline_percent: numberOrNull(event.target.value) })
+                    }
+                    aria-label="Treadmill incline percentage"
+                  />
+                </label>
+              )}
+            </div>
+          )}
+          <input
+            data-set-field="notes"
+            className="set-editor-note"
+            value={item.notes ?? ''}
+            onChange={(event) => onUpdateSet(item.key, { notes: event.target.value || null })}
+            placeholder="Add a note"
+            aria-label={`Note for set ${index + 1}`}
+          />
+          {cardio && (
+            <CardioSetScreenshotUpload
+              onScan={(scan) => onUpdateSet(item.key, cardioSetUpdateFromScan(scan))}
+            />
+          )}
+        </div>
+        {prBadges.has(item.key) && (
+          <div className="pr-callout" role="status">
+            🏆 {prBadges.get(item.key)?.join(' · ')}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   function updateWeightDraft(item: DraftSet, rawValue: string) {
     const draft = rawValue.replace(',', '.');
     if (!/^\d*(?:\.\d*)?$/.test(draft)) return;
@@ -3408,11 +3718,8 @@ function MovementCard({
     });
   }
 
-  const setNumbers = setNumberLabels(movement.sets);
-  const setGridRef = useRef<HTMLDivElement>(null);
   useFlipAnimation(setGridRef, movement.sets.map((item) => item.key).join('|'));
-  const editingSetIndex = movement.sets.findIndex((item) => item.key === editingSetKey);
-  const editingSet = editingSetIndex >= 0 ? movement.sets[editingSetIndex] : null;
+  useExpandAnimation(setGridRef);
 
   return (
     <article
@@ -3618,10 +3925,10 @@ function MovementCard({
           {cardio ? (
             <>
               <span>Set</span>
-              <span>MIN</span>
-              <span>KM</span>
+              <span>Min</span>
+              <span>Km</span>
               <span>RPE</span>
-              <span>Done</span>
+              <span aria-hidden="true" />
               <span aria-hidden="true" />
             </>
           ) : (
@@ -3635,389 +3942,51 @@ function MovementCard({
             </>
           )}
         </div>
-        {movement.sets.map((item, index) => (
-          <Fragment key={item.key}>
-            <SwipeToDeleteSetRow
-              flipKey={item.key}
-              label={`set ${index + 1}`}
-              disabled={movement.sets.length < 2}
-              overlayOpen={openSetActionsKey === item.key}
-              onDelete={() => onDeleteSet(index)}
-            >
-              <details
-                className={`set-details ${item.completed ? 'completed' : ''} ${item.fromPrevious ? 'previous-set-details' : ''} ${draggingSetKey === item.key ? 'set-dragging' : ''} ${dragTargetSetKey === item.key && draggingSetKey !== item.key ? 'set-drop-target' : ''}`}
-                data-set-key={item.key}
-                open={!item.completed && !item.fromPrevious}
-                onToggle={(event) => {
-                  if ((item.completed || item.fromPrevious) && event.currentTarget.open) {
-                    event.currentTarget.open = false;
-                  }
-                }}
+        {movement.sets.map((item, index) => {
+          const open = isSetOpen(item);
+          return (
+            <Fragment key={item.key}>
+              <SwipeToDeleteSetRow
+                flipKey={item.key}
+                label={`set ${index + 1}`}
+                disabled={movement.sets.length < 2}
+                overlayOpen={openSetActionsKey === item.key || typeMenuSetKey === item.key}
+                onDelete={() => onDeleteSet(index)}
               >
-                <summary
-                  className="completed-set-summary"
-                  onClick={(event) => {
-                    if (!item.completed && !item.fromPrevious) return;
-                    event.preventDefault();
-                    openSetEditor(item.key);
-                  }}
-                >
-                  {cardio ? (
-                    <>
-                      <span>{index + 1}</span>
-                      <strong>{completedSetPerformance(item, true)}</strong>
-                      <span>{item.rpe ?? '–'}</span>
-                      {renderRowCompleteButton(item, index)}
-                      {renderCompletedSetActions(item, index)}
-                    </>
-                  ) : (
-                    <>
-                      <button
-                        type="button"
-                        className={`completed-set-value set-number-cell set-number-${setKindOf(item)}`}
-                        aria-label={`Edit set type for set ${index + 1}`}
-                        title={setTypeTitle(item)}
-                        onClick={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          openSetEditor(item.key, 'type');
-                        }}
-                      >
-                        {setNumbers[index]}
-                      </button>
-                      <button
-                        type="button"
-                        className="completed-set-value completed-set-weight"
-                        aria-label={`Edit weight for set ${index + 1}`}
-                        onClick={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          openSetEditor(item.key, 'weight');
-                        }}
-                      >
-                        {item.weight_kg === null ? '–' : `${item.weight_kg} kg`}
-                        {prBadges.has(item.key) && (
-                          <b className="pr-badge" title={prBadges.get(item.key)?.join(', ')}>
-                            PR
-                          </b>
-                        )}
-                      </button>
-                      <button
-                        type="button"
-                        className="completed-set-value completed-set-reps"
-                        aria-label={`Edit repetitions for set ${index + 1}`}
-                        onClick={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          openSetEditor(item.key, 'reps');
-                        }}
-                      >
-                        {item.reps ?? '–'}
-                      </button>
-                      <button
-                        type="button"
-                        className="completed-set-value completed-set-rpe"
-                        aria-label={`Edit RPE for set ${index + 1}`}
-                        onClick={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          openSetEditor(item.key, 'rpe');
-                        }}
-                      >
-                        {item.rpe ?? '–'}
-                      </button>
-                      {renderRowCompleteButton(item, index)}
-                      {renderCompletedSetActions(item, index)}
-                    </>
-                  )}
-                </summary>
                 <div
-                  className={`set-row ${item.completed ? 'completed' : ''} ${item.failed ? 'failed-set' : ''} ${item.fromPrevious ? 'previous-set' : ''} set-type-${item.set_type ?? 'normal'}`}
+                  className={`set-details ${item.completed ? 'completed' : ''} ${item.fromPrevious ? 'previous-set-details' : ''} ${open ? 'is-open' : ''} ${draggingSetKey === item.key ? 'set-dragging' : ''} ${dragTargetSetKey === item.key && draggingSetKey !== item.key ? 'set-drop-target' : ''}`}
+                  data-set-key={item.key}
+                  data-expand-key={item.key}
+                  data-expanded={open}
                 >
-                  <span className="set-index">
-                    {index + 1}
-                    {prBadges.has(item.key) && (
-                      <b className="pr-badge" title={prBadges.get(item.key)?.join(', ')}>
-                        PR
-                      </b>
-                    )}
-                  </span>
-                  {cardio ? (
-                    <>
-                      <input
-                        inputMode="numeric"
-                        type="number"
-                        min="0"
-                        value={
-                          item.duration_seconds === null
-                            ? ''
-                            : Math.round(item.duration_seconds / 60)
-                        }
-                        onChange={(event) =>
-                          onUpdateSet(item.key, {
-                            duration_seconds:
-                              numberOrNull(event.target.value) === null
-                                ? null
-                                : Number(event.target.value) * 60,
-                          })
-                        }
-                        aria-label="Duration minutes"
-                      />
-                      <input
-                        inputMode="decimal"
-                        type="number"
-                        min="0"
-                        step="0.1"
-                        value={item.distance_km ?? ''}
-                        onChange={(event) =>
-                          onUpdateSet(item.key, { distance_km: numberOrNull(event.target.value) })
-                        }
-                        aria-label="Distance kilometres"
-                      />
-                    </>
-                  ) : (
-                    <>
-                      <input
-                        inputMode="decimal"
-                        type="text"
-                        value={weightDrafts[item.key] ?? item.weight_kg ?? ''}
-                        onFocus={(event) => {
-                          setWeightDrafts((current) => ({
-                            ...current,
-                            [item.key]: event.currentTarget.value,
-                          }));
-                          if (item.weight_kg !== null) event.currentTarget.select();
-                        }}
-                        onClick={(event) => {
-                          if (item.weight_kg !== null) event.currentTarget.select();
-                        }}
-                        onChange={(event) => updateWeightDraft(item, event.target.value)}
-                        onBlur={() => commitWeightDraft(item)}
-                        aria-label={
-                          item.fromPrevious
-                            ? 'Weight kilograms, suggested from the last workout'
-                            : 'Weight kilograms'
-                        }
-                      />
-                      <input
-                        inputMode="numeric"
-                        type="text"
-                        value={item.reps ?? ''}
-                        onFocus={(event) => {
-                          if (item.reps !== null) event.currentTarget.select();
-                        }}
-                        onClick={(event) => {
-                          if (item.reps !== null) event.currentTarget.select();
-                        }}
-                        onChange={(event) =>
-                          onUpdateSet(item.key, { reps: numberOrNull(event.target.value) })
-                        }
-                        aria-label={
-                          item.fromPrevious
-                            ? 'Repetitions, suggested from the last workout'
-                            : 'Repetitions'
-                        }
-                      />
-                    </>
-                  )}
-                  <select
-                    value={item.rpe ?? ''}
-                    onChange={(event) =>
-                      onUpdateSet(item.key, { rpe: numberOrNull(event.target.value) })
-                    }
-                    aria-label="RPE"
-                  >
-                    <option value="">–</option>
-                    {[5, 6, 7, 7.5, 8, 8.5, 9, 9.5, 10].map((rpe) => (
-                      <option key={rpe} value={rpe}>
-                        {rpe}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    type="button"
-                    className="complete-set"
-                    onClick={() => requestSetCompletion(item, index)}
-                    aria-label={item.completed ? 'Mark set incomplete' : 'Complete set'}
-                  >
-                    {item.completed ? '✓' : ''}
-                  </button>
-                  {renderSetDragHandle(item, index)}
-                  <div className="set-extras">
-                    {treadmill && (
-                      <fieldset className="treadmill-set-fields">
-                        <legend>Treadmill</legend>
-                        <label>
-                          Incline %
-                          <input
-                            inputMode="decimal"
-                            type="number"
-                            min="0"
-                            max="100"
-                            step="0.5"
-                            value={item.incline_percent ?? ''}
-                            onChange={(event) =>
-                              onUpdateSet(item.key, {
-                                incline_percent: numberOrNull(event.target.value),
-                              })
-                            }
-                            aria-label="Treadmill incline percentage"
-                          />
-                        </label>
-                        <label>
-                          Speed km/h
-                          <input
-                            inputMode="decimal"
-                            type="number"
-                            min="0"
-                            max="100"
-                            step="0.1"
-                            value={item.speed_kph ?? ''}
-                            onChange={(event) =>
-                              onUpdateSet(item.key, { speed_kph: numberOrNull(event.target.value) })
-                            }
-                            aria-label="Treadmill speed kilometres per hour"
-                          />
-                        </label>
-                      </fieldset>
-                    )}
-                    <label>
-                      Type
-                      <select
-                        value={item.set_type ?? (item.warmup ? 'warmup' : 'normal')}
-                        onChange={(event) =>
-                          onUpdateSet(item.key, {
-                            set_type: event.target.value as DraftSet['set_type'],
-                            warmup: event.target.value === 'warmup',
-                          })
-                        }
-                      >
-                        <option value="normal">Working</option>
-                        <option value="warmup">Warm-up</option>
-                        <option value="drop">Drop set</option>
-                      </select>
-                    </label>
-                    {!cardio && (
-                      <label>
-                        Rest
-                        <select
-                          value={item.rest_seconds ?? DEFAULT_REST_SECONDS}
-                          onChange={(event) =>
-                            onUpdateSet(item.key, { rest_seconds: Number(event.target.value) })
-                          }
-                        >
-                          {restOptions.map((seconds) => (
-                            <option key={seconds} value={seconds}>
-                              {formatDuration(seconds)}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    )}
-                    <input
-                      value={item.notes ?? ''}
-                      onChange={(event) =>
-                        onUpdateSet(item.key, { notes: event.target.value || null })
-                      }
-                      placeholder="Set note (optional)"
-                    />
-                    <div
-                      className={`set-actions-menu ${item.completed ? 'completed-set-actions' : ''} ${openSetActionsKey === item.key ? 'is-open' : ''}`}
-                    >
-                      <button
-                        type="button"
-                        className="set-actions-trigger"
-                        aria-label={`Options for set ${index + 1}`}
-                        aria-expanded={openSetActionsKey === item.key}
-                        onClick={() =>
-                          setOpenSetActionsKey((current) =>
-                            current === item.key ? null : item.key,
-                          )
-                        }
-                      >
-                        ⋮
-                      </button>
-                      {openSetActionsKey === item.key && (
-                        <div className="set-actions-menu-popover">
-                          <button
-                            type="button"
-                            disabled={index === 0}
-                            onClick={() => {
-                              onMoveSet(index, index - 1);
-                              setOpenSetActionsKey(null);
-                            }}
-                          >
-                            <span aria-hidden="true">↑</span>
-                            Move earlier
-                          </button>
-                          <button
-                            type="button"
-                            disabled={index === movement.sets.length - 1}
-                            onClick={() => {
-                              onMoveSet(index, index + 1);
-                              setOpenSetActionsKey(null);
-                            }}
-                          >
-                            <span aria-hidden="true">↓</span>
-                            Move later
-                          </button>
-                          <button
-                            type="button"
-                            className="danger"
-                            onClick={() => {
-                              onDeleteSet(index);
-                              setOpenSetActionsKey(null);
-                            }}
-                          >
-                            <span aria-hidden="true">■</span>
-                            Delete set
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                  {prBadges.has(item.key) && (
-                    <div className="pr-callout" role="status">
-                      🏆 {prBadges.get(item.key)?.join(' · ')}
-                    </div>
-                  )}
+                  {open ? renderSetEditor(item, index) : renderSetSummary(item, index)}
                 </div>
-              </details>
-              {item.completed && item.notes && (
-                <button
-                  type="button"
-                  className="completed-set-note"
-                  aria-label={`Edit note for set ${index + 1}`}
-                  onClick={() => openSetEditor(item.key, 'notes')}
-                >
-                  {item.notes}
-                </button>
+              </SwipeToDeleteSetRow>
+              {!cardio && (
+                <div className="rest-between" data-flip-key={`${item.key}:rest`}>
+                  <i />
+                  <label>
+                    <select
+                      value={item.rest_seconds ?? DEFAULT_REST_SECONDS}
+                      onChange={(event) =>
+                        onUpdateSet(item.key, { rest_seconds: Number(event.target.value) })
+                      }
+                      aria-label={`Rest after set ${index + 1}`}
+                    >
+                      {restOptions.map((seconds) => (
+                        <option key={seconds} value={seconds}>
+                          {formatDuration(seconds)}
+                        </option>
+                      ))}
+                    </select>
+                    <span>rest</span>
+                  </label>
+                  <i />
+                </div>
               )}
-            </SwipeToDeleteSetRow>
-            {!cardio && (
-              <div className="rest-between" data-flip-key={`${item.key}:rest`}>
-                <i />
-                <label>
-                  <select
-                    value={item.rest_seconds ?? DEFAULT_REST_SECONDS}
-                    onChange={(event) =>
-                      onUpdateSet(item.key, { rest_seconds: Number(event.target.value) })
-                    }
-                    aria-label={`Rest after set ${index + 1}`}
-                  >
-                    {restOptions.map((seconds) => (
-                      <option key={seconds} value={seconds}>
-                        {formatDuration(seconds)}
-                      </option>
-                    ))}
-                  </select>
-                  <span>rest</span>
-                </label>
-                <i />
-              </div>
-            )}
-          </Fragment>
-        ))}
+            </Fragment>
+          );
+        })}
       </div>
       {pendingSetCompletion && (
         <SetEntryConfirmationDialog
@@ -4025,26 +3994,12 @@ function MovementCard({
           confirmLabel="Add set"
           onCancel={() => setPendingSetCompletion(null)}
           onConfirm={() => {
-            onToggleSet(pendingSetCompletion.item);
+            completeSet(pendingSetCompletion.item);
             setPendingSetCompletion(null);
           }}
         />
       )}
-      {editingSet && (
-        <CompletedSetEditDialog
-          key={editingSet.key}
-          exerciseName={movement.exercise.name}
-          setNumber={editingSetIndex + 1}
-          item={editingSet}
-          initialFocus={editingSetFocus}
-          cardio={cardio}
-          treadmill={treadmill}
-          onSave={(update) => onUpdateSet(editingSet.key, update)}
-          onDelete={() => onDeleteSet(editingSetIndex)}
-          onClose={closeSetEditor}
-        />
-      )}
-      <button className="add-set-button" onClick={() => setAddSetOpen(true)}>
+      <button type="button" className="add-set-button" onClick={onAddSet}>
         ＋ Add set
       </button>
       <input
@@ -4054,133 +4009,8 @@ function MovementCard({
         onChange={(event) => onMovementNotes(event.target.value)}
         placeholder="Exercise note for next time…"
       />
-      {addSetOpen && (
-        <AddSetDialog
-          movement={movement}
-          onClose={() => setAddSetOpen(false)}
-          onAdd={(count, update) => {
-            onAddSet(count, update);
-            setAddSetOpen(false);
-          }}
-        />
-      )}
     </article>
   );
-}
-
-function useSetDialogViewport() {
-  const initialViewportHeightRef = useRef(window.visualViewport?.height ?? window.innerHeight);
-  const [viewport, setViewport] = useState(() => ({
-    height: window.visualViewport?.height ?? window.innerHeight,
-    top: window.visualViewport?.offsetTop ?? 0,
-    keyboardVisible: false,
-  }));
-
-  useEffect(() => {
-    const visualViewport = window.visualViewport;
-    const updateViewport = () =>
-      setViewport({
-        height: visualViewport?.height ?? window.innerHeight,
-        top: visualViewport?.offsetTop ?? 0,
-        keyboardVisible:
-          initialViewportHeightRef.current - (visualViewport?.height ?? window.innerHeight) > 100,
-      });
-
-    updateViewport();
-    visualViewport?.addEventListener('resize', updateViewport);
-    visualViewport?.addEventListener('scroll', updateViewport);
-    window.addEventListener('resize', updateViewport);
-    return () => {
-      visualViewport?.removeEventListener('resize', updateViewport);
-      visualViewport?.removeEventListener('scroll', updateViewport);
-      window.removeEventListener('resize', updateViewport);
-    };
-  }, []);
-
-  return viewport;
-}
-
-function useSetDialogSwipeToDismiss(onDismiss: () => void) {
-  const onDismissRef = useRef(onDismiss);
-  const pointerRef = useRef<{
-    id: number;
-    startX: number;
-    startY: number;
-    vertical: boolean;
-  } | null>(null);
-  const [dragY, setDragY] = useState(0);
-  const [dragging, setDragging] = useState(false);
-
-  useEffect(() => {
-    onDismissRef.current = onDismiss;
-  }, [onDismiss]);
-
-  const reset = () => {
-    pointerRef.current = null;
-    setDragY(0);
-    setDragging(false);
-  };
-
-  const onPointerDown = (event: ReactPointerEvent<HTMLElement>) => {
-    const target = event.target as HTMLElement;
-    if (
-      !event.isPrimary ||
-      event.pointerType !== 'touch' ||
-      target.closest('button, input, select, textarea, a')
-    ) {
-      return;
-    }
-
-    pointerRef.current = {
-      id: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      vertical: false,
-    };
-    event.currentTarget.setPointerCapture(event.pointerId);
-  };
-
-  const onPointerMove = (event: ReactPointerEvent<HTMLElement>) => {
-    const pointer = pointerRef.current;
-    if (!pointer || pointer.id !== event.pointerId) return;
-
-    const deltaX = event.clientX - pointer.startX;
-    const deltaY = event.clientY - pointer.startY;
-    if (!pointer.vertical) {
-      if (Math.abs(deltaX) > 10 && Math.abs(deltaX) > Math.max(0, deltaY)) {
-        reset();
-        return;
-      }
-      if (deltaY <= 8 || deltaY <= Math.abs(deltaX) * 1.15) return;
-      pointer.vertical = true;
-      setDragging(true);
-    }
-
-    event.preventDefault();
-    setDragY(Math.max(0, deltaY));
-  };
-
-  const onPointerUp = (event: ReactPointerEvent<HTMLElement>) => {
-    const pointer = pointerRef.current;
-    if (!pointer || pointer.id !== event.pointerId) return;
-
-    const completed = completesSetDialogDismissSwipe(
-      event.clientX - pointer.startX,
-      event.clientY - pointer.startY,
-    );
-    reset();
-    if (completed) onDismissRef.current();
-  };
-
-  const onPointerCancel = (event: ReactPointerEvent<HTMLElement>) => {
-    if (pointerRef.current?.id === event.pointerId) reset();
-  };
-
-  return {
-    dragY,
-    dragging,
-    headerProps: { onPointerDown, onPointerMove, onPointerUp, onPointerCancel },
-  };
 }
 
 function SetEntryConfirmationDialog({
@@ -4289,689 +4119,6 @@ function CardioSetScreenshotUpload({ onScan }: { onScan: (scan: CardioScreenshot
         </small>
       )}
     </div>
-  );
-}
-
-function CompletedSetEditDialog({
-  exerciseName,
-  setNumber,
-  item,
-  initialFocus,
-  cardio,
-  treadmill,
-  onSave,
-  onDelete,
-  onClose,
-}: {
-  exerciseName: string;
-  setNumber: number;
-  item: DraftSet;
-  initialFocus: SetEditorFocus;
-  cardio: boolean;
-  treadmill: boolean;
-  onSave: (update: Partial<DraftSet>) => void;
-  onDelete: () => void;
-  onClose: () => void;
-}) {
-  const [weight, setWeight] = useState(item.weight_kg?.toString() ?? '');
-  const [reps, setReps] = useState(item.reps?.toString() ?? '');
-  const [duration, setDuration] = useState(
-    item.duration_seconds === null ? '' : String(Math.round(item.duration_seconds / 60)),
-  );
-  const [distance, setDistance] = useState(item.distance_km?.toString() ?? '');
-  const [calories, setCalories] = useState(item.calories_kcal?.toString() ?? '');
-  const [heartRate, setHeartRate] = useState(item.average_heart_rate_bpm?.toString() ?? '');
-  const [incline, setIncline] = useState(item.incline_percent?.toString() ?? '');
-  const [speed, setSpeed] = useState(item.speed_kph?.toString() ?? '');
-  const [rpe, setRpe] = useState(item.rpe?.toString() ?? '');
-  const [setType, setSetType] = useState<DraftSet['set_type']>(
-    item.set_type ?? (item.warmup ? 'warmup' : 'normal'),
-  );
-  const [restSeconds, setRestSeconds] = useState(String(item.rest_seconds ?? DEFAULT_REST_SECONDS));
-  const [notes, setNotes] = useState(item.notes ?? '');
-  const [deleteConfirmationOpen, setDeleteConfirmationOpen] = useState(false);
-  const [pendingSave, setPendingSave] = useState<{
-    update: Partial<DraftSet>;
-    warning: SetEntryWarning;
-  } | null>(null);
-  const closeButtonRef = useRef<HTMLButtonElement>(null);
-  const onCloseRef = useRef(onClose);
-  const viewport = useSetDialogViewport();
-  const swipe = useSetDialogSwipeToDismiss(onClose);
-
-  useEffect(() => {
-    onCloseRef.current = onClose;
-  }, [onClose]);
-
-  useEffect(() => {
-    const root = document.getElementById('root');
-    const rootWasInert = root?.hasAttribute('inert') ?? false;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    root?.setAttribute('inert', '');
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onCloseRef.current();
-    };
-    window.addEventListener('keydown', closeOnEscape);
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      if (!rootWasInert) root?.removeAttribute('inert');
-      window.removeEventListener('keydown', closeOnEscape);
-    };
-  }, []);
-
-  function updateDecimalDraft(value: string, update: (next: string) => void) {
-    const next = value.replace(',', '.');
-    if (/^\d*(?:\.\d*)?$/.test(next)) update(next);
-  }
-
-  function save(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const durationMinutes = numberOrNull(duration);
-    const update: Partial<DraftSet> = {
-      weight_kg: cardio ? null : decimalNumberOrNull(weight),
-      reps: cardio ? null : numberOrNull(reps),
-      duration_seconds: cardio && durationMinutes !== null ? durationMinutes * 60 : null,
-      distance_km: cardio ? decimalNumberOrNull(distance) : null,
-      calories_kcal: cardio ? numberOrNull(calories) : null,
-      average_heart_rate_bpm: cardio ? numberOrNull(heartRate) : null,
-      incline_percent: treadmill ? decimalNumberOrNull(incline) : item.incline_percent,
-      speed_kph: cardio ? decimalNumberOrNull(speed) : item.speed_kph,
-      rpe: numberOrNull(rpe),
-      rest_seconds: cardio ? null : Number(restSeconds),
-      set_type: setType,
-      warmup: setType === 'warmup',
-      notes: notes.trim() || null,
-      completed: true,
-    };
-    const warning = unusualSetEntryWarning({
-      reps: update.reps ?? null,
-      weightKg: update.weight_kg ?? null,
-      referenceWeightKg: item.weight_kg,
-      originalReps: item.completed ? item.reps : undefined,
-    });
-    if (warning) {
-      if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
-      setPendingSave({ update, warning });
-      return;
-    }
-    onSave(update);
-    onClose();
-  }
-
-  const viewportStyle = {
-    '--set-dialog-viewport-top': `${viewport.top}px`,
-    '--set-dialog-viewport-height': `${viewport.height}px`,
-  } as CSSProperties;
-
-  return createPortal(
-    <div
-      className="modal-backdrop add-set-backdrop set-dialog-backdrop"
-      style={viewportStyle}
-      onPointerDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
-      <form
-        id="completed-set-editor-form"
-        className={`add-set-dialog ${viewport.keyboardVisible ? 'keyboard-visible' : ''} ${swipe.dragging ? 'swipe-dragging' : ''}`}
-        style={{ '--set-dialog-drag-y': `${swipe.dragY}px` } as CSSProperties}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="completed-set-edit-title"
-        onSubmit={save}
-      >
-        {pendingSave && (
-          <SetEntryConfirmationDialog
-            warning={pendingSave.warning}
-            confirmLabel={item.completed ? 'Save set' : 'Add set'}
-            onCancel={() => setPendingSave(null)}
-            onConfirm={() => {
-              onSave(pendingSave.update);
-              onClose();
-            }}
-          />
-        )}
-        {deleteConfirmationOpen && (
-          <div
-            className="set-delete-confirmation"
-            role="alertdialog"
-            aria-modal="true"
-            aria-labelledby="set-delete-confirmation-title"
-          >
-            <div>
-              <h3 id="set-delete-confirmation-title">Delete this set?</h3>
-              <p>This set will be removed from the workout. This can’t be undone.</p>
-              <footer>
-                <button type="button" onClick={() => setDeleteConfirmationOpen(false)}>
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  className="confirm-delete-set"
-                  onClick={() => {
-                    onDelete();
-                    onClose();
-                  }}
-                >
-                  Delete set
-                </button>
-              </footer>
-            </div>
-          </div>
-        )}
-        <header {...swipe.headerProps}>
-          <h2 id="completed-set-edit-title">{item.completed ? 'Edit Set' : 'Add Set'}</h2>
-          <div className="set-dialog-header-actions">
-            <button
-              type="button"
-              className="set-dialog-delete"
-              onClick={() => {
-                if (document.activeElement instanceof HTMLElement) {
-                  document.activeElement.blur();
-                }
-                setDeleteConfirmationOpen(true);
-              }}
-              aria-label="Delete set"
-            >
-              <span className="trash-can-icon" aria-hidden="true" />
-            </button>
-            <button
-              ref={closeButtonRef}
-              type="button"
-              onClick={onClose}
-              aria-label="Close set editor"
-            >
-              ×
-            </button>
-          </div>
-        </header>
-
-        <div className="add-set-content">
-          <div className="add-set-previous">
-            <strong>{exerciseName}</strong>
-            <div>
-              <span>Current</span>
-              <span>Set {setNumber}</span>
-              <span>{completedSetPerformance(item, cardio)}</span>
-            </div>
-          </div>
-          <div className="add-set-fields">
-            {cardio ? (
-              <>
-                <label>
-                  Minutes
-                  <input
-                    autoFocus={initialFocus === null}
-                    inputMode="numeric"
-                    value={duration}
-                    onChange={(event) => {
-                      if (/^\d*$/.test(event.target.value)) setDuration(event.target.value);
-                    }}
-                  />
-                </label>
-                <label>
-                  Distance
-                  <span className="unit-input">
-                    <input
-                      inputMode="decimal"
-                      value={distance}
-                      onChange={(event) => updateDecimalDraft(event.target.value, setDistance)}
-                    />
-                    <b>km</b>
-                  </span>
-                </label>
-                <label>
-                  Active calories
-                  <span className="unit-input">
-                    <input
-                      inputMode="numeric"
-                      value={calories}
-                      onChange={(event) => {
-                        if (/^\d*$/.test(event.target.value)) setCalories(event.target.value);
-                      }}
-                    />
-                    <b>kcal</b>
-                  </span>
-                </label>
-                <label>
-                  Avg heart rate
-                  <span className="unit-input">
-                    <input
-                      inputMode="numeric"
-                      value={heartRate}
-                      onChange={(event) => {
-                        if (/^\d*$/.test(event.target.value)) setHeartRate(event.target.value);
-                      }}
-                    />
-                    <b>bpm</b>
-                  </span>
-                </label>
-              </>
-            ) : (
-              <div className="stepper-pair">
-                <StepperInput
-                  label="Weight"
-                  unit="kg"
-                  decimal
-                  step={2.5}
-                  value={weight}
-                  onChange={setWeight}
-                  autoFocus={initialFocus === 'weight'}
-                />
-                <StepperInput
-                  label="Reps"
-                  step={1}
-                  value={reps}
-                  onChange={setReps}
-                  autoFocus={initialFocus === 'reps'}
-                />
-              </div>
-            )}
-            <RpeChips value={rpe} onChange={setRpe} autoFocus={initialFocus === 'rpe'} />
-            <SetTypeSegments
-              value={setType ?? 'normal'}
-              onChange={setSetType}
-              autoFocus={initialFocus === 'type'}
-            />
-            <div className="set-dialog-secondary-fields">
-              {!cardio && (
-                <label>
-                  Rest
-                  <select
-                    value={restSeconds}
-                    onChange={(event) => setRestSeconds(event.target.value)}
-                  >
-                    {restOptions.map((seconds) => (
-                      <option key={seconds} value={seconds}>
-                        {formatDuration(seconds)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              )}
-              {cardio && (
-                <CardioSetScreenshotUpload
-                  onScan={(scan) => {
-                    const update = cardioSetUpdateFromScan(scan);
-                    if (update.duration_seconds != null) {
-                      setDuration(String(Math.round(update.duration_seconds / 60)));
-                    }
-                    if (update.distance_km != null) setDistance(String(update.distance_km));
-                    if (update.calories_kcal != null) {
-                      setCalories(String(update.calories_kcal));
-                    }
-                    if (update.average_heart_rate_bpm != null) {
-                      setHeartRate(String(update.average_heart_rate_bpm));
-                    }
-                    if (update.speed_kph != null) setSpeed(String(update.speed_kph));
-                  }}
-                />
-              )}
-            </div>
-            {cardio && (
-              <label>
-                Avg speed km/h
-                <input
-                  inputMode="decimal"
-                  value={speed}
-                  onChange={(event) => updateDecimalDraft(event.target.value, setSpeed)}
-                />
-              </label>
-            )}
-            {treadmill && (
-              <label>
-                Incline %
-                <input
-                  inputMode="decimal"
-                  value={incline}
-                  onChange={(event) => updateDecimalDraft(event.target.value, setIncline)}
-                />
-              </label>
-            )}
-            <label className="add-set-notes-field">
-              Set note
-              <textarea
-                autoFocus={initialFocus === 'notes'}
-                value={notes}
-                onChange={(event) => setNotes(event.target.value)}
-                placeholder="Optional note"
-                rows={2}
-              />
-            </label>
-          </div>
-        </div>
-
-        {!viewport.keyboardVisible && (
-          <footer className="set-dialog-footer">
-            <button type="submit" className="add-set-confirm">
-              {item.completed ? 'Save changes' : 'Add Set'}
-            </button>
-          </footer>
-        )}
-      </form>
-      {viewport.keyboardVisible && (
-        <SetDialogKeyboardAction
-          label={item.completed ? 'Save' : 'Add'}
-          submit
-          form="completed-set-editor-form"
-        />
-      )}
-    </div>,
-    document.body,
-  );
-}
-
-function AddSetDialog({
-  movement,
-  onClose,
-  onAdd,
-}: {
-  movement: DraftMovement;
-  onClose: () => void;
-  onAdd: (count: number, update: Partial<DraftSet>) => void;
-}) {
-  const previous = movement.sets.at(-1);
-  const cardio = movement.exercise.kind === 'cardio';
-  const treadmill =
-    cardio && (movement.exercise.equipment?.toLowerCase().includes('treadmill') ?? false);
-  const [weight, setWeight] = useState(previous?.weight_kg?.toString() ?? '');
-  const [reps, setReps] = useState(previous?.reps?.toString() ?? '');
-  const [duration, setDuration] = useState(
-    previous?.duration_seconds ? Math.round(previous.duration_seconds / 60).toString() : '',
-  );
-  const [distance, setDistance] = useState(previous?.distance_km?.toString() ?? '');
-  const [calories, setCalories] = useState(previous?.calories_kcal?.toString() ?? '');
-  const [heartRate, setHeartRate] = useState(previous?.average_heart_rate_bpm?.toString() ?? '');
-  const [speed, setSpeed] = useState(previous?.speed_kph?.toString() ?? '');
-  const [incline, setIncline] = useState(previous?.incline_percent?.toString() ?? '');
-  const [count, setCount] = useState('1');
-  const [restSeconds, setRestSeconds] = useState(
-    String(previous?.rest_seconds ?? DEFAULT_REST_SECONDS),
-  );
-  const [setType, setSetType] = useState<NonNullable<DraftSet['set_type']>>('normal');
-  const [rpe, setRpe] = useState(previous?.rpe?.toString() ?? '');
-  const [notes, setNotes] = useState('');
-  const [pendingAdd, setPendingAdd] = useState<{
-    count: number;
-    update: Partial<DraftSet>;
-    warning: SetEntryWarning;
-  } | null>(null);
-  const closeButtonRef = useRef<HTMLButtonElement>(null);
-  const onCloseRef = useRef(onClose);
-  const viewport = useSetDialogViewport();
-  const swipe = useSetDialogSwipeToDismiss(onClose);
-
-  useEffect(() => {
-    onCloseRef.current = onClose;
-  }, [onClose]);
-
-  useEffect(() => {
-    const root = document.getElementById('root');
-    const rootWasInert = root?.hasAttribute('inert') ?? false;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    root?.setAttribute('inert', '');
-
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onCloseRef.current();
-    };
-    window.addEventListener('keydown', closeOnEscape);
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      if (!rootWasInert) root?.removeAttribute('inert');
-      window.removeEventListener('keydown', closeOnEscape);
-    };
-  }, []);
-
-  const submit = () => {
-    const setCount = Math.min(20, Math.max(1, Number(count) || 1));
-    const update: Partial<DraftSet> = {
-      weight_kg: cardio ? null : numberOrNull(weight),
-      reps: cardio ? null : numberOrNull(reps),
-      duration_seconds: cardio && numberOrNull(duration) !== null ? Number(duration) * 60 : null,
-      distance_km: cardio ? numberOrNull(distance) : null,
-      calories_kcal: cardio ? numberOrNull(calories) : null,
-      average_heart_rate_bpm: cardio ? numberOrNull(heartRate) : null,
-      speed_kph: cardio ? numberOrNull(speed) : null,
-      incline_percent: treadmill ? numberOrNull(incline) : null,
-      rpe: numberOrNull(rpe),
-      rest_seconds: cardio ? null : Number(restSeconds),
-      notes: notes || null,
-      warmup: !cardio && setType === 'warmup',
-      set_type: cardio ? 'normal' : setType,
-      completed: true,
-    };
-    const warning = unusualSetEntryWarning({
-      reps: update.reps ?? null,
-      weightKg: update.weight_kg ?? null,
-      referenceWeightKg: previous?.weight_kg ?? null,
-    });
-    if (warning) {
-      if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
-      setPendingAdd({ count: setCount, update, warning });
-      return;
-    }
-    onAdd(setCount, update);
-  };
-
-  const viewportStyle = {
-    '--set-dialog-viewport-top': `${viewport.top}px`,
-    '--set-dialog-viewport-height': `${viewport.height}px`,
-  } as CSSProperties;
-
-  return createPortal(
-    <div
-      className="modal-backdrop add-set-backdrop set-dialog-backdrop"
-      style={viewportStyle}
-      onPointerDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
-      {pendingAdd && (
-        <SetEntryConfirmationDialog
-          warning={pendingAdd.warning}
-          confirmLabel="Add set"
-          onCancel={() => setPendingAdd(null)}
-          onConfirm={() => onAdd(pendingAdd.count, pendingAdd.update)}
-        />
-      )}
-      <section
-        className={`add-set-dialog ${viewport.keyboardVisible ? 'keyboard-visible' : ''} ${swipe.dragging ? 'swipe-dragging' : ''}`}
-        style={{ '--set-dialog-drag-y': `${swipe.dragY}px` } as CSSProperties}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="add-set-title"
-      >
-        <header {...swipe.headerProps}>
-          <h2 id="add-set-title">Add Set</h2>
-          <div className="set-dialog-header-actions">
-            <button ref={closeButtonRef} type="button" onClick={onClose} aria-label="Close add set">
-              ×
-            </button>
-          </div>
-        </header>
-        <div className="add-set-content">
-          <div className="add-set-previous">
-            <strong>Previous</strong>
-            <div>
-              <span>Last</span>
-              <span>Set {Math.max(1, movement.sets.length)}</span>
-              <span>
-                {previous ? completedSetPerformance(previous, cardio) : 'No previous set'}
-              </span>
-            </div>
-          </div>
-          <div className="add-set-fields">
-            {cardio ? (
-              <>
-                <label>
-                  Minutes
-                  <input
-                    type="number"
-                    min="0"
-                    inputMode="numeric"
-                    value={duration}
-                    onChange={(event) => setDuration(event.target.value)}
-                  />
-                </label>
-                <label>
-                  Distance
-                  <span className="unit-input">
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.1"
-                      inputMode="decimal"
-                      value={distance}
-                      onChange={(event) => setDistance(event.target.value)}
-                    />
-                    <b>km</b>
-                  </span>
-                </label>
-                <label>
-                  Active calories
-                  <span className="unit-input">
-                    <input
-                      type="number"
-                      min="0"
-                      inputMode="numeric"
-                      value={calories}
-                      onChange={(event) => setCalories(event.target.value)}
-                    />
-                    <b>kcal</b>
-                  </span>
-                </label>
-                <label>
-                  Avg heart rate
-                  <span className="unit-input">
-                    <input
-                      type="number"
-                      min="20"
-                      max="250"
-                      inputMode="numeric"
-                      value={heartRate}
-                      onChange={(event) => setHeartRate(event.target.value)}
-                    />
-                    <b>bpm</b>
-                  </span>
-                </label>
-                <label>
-                  Avg speed
-                  <span className="unit-input">
-                    <input
-                      type="number"
-                      min="0"
-                      max="100"
-                      step="0.1"
-                      inputMode="decimal"
-                      value={speed}
-                      onChange={(event) => setSpeed(event.target.value)}
-                    />
-                    <b>km/h</b>
-                  </span>
-                </label>
-                {treadmill && (
-                  <label>
-                    Incline
-                    <span className="unit-input">
-                      <input
-                        type="number"
-                        min="0"
-                        max="100"
-                        step="0.1"
-                        inputMode="decimal"
-                        value={incline}
-                        onChange={(event) => setIncline(event.target.value)}
-                      />
-                      <b>%</b>
-                    </span>
-                  </label>
-                )}
-              </>
-            ) : (
-              <div className="stepper-pair">
-                <StepperInput
-                  label="Weight"
-                  unit="kg"
-                  decimal
-                  step={2.5}
-                  value={weight}
-                  onChange={setWeight}
-                />
-                <StepperInput label="Reps" step={1} value={reps} onChange={setReps} />
-              </div>
-            )}
-            <RpeChips value={rpe} onChange={setRpe} />
-            {!cardio && <SetTypeSegments value={setType} onChange={setSetType} />}
-            <div className={`add-set-field-pair ${cardio ? 'cardio-set-count' : ''}`}>
-              <StepperInput
-                label="Sets"
-                step={1}
-                min={1}
-                value={count}
-                onChange={(next) => setCount(String(Math.min(20, Number(next) || 1)))}
-              />
-              {!cardio && (
-                <label>
-                  Rest
-                  <select
-                    value={restSeconds}
-                    onChange={(event) => setRestSeconds(event.target.value)}
-                  >
-                    {restOptions.map((seconds) => (
-                      <option key={seconds} value={seconds}>
-                        {formatDuration(seconds)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              )}
-            </div>
-            <label className="add-set-notes-field">
-              Notes
-              <input
-                value={notes}
-                onChange={(event) => setNotes(event.target.value)}
-                placeholder="Optional set note"
-              />
-            </label>
-          </div>
-          {cardio && (
-            <div className="add-set-toggles">
-              <CardioSetScreenshotUpload
-                onScan={(scan) => {
-                  const update = cardioSetUpdateFromScan(scan);
-                  if (update.duration_seconds != null) {
-                    setDuration(String(Math.round(update.duration_seconds / 60)));
-                  }
-                  if (update.distance_km != null) setDistance(String(update.distance_km));
-                  if (update.calories_kcal != null) {
-                    setCalories(String(update.calories_kcal));
-                  }
-                  if (update.average_heart_rate_bpm != null) {
-                    setHeartRate(String(update.average_heart_rate_bpm));
-                  }
-                  if (update.speed_kph != null) setSpeed(String(update.speed_kph));
-                }}
-              />
-            </div>
-          )}
-        </div>
-        {!viewport.keyboardVisible && (
-          <footer>
-            <button type="button" className="add-set-confirm" onClick={submit}>
-              Add Set
-            </button>
-            <button type="button" onClick={onClose}>
-              Close
-            </button>
-          </footer>
-        )}
-      </section>
-      {viewport.keyboardVisible && <SetDialogKeyboardAction label="Add" onClick={submit} />}
-    </div>,
-    document.body,
   );
 }
 
