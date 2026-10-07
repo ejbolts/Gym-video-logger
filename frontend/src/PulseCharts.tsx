@@ -17,7 +17,8 @@ function useElementWidth<T extends HTMLElement>(fallback: number) {
     const element = ref.current;
     if (!element) return;
     const update = () => {
-      const next = Math.round(element.getBoundingClientRect().width);
+      // Layout width, not the visual box: the landscape viewer rotates the chart with a transform.
+      const next = Math.round(element.clientWidth);
       if (next > 0) setWidth((current) => (current === next ? current : next));
     };
     update();

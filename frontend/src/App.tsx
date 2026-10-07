@@ -83,7 +83,8 @@ import {
   showRestTimerNotification,
   showWorkoutAutoSavedNotification,
 } from './push';
-import { SetLevelLabel } from './SetLevelLabel';
+import { RpeChips, SetTypeSegments, StepperInput } from './SetFields';
+import { setKindOf, setNumberLabels } from './setFieldValues';
 import { SetDialogKeyboardAction } from './SetDialogKeyboardAction';
 import { SwipeToDeleteSetRow } from './SwipeToDeleteSetRow';
 import { completesSetDialogDismissSwipe } from './setDialogSwipe';
@@ -209,6 +210,10 @@ function emptySet(
     key: crypto.randomUUID(),
     ...createWorkoutSet(kind, previous, isFirstSet),
   };
+}
+
+function setTypeTitle(item: Pick<DraftSet, 'set_type' | 'warmup'>): string {
+  return { normal: 'Working set', warmup: 'Warm-up set', drop: 'Drop set' }[setKindOf(item)];
 }
 
 /** Sets pre-filled from the exercise's most recent session, marked as suggestions. */
@@ -415,6 +420,7 @@ export function App() {
     initialHistoryState ? initialHistoryState.tab : appTabFromHash(window.location.hash),
   );
   const historyIndexRef = useRef(initialHistoryState?.index ?? 0);
+  const scrollPositionsRef = useRef(new Map<number, number>());
   const navigationActionRef = useRef<'push' | 'replace' | 'pop'>('replace');
   const currentTabRef = useRef(tab);
   const initialRefreshStartedRef = useRef(false);
@@ -493,6 +499,7 @@ export function App() {
 
   function setTab(nextTab: AppTab, options: { replace?: boolean } = {}) {
     if (nextTab === tab) return;
+    scrollPositionsRef.current.set(historyIndexRef.current, window.scrollY);
     navigationActionRef.current = options.replace ? 'replace' : 'push';
     setTabState(nextTab);
   }
@@ -619,6 +626,13 @@ export function App() {
 
   useEffect(() => {
     const action = navigationActionRef.current;
+    // Screens share the page scroll: new screens open at the top, and going back returns to
+    // where that screen was left.
+    // Runs before any screen's own animation-frame scroll (e.g. revealing an opened workout).
+    window.scrollTo(
+      0,
+      action === 'pop' ? (scrollPositionsRef.current.get(historyIndexRef.current) ?? 0) : 0,
+    );
     if (action === 'pop') {
       navigationActionRef.current = 'replace';
       return;
@@ -638,10 +652,13 @@ export function App() {
   }, [tab]);
 
   useEffect(() => {
+    // The app restores each screen's scroll itself; the browser's restore would fight it.
+    if ('scrollRestoration' in window.history) window.history.scrollRestoration = 'manual';
     const restoreNavigation = (event: PopStateEvent) => {
       const nextTab = isAppHistoryState(event.state)
         ? event.state.tab
         : appTabFromHash(window.location.hash);
+      scrollPositionsRef.current.set(historyIndexRef.current, window.scrollY);
       if (isAppHistoryState(event.state)) historyIndexRef.current = event.state.index;
       navigationActionRef.current = 'pop';
       if (currentTabRef.current === nextTab) {
@@ -2291,13 +2308,21 @@ function WorkoutLogger({
     setNameEditorOpen(true);
   };
 
+  // Matches the name and type saved for a new workout, which are inferred from its exercises.
+  const liveIdentity = finalizeWorkoutIdentity(
+    movements.map((movement) => movement.exercise),
+    category,
+    name,
+    !initialWorkout && !resumedWorkoutId,
+  );
+
   return (
     <section className="logger-screen content-page">
       {prConfettiBurst > 0 && (
         <ConfettiBurst key={prConfettiBurst} onComplete={() => setPrConfettiBurst(0)} />
       )}
       <OverlayScreenHeader
-        title={name.trim() || `${categoryNames[category]} workout`}
+        title={liveIdentity.name}
         subtitle={
           <WorkoutHeaderMeta
             durationLabel={
@@ -2498,8 +2523,8 @@ function WorkoutLogger({
           </span>
           {currentBodyweight !== null && (
             <span>
-              <small>BW</small>
-              <strong>{currentBodyweight} kg</strong>
+              <small>BW kg</small>
+              <strong>{currentBodyweight}</strong>
             </span>
           )}
           <span>
@@ -2511,8 +2536,8 @@ function WorkoutLogger({
             <strong>{completedReps}</strong>
           </span>
           <span>
-            <small>Volume</small>
-            <strong>{completedVolume.toLocaleString()} kg</strong>
+            <small>Volume kg</small>
+            <strong>{completedVolume.toLocaleString()}</strong>
           </span>
         </div>
       </section>
@@ -3243,6 +3268,26 @@ function MovementCard({
     );
   }
 
+  function renderRowCompleteButton(item: DraftSet, index: number) {
+    return (
+      <button
+        type="button"
+        className={`row-complete-button ${item.completed ? 'done' : ''}`}
+        aria-label={
+          item.completed ? `Mark set ${index + 1} incomplete` : `Complete set ${index + 1}`
+        }
+        aria-pressed={item.completed}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          requestSetCompletion(item, index);
+        }}
+      >
+        <Icon name="check" />
+      </button>
+    );
+  }
+
   function renderCompletedSetActions(item: DraftSet, index: number) {
     return (
       <span
@@ -3339,6 +3384,7 @@ function MovementCard({
     });
   }
 
+  const setNumbers = setNumberLabels(movement.sets);
   const editingSetIndex = movement.sets.findIndex((item) => item.key === editingSetKey);
   const editingSet = editingSetIndex >= 0 ? movement.sets[editingSetIndex] : null;
 
@@ -3553,9 +3599,11 @@ function MovementCard({
             </>
           ) : (
             <>
+              <span>Set</span>
               <span>Weight</span>
               <span>Reps</span>
-              <span>Level</span>
+              <span>RPE</span>
+              <span aria-hidden="true" />
               <span aria-hidden="true" />
             </>
           )}
@@ -3591,11 +3639,24 @@ function MovementCard({
                       <span>{index + 1}</span>
                       <strong>{completedSetPerformance(item, true)}</strong>
                       <span>{item.rpe ?? '–'}</span>
-                      <b className="completed-set-check">{item.completed ? '✓' : ''}</b>
+                      {renderRowCompleteButton(item, index)}
                       {renderCompletedSetActions(item, index)}
                     </>
                   ) : (
                     <>
+                      <button
+                        type="button"
+                        className={`completed-set-value set-number-cell set-number-${setKindOf(item)}`}
+                        aria-label={`Edit set type for set ${index + 1}`}
+                        title={setTypeTitle(item)}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          openSetEditor(item.key, 'type');
+                        }}
+                      >
+                        {setNumbers[index]}
+                      </button>
                       <button
                         type="button"
                         className="completed-set-value completed-set-weight"
@@ -3625,32 +3686,19 @@ function MovementCard({
                       >
                         {item.reps ?? '–'}
                       </button>
-                      <span className="completed-set-level">
-                        <button
-                          type="button"
-                          className="completed-set-level-control completed-set-type-control"
-                          aria-label={`Edit set type for set ${index + 1}`}
-                          onClick={(event) => {
-                            event.preventDefault();
-                            event.stopPropagation();
-                            openSetEditor(item.key, 'type');
-                          }}
-                        >
-                          <SetLevelLabel setType={item.set_type} warmup={item.warmup} />
-                        </button>
-                        <button
-                          type="button"
-                          className="completed-set-level-control completed-set-rpe"
-                          aria-label={`Edit RPE for set ${index + 1}`}
-                          onClick={(event) => {
-                            event.preventDefault();
-                            event.stopPropagation();
-                            openSetEditor(item.key, 'rpe');
-                          }}
-                        >
-                          RPE {item.rpe ?? '–'}
-                        </button>
-                      </span>
+                      <button
+                        type="button"
+                        className="completed-set-value completed-set-rpe"
+                        aria-label={`Edit RPE for set ${index + 1}`}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          openSetEditor(item.key, 'rpe');
+                        }}
+                      >
+                        {item.rpe ?? '–'}
+                      </button>
+                      {renderRowCompleteButton(item, index)}
                       {renderCompletedSetActions(item, index)}
                     </>
                   )}
@@ -4473,72 +4521,32 @@ function CompletedSetEditDialog({
                 </label>
               </>
             ) : (
-              <>
-                <label>
-                  Weight
-                  <span className="unit-input">
-                    <input
-                      autoFocus={initialFocus === null || initialFocus === 'weight'}
-                      inputMode="decimal"
-                      value={weight}
-                      onFocus={(event) => {
-                        if (event.currentTarget.value) event.currentTarget.select();
-                      }}
-                      onClick={(event) => {
-                        if (event.currentTarget.value) event.currentTarget.select();
-                      }}
-                      onChange={(event) => updateDecimalDraft(event.target.value, setWeight)}
-                    />
-                    <b>kg</b>
-                  </span>
-                </label>
-                <label>
-                  Reps
-                  <input
-                    autoFocus={initialFocus === 'reps'}
-                    inputMode="numeric"
-                    value={reps}
-                    onFocus={(event) => {
-                      if (event.currentTarget.value) event.currentTarget.select();
-                    }}
-                    onClick={(event) => {
-                      if (event.currentTarget.value) event.currentTarget.select();
-                    }}
-                    onChange={(event) => {
-                      if (/^\d*$/.test(event.target.value)) setReps(event.target.value);
-                    }}
-                  />
-                </label>
-              </>
+              <div className="stepper-pair">
+                <StepperInput
+                  label="Weight"
+                  unit="kg"
+                  decimal
+                  step={2.5}
+                  value={weight}
+                  onChange={setWeight}
+                  autoFocus={initialFocus === 'weight'}
+                />
+                <StepperInput
+                  label="Reps"
+                  step={1}
+                  value={reps}
+                  onChange={setReps}
+                  autoFocus={initialFocus === 'reps'}
+                />
+              </div>
             )}
+            <RpeChips value={rpe} onChange={setRpe} autoFocus={initialFocus === 'rpe'} />
+            <SetTypeSegments
+              value={setType ?? 'normal'}
+              onChange={setSetType}
+              autoFocus={initialFocus === 'type'}
+            />
             <div className="set-dialog-secondary-fields">
-              <label>
-                RPE
-                <select
-                  autoFocus={initialFocus === 'rpe'}
-                  value={rpe}
-                  onChange={(event) => setRpe(event.target.value)}
-                >
-                  <option value="">–</option>
-                  {[5, 6, 7, 7.5, 8, 8.5, 9, 9.5, 10].map((value) => (
-                    <option key={value} value={value}>
-                      {value}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Type
-                <select
-                  autoFocus={initialFocus === 'type'}
-                  value={setType}
-                  onChange={(event) => setSetType(event.target.value as DraftSet['set_type'])}
-                >
-                  <option value="normal">Working</option>
-                  <option value="warmup">Warm-up</option>
-                  <option value="drop">Drop set</option>
-                </select>
-              </label>
               {!cardio && (
                 <label>
                   Rest
@@ -4653,11 +4661,9 @@ function AddSetDialog({
   const [restSeconds, setRestSeconds] = useState(
     String(previous?.rest_seconds ?? DEFAULT_REST_SECONDS),
   );
-  const [warmup, setWarmup] = useState(false);
-  const [dropSet, setDropSet] = useState(false);
+  const [setType, setSetType] = useState<NonNullable<DraftSet['set_type']>>('normal');
   const [rpe, setRpe] = useState(previous?.rpe?.toString() ?? '');
   const [notes, setNotes] = useState('');
-  const [showRpe, setShowRpe] = useState(false);
   const [pendingAdd, setPendingAdd] = useState<{
     count: number;
     update: Partial<DraftSet>;
@@ -4704,8 +4710,8 @@ function AddSetDialog({
       rpe: numberOrNull(rpe),
       rest_seconds: cardio ? null : Number(restSeconds),
       notes: notes || null,
-      warmup,
-      set_type: warmup ? 'warmup' : dropSet ? 'drop' : 'normal',
+      warmup: !cardio && setType === 'warmup',
+      set_type: cardio ? 'normal' : setType,
       completed: true,
     };
     const warning = unusualSetEntryWarning({
@@ -4856,57 +4862,28 @@ function AddSetDialog({
                 )}
               </>
             ) : (
-              <>
-                <label>
-                  Weight
-                  <span className="unit-input">
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.5"
-                      inputMode="decimal"
-                      value={weight}
-                      onFocus={(event) => {
-                        if (event.currentTarget.value) event.currentTarget.select();
-                      }}
-                      onClick={(event) => {
-                        if (event.currentTarget.value) event.currentTarget.select();
-                      }}
-                      onChange={(event) => setWeight(event.target.value)}
-                    />
-                    <b>kg</b>
-                  </span>
-                </label>
-                <label>
-                  Reps
-                  <input
-                    type="number"
-                    min="0"
-                    inputMode="numeric"
-                    value={reps}
-                    onFocus={(event) => {
-                      if (event.currentTarget.value) event.currentTarget.select();
-                    }}
-                    onClick={(event) => {
-                      if (event.currentTarget.value) event.currentTarget.select();
-                    }}
-                    onChange={(event) => setReps(event.target.value)}
-                  />
-                </label>
-              </>
-            )}
-            <div className={`add-set-field-pair ${cardio ? 'cardio-set-count' : ''}`}>
-              <label>
-                Sets
-                <input
-                  type="number"
-                  min="1"
-                  max="20"
-                  inputMode="numeric"
-                  value={count}
-                  onChange={(event) => setCount(event.target.value)}
+              <div className="stepper-pair">
+                <StepperInput
+                  label="Weight"
+                  unit="kg"
+                  decimal
+                  step={2.5}
+                  value={weight}
+                  onChange={setWeight}
                 />
-              </label>
+                <StepperInput label="Reps" step={1} value={reps} onChange={setReps} />
+              </div>
+            )}
+            <RpeChips value={rpe} onChange={setRpe} />
+            {!cardio && <SetTypeSegments value={setType} onChange={setSetType} />}
+            <div className={`add-set-field-pair ${cardio ? 'cardio-set-count' : ''}`}>
+              <StepperInput
+                label="Sets"
+                step={1}
+                min={1}
+                value={count}
+                onChange={(next) => setCount(String(Math.min(20, Number(next) || 1)))}
+              />
               {!cardio && (
                 <label>
                   Rest
@@ -4923,19 +4900,6 @@ function AddSetDialog({
                 </label>
               )}
             </div>
-            {showRpe && (
-              <label>
-                RPE
-                <select value={rpe} onChange={(event) => setRpe(event.target.value)}>
-                  <option value="">Optional</option>
-                  {[5, 6, 7, 7.5, 8, 8.5, 9, 9.5, 10].map((value) => (
-                    <option value={value} key={value}>
-                      {value}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
             <label className="add-set-notes-field">
               Notes
               <input
@@ -4945,41 +4909,8 @@ function AddSetDialog({
               />
             </label>
           </div>
-          <div className="add-set-toggles">
-            {!cardio && (
-              <>
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={warmup}
-                    onChange={(event) => {
-                      setWarmup(event.target.checked);
-                      if (event.target.checked) setDropSet(false);
-                    }}
-                  />
-                  Warmup
-                </label>
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={dropSet}
-                    onChange={(event) => {
-                      setDropSet(event.target.checked);
-                      if (event.target.checked) setWarmup(false);
-                    }}
-                  />
-                  Dropset
-                </label>
-              </>
-            )}
-            <button
-              type="button"
-              className={showRpe ? 'active' : ''}
-              onClick={() => setShowRpe((value) => !value)}
-            >
-              ＋ RPE
-            </button>
-            {cardio && (
+          {cardio && (
+            <div className="add-set-toggles">
               <CardioSetScreenshotUpload
                 onScan={(scan) => {
                   const update = cardioSetUpdateFromScan(scan);
@@ -4996,8 +4927,8 @@ function AddSetDialog({
                   if (update.speed_kph != null) setSpeed(String(update.speed_kph));
                 }}
               />
-            )}
-          </div>
+            </div>
+          )}
         </div>
         {!viewport.keyboardVisible && (
           <footer>
@@ -5757,6 +5688,12 @@ type LockableScreenOrientation = ScreenOrientation & {
   unlock?: () => void;
 };
 
+/** Plot height for the full-screen viewer, which is rotated by CSS while the phone is upright. */
+function expandedChartHeight(): number {
+  const rotated = window.matchMedia('(orientation: portrait)').matches;
+  return Math.max(200, (rotated ? window.innerWidth : window.innerHeight) - 96);
+}
+
 function LandscapeChartFrame({
   title,
   controls,
@@ -6084,7 +6021,7 @@ function ProgressScreen({
                       : metricInfo.series
                   }
                   unit="kg"
-                  height={chartExpanded ? Math.max(220, window.innerHeight - 110) : 200}
+                  height={chartExpanded ? expandedChartHeight() : 200}
                   markRecords={metric !== 'volume_kg'}
                   formatValue={formatMetric}
                   onSelect={(point) => point.id && onOpenWorkout(point.id, progress.exercise.id)}
@@ -7495,7 +7432,7 @@ function BodyTrendChart({
     ],
   );
   const showFat = series === 'fat' && hasBodyFat;
-  const chartHeight = chartExpanded ? Math.max(220, window.innerHeight - 110) : 200;
+  const chartHeight = chartExpanded ? expandedChartHeight() : 200;
 
   return (
     <div className="body-trend-chart">

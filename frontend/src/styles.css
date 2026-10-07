@@ -5390,10 +5390,6 @@ html.edge-swipe-active .edge-swipe-indicator {
     grid-template-columns: minmax(4.35rem, 1fr) 2.35rem 2.65rem minmax(5.3rem, 1.1fr) 1.3rem;
     font-size: 0.75rem;
   }
-
-  .set-level-label {
-    font-size: 0.72rem;
-  }
 }
 
 body,
@@ -8481,38 +8477,6 @@ body,
   padding: 0.35rem 0.55rem;
 }
 
-.set-level-label {
-  font-size: 0.78rem;
-  font-weight: 850;
-  line-height: 1.1;
-  text-transform: lowercase;
-  white-space: nowrap;
-}
-
-.set-level-working {
-  color: #5598e7;
-}
-
-.set-level-drop {
-  color: #bb7cf0;
-}
-
-.set-level-warmup {
-  color: #e18a28;
-}
-
-.set-details.completed .completed-set-summary .set-level-working {
-  color: #006fab;
-}
-
-.set-details.completed .completed-set-summary .set-level-drop {
-  color: #6f2e96;
-}
-
-.set-details.completed .completed-set-summary .set-level-warmup {
-  color: #914500;
-}
-
 .set-row.previous-set > input,
 .set-row.previous-set > select,
 .set-row.previous-set .set-extras input,
@@ -9563,13 +9527,8 @@ body.chart-fullscreen-open {
 }
 
 .set-details.previous-set-details .completed-set-summary > strong,
-.set-details.previous-set-details .completed-set-summary > span,
-.set-details.previous-set-details .set-level-warmup {
+.set-details.previous-set-details .completed-set-summary > span {
   color: inherit;
-}
-
-.set-details.previous-set-details .set-level-label {
-  opacity: 0.62;
 }
 
 .set-details.previous-set-details .completed-set-menu {
@@ -9840,10 +9799,6 @@ body.chart-fullscreen-open {
   .set-dialog-backdrop textarea {
     font-size: 16px !important;
   }
-}
-
-.set-details.previous-set-details .completed-set-summary .set-level-drop {
-  color: #ad76d8;
 }
 
 .movement-header-actions {
@@ -10122,10 +10077,6 @@ body.chart-fullscreen-open {
     gap: 0.18rem;
     padding-right: 0.2rem;
     padding-left: 0.2rem;
-  }
-
-  .set-level-label {
-    font-size: 0.68rem;
   }
 
   .set-grid-strength .completed-set-rpe {
