@@ -84,6 +84,14 @@ import {
   showWorkoutAutoSavedNotification,
 } from './push';
 import { RpeChips, SetTypeSegments, StepperInput } from './SetFields';
+import { useFlipAnimation, useSlidingIndicator } from './motionHooks';
+import {
+  applyReduceMotion,
+  motionReduced,
+  reduceMotionPreference,
+  saveReduceMotionPreference,
+  systemPrefersReducedMotion,
+} from './motion';
 import { setKindOf, setNumberLabels } from './setFieldValues';
 import { SetDialogKeyboardAction } from './SetDialogKeyboardAction';
 import { SwipeToDeleteSetRow } from './SwipeToDeleteSetRow';
@@ -434,6 +442,8 @@ export function App() {
   const [personalRecords, setPersonalRecords] = useState<PersonalRecord[]>([]);
   const [completionRecords, setCompletionRecords] = useState<PersonalRecord[]>([]);
   const [restTimerEnabled, setRestTimerEnabled] = useState(restTimerPreferenceEnabled);
+  const [reduceMotion, setReduceMotion] = useState(reduceMotionPreference);
+  const [navDirection, setNavDirection] = useState<'forward' | 'back'>('forward');
   const [bodyTrendPreference, setBodyTrendPreference] = useState(loadBodyTrendPreference);
   const [workoutTypeColors, setWorkoutTypeColors] =
     useState<WorkoutTypeColors>(defaultCategoryColors);
@@ -501,6 +511,7 @@ export function App() {
     if (nextTab === tab) return;
     scrollPositionsRef.current.set(historyIndexRef.current, window.scrollY);
     navigationActionRef.current = options.replace ? 'replace' : 'push';
+    setNavDirection('forward');
     setTabState(nextTab);
   }
 
@@ -665,6 +676,7 @@ export function App() {
         navigationActionRef.current = 'replace';
         return;
       }
+      setNavDirection('back');
       setTabState(nextTab);
     };
 
@@ -846,6 +858,12 @@ export function App() {
     setRestTimerEnabled(enabled);
   }
 
+  function updateReduceMotion(reduced: boolean) {
+    saveReduceMotionPreference(reduced);
+    applyReduceMotion(reduced);
+    setReduceMotion(reduced);
+  }
+
   function updateBodyTrendPreference(preference: BodyTrendPreference) {
     saveBodyTrendPreference(preference);
     setBodyTrendPreference(preference);
@@ -891,6 +909,7 @@ export function App() {
 
       <main
         className={`tracker-content ${tab === 'videos' ? 'video-content' : ''} ${nestedHeader || tab === 'log' ? 'with-overlay-header' : ''}`}
+        data-nav-direction={navDirection}
       >
         {loading && tab !== 'dashboard' && tab !== 'videos' && <TodaySkeleton />}
         {(tab === 'dashboard' || visitedTabs.has('dashboard')) && (
@@ -1026,6 +1045,8 @@ export function App() {
               onWorkoutTypeColorsChange={setWorkoutTypeColors}
               restTimerEnabled={restTimerEnabled}
               onRestTimerEnabledChange={updateRestTimerPreference}
+              reduceMotion={reduceMotion}
+              onReduceMotionChange={updateReduceMotion}
               bodyTrendPreference={bodyTrendPreference}
               onBodyTrendPreferenceChange={updateBodyTrendPreference}
               onImportWorkouts={importWorkoutCsv}
@@ -1682,6 +1703,8 @@ function WorkoutLogger({
           })),
   );
   const [pickerOpen, setPickerOpen] = useState(false);
+  const movementStackRef = useRef<HTMLDivElement>(null);
+  useFlipAnimation(movementStackRef, movements.map((movement) => movement.key).join('|'));
   const [switchingMovementKey, setSwitchingMovementKey] = useState<string | null>(null);
   const [supersetPickerKey, setSupersetPickerKey] = useState<string | null>(null);
   const [deleteConfirmationOpen, setDeleteConfirmationOpen] = useState(false);
@@ -2318,9 +2341,10 @@ function WorkoutLogger({
 
   return (
     <section className="logger-screen content-page">
-      {prConfettiBurst > 0 && (
-        <ConfettiBurst key={prConfettiBurst} onComplete={() => setPrConfettiBurst(0)} />
-      )}
+      {prConfettiBurst > 0 &&
+        (motionReduced() ? null : (
+          <ConfettiBurst key={prConfettiBurst} onComplete={() => setPrConfettiBurst(0)} />
+        ))}
       <OverlayScreenHeader
         title={liveIdentity.name}
         subtitle={
@@ -2536,7 +2560,7 @@ function WorkoutLogger({
             <strong>{completedReps}</strong>
           </span>
           <span>
-            <small>Volume kg</small>
+            <small>Vol kg</small>
             <strong>{completedVolume.toLocaleString()}</strong>
           </span>
         </div>
@@ -2544,7 +2568,7 @@ function WorkoutLogger({
 
       {error && <p className="inline-error">{error}</p>}
 
-      <div className="movement-stack">
+      <div className="movement-stack" ref={movementStackRef}>
         {movements.map((movement, movementIndex) => (
           <MovementCard
             key={movement.key}
@@ -3385,12 +3409,15 @@ function MovementCard({
   }
 
   const setNumbers = setNumberLabels(movement.sets);
+  const setGridRef = useRef<HTMLDivElement>(null);
+  useFlipAnimation(setGridRef, movement.sets.map((item) => item.key).join('|'));
   const editingSetIndex = movement.sets.findIndex((item) => item.key === editingSetKey);
   const editingSet = editingSetIndex >= 0 ? movement.sets[editingSetIndex] : null;
 
   return (
     <article
       className={`movement-card panel ${expanded ? '' : 'is-collapsed'} ${supersetLabel ? 'superset-card' : ''}`}
+      data-flip-key={movement.key}
     >
       {supersetLabel && <div className="superset-ribbon">{supersetLabel}</div>}
       <header onClick={() => setExpanded((current) => !current)}>
@@ -3586,7 +3613,7 @@ function MovementCard({
         />
       )}
 
-      <div className={`set-grid set-grid-${cardio ? 'cardio' : 'strength'}`}>
+      <div className={`set-grid set-grid-${cardio ? 'cardio' : 'strength'}`} ref={setGridRef}>
         <div className="set-grid-head">
           {cardio ? (
             <>
@@ -3611,6 +3638,7 @@ function MovementCard({
         {movement.sets.map((item, index) => (
           <Fragment key={item.key}>
             <SwipeToDeleteSetRow
+              flipKey={item.key}
               label={`set ${index + 1}`}
               disabled={movement.sets.length < 2}
               overlayOpen={openSetActionsKey === item.key}
@@ -3967,7 +3995,7 @@ function MovementCard({
               )}
             </SwipeToDeleteSetRow>
             {!cardio && (
-              <div className="rest-between">
+              <div className="rest-between" data-flip-key={`${item.key}:rest`}>
                 <i />
                 <label>
                   <select
@@ -5838,6 +5866,8 @@ function ProgressScreen({
   const [visibleSessions, setVisibleSessions] = useState(HISTORY_PAGE_SIZE);
   const [pickerRequest, setPickerRequest] = useState(0);
   const [chartExpanded, setChartExpanded] = useState(false);
+  const metricIndicatorRef = useSlidingIndicator<HTMLDivElement>(metric);
+  const rangeIndicatorRef = useSlidingIndicator<HTMLDivElement>(displayRange);
   const selectedExercise = strengthExercises.find((exercise) => exercise.id === exerciseId) ?? null;
 
   useEffect(() => {
@@ -5951,7 +5981,12 @@ function ProgressScreen({
       {loading && !progress && <LoadingState />}
       {progress && (
         <div className={loading ? 'progress-refreshing' : ''}>
-          <div className="segmented-control" role="tablist" aria-label="Progress metric">
+          <div
+            ref={metricIndicatorRef}
+            className="segmented-control slide-indicator"
+            role="tablist"
+            aria-label="Progress metric"
+          >
             {PROGRESS_METRICS.map((item) => (
               <button
                 type="button"
@@ -5989,7 +6024,8 @@ function ProgressScreen({
                 )}
               </div>
               <div
-                className="range-chips"
+                ref={rangeIndicatorRef}
+                className="range-chips slide-indicator"
                 role="tablist"
                 aria-label="Exercise progress graph range"
               >
@@ -6173,6 +6209,8 @@ function SettingsScreen({
   onWorkoutTypeColorsChange,
   restTimerEnabled,
   onRestTimerEnabledChange,
+  reduceMotion,
+  onReduceMotionChange,
   bodyTrendPreference,
   onBodyTrendPreferenceChange,
   onImportWorkouts,
@@ -6186,6 +6224,8 @@ function SettingsScreen({
   onWorkoutTypeColorsChange: (colors: WorkoutTypeColors) => void;
   restTimerEnabled: boolean;
   onRestTimerEnabledChange: (enabled: boolean) => void;
+  reduceMotion: boolean;
+  onReduceMotionChange: (reduced: boolean) => void;
   bodyTrendPreference: BodyTrendPreference;
   onBodyTrendPreferenceChange: (preference: BodyTrendPreference) => void;
   onImportWorkouts: (file: File) => Promise<void>;
@@ -6525,6 +6565,38 @@ function SettingsScreen({
         )}
       </section>
 
+      <section className="settings-panel panel" aria-labelledby="motion-settings-title">
+        <header>
+          <div>
+            <p className="section-kicker">MOTION</p>
+            <h2 id="motion-settings-title">Animations</h2>
+          </div>
+        </header>
+        <div className="notification-setting-row">
+          <div>
+            <strong>Reduce animations</strong>
+            <small>
+              {reduceMotion
+                ? 'Screens, sheets and charts change without sliding or fading'
+                : systemPrefersReducedMotion()
+                  ? 'Your phone already asks for reduced motion, so the app follows it'
+                  : 'Screens slide, sheets glide and charts draw in'}
+            </small>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-label="Reduce animations"
+            aria-checked={reduceMotion}
+            className={reduceMotion ? 'is-on' : ''}
+            onClick={() => onReduceMotionChange(!reduceMotion)}
+          >
+            <span />
+            {reduceMotion ? 'On' : 'Off'}
+          </button>
+        </div>
+      </section>
+
       <section className="settings-panel panel" aria-labelledby="workout-type-colors-title">
         <header>
           <div>
@@ -6782,6 +6854,7 @@ export function BodyCompositionScreen({
   const [editError, setEditError] = useState<string | null>(null);
   const [checkInPage, setCheckInPage] = useState(1);
   const [historyView, setHistoryView] = useState<'daily' | BodyHistoryPeriod>('daily');
+  const historyViewIndicatorRef = useSlidingIndicator<HTMLDivElement>(historyView);
   const [trendDuration, setTrendDuration] = useState<BodyTrendDuration>(trendPreference.duration);
   const [trendStatistic, setTrendStatistic] = useState<BodyTrendStatistic>(
     trendPreference.statistic,
@@ -7168,7 +7241,12 @@ export function BodyCompositionScreen({
         </PopupDialog>
       )}
 
-      <div className="body-log-tabs" role="tablist" aria-label="Bodyweight records">
+      <div
+        ref={historyViewIndicatorRef}
+        className="body-log-tabs slide-indicator"
+        role="tablist"
+        aria-label="Bodyweight records"
+      >
         {(
           [
             ['daily', 'Daily'],
@@ -7432,12 +7510,19 @@ function BodyTrendChart({
     ],
   );
   const showFat = series === 'fat' && hasBodyFat;
+  const bodyRangeIndicatorRef = useSlidingIndicator<HTMLDivElement>(displayRange);
+  const bodySeriesIndicatorRef = useSlidingIndicator<HTMLDivElement>(showFat);
   const chartHeight = chartExpanded ? expandedChartHeight() : 200;
 
   return (
     <div className="body-trend-chart">
       <div className="body-trend-chart-controls">
-        <div className="range-chips" role="tablist" aria-label="Body composition range">
+        <div
+          ref={bodyRangeIndicatorRef}
+          className="range-chips slide-indicator"
+          role="tablist"
+          aria-label="Body composition range"
+        >
           {TIME_RANGE_OPTIONS.map((option) => (
             <button
               type="button"
@@ -7453,7 +7538,12 @@ function BodyTrendChart({
           ))}
         </div>
         {hasBodyFat && (
-          <div className="segmented-control compact" role="tablist" aria-label="Body measure">
+          <div
+            ref={bodySeriesIndicatorRef}
+            className="segmented-control compact slide-indicator"
+            role="tablist"
+            aria-label="Body measure"
+          >
             <button
               type="button"
               role="tab"
@@ -8213,6 +8303,7 @@ function HistoryScreen({
     [visibleCount, weekStartDay, workouts],
   );
   const recordCounts = useMemo(() => recordCountsByWorkout(personalRecords), [personalRecords]);
+  const sectionIndicatorRef = useSlidingIndicator<HTMLDivElement>(section);
   const defaultExerciseId = useMemo(
     () => mostTrainedExerciseId(workouts, today),
     [today, workouts],
@@ -8262,7 +8353,12 @@ function HistoryScreen({
               ) : undefined
             }
           />
-          <div className="segmented-control" role="tablist" aria-label="History sections">
+          <div
+            ref={sectionIndicatorRef}
+            className="segmented-control slide-indicator"
+            role="tablist"
+            aria-label="History sections"
+          >
             <button
               type="button"
               role="tab"

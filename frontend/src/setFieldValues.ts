@@ -1,6 +1,6 @@
 import type { WorkoutSetInput } from './types';
 
-export const RPE_OPTIONS = [5, 6, 7, 7.5, 8, 8.5, 9, 9.5, 10] as const;
+export const RPE_OPTIONS = [5, 6, 6.5, 7, 7.5, 8, 8.5, 9, 9.5, 10] as const;
 
 export type SetKind = 'normal' | 'warmup' | 'drop';
 

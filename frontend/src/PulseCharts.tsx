@@ -1,5 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from 'react';
+import { EDGE_SWIPE_START_PX } from './edgeSwipe';
+import type {
+  CSSProperties,
+  KeyboardEvent as ReactKeyboardEvent,
+  PointerEvent as ReactPointerEvent,
+} from 'react';
 import {
   heatLevel,
   niceTicks,
@@ -214,6 +219,8 @@ export function TrendChart({
     coords.length > 1
       ? `${line}L${coords.at(-1)!.x.toFixed(1)},${baseline}L${coords[0].x.toFixed(1)},${baseline}Z`
       : '';
+  // Changing data (range, metric, exercise) re-runs the draw-in animation; hover does not.
+  const drawKey = `${points.length}:${points[0]?.date}:${points.at(-1)?.date}:${points.at(-1)?.value}`;
   const activePoint = active === null ? null : points[active];
   const activeCoord = active === null ? null : coords[active];
 
@@ -259,6 +266,14 @@ export function TrendChart({
         tabIndex={0}
         onKeyDown={onKeyDown}
         onPointerDown={(event) => {
+          // Leave touches in the left edge zone to the swipe-back gesture (touch input is
+          // implicitly captured by the element it lands on, so release that too).
+          if (event.clientX <= EDGE_SWIPE_START_PX) {
+            if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+              event.currentTarget.releasePointerCapture(event.pointerId);
+            }
+            return;
+          }
           event.currentTarget.setPointerCapture(event.pointerId);
           selectAt(event);
         }}
@@ -327,8 +342,10 @@ export function TrendChart({
         {background.map((point, index) => (
           <circle className="pulse-chart-bg-dot" key={index} cx={point.x} cy={point.y} r="2.4" />
         ))}
-        {area && areaPath && <path className="pulse-chart-area" d={areaPath} />}
-        <path className="pulse-chart-line" d={line} />
+        {area && areaPath && (
+          <path className="pulse-chart-area" d={areaPath} key={`area-${drawKey}`} />
+        )}
+        <path className="pulse-chart-line" d={line} pathLength={1} key={`line-${drawKey}`} />
         {coords.map((point, index) =>
           records.has(index) || (index === coords.length - 1 && !markRecords) ? (
             <circle className="pulse-chart-marker" key={index} cx={point.x} cy={point.y} r="4" />
@@ -377,7 +394,15 @@ export function SparkBars({ values, label }: { values: number[]; label: string }
   return (
     <div className="pulse-sparkbars" role="img" aria-label={label}>
       {values.map((value, index) => (
-        <i key={index} style={{ height: `${Math.max(8, (value / max) * 100)}%` }} />
+        <i
+          key={index}
+          style={
+            {
+              height: `${Math.max(8, (value / max) * 100)}%`,
+              '--d': `${index * 28}ms`,
+            } as CSSProperties
+          }
+        />
       ))}
     </div>
   );
@@ -397,7 +422,7 @@ export function Sparkline({ values, label }: { values: number[]; label: string }
   return (
     <div className="pulse-sparkline" ref={ref}>
       <svg width={width} height={height} role="img" aria-label={label}>
-        <path d={path} />
+        <path d={path} pathLength={1} />
         <circle cx={x(values.length - 1)} cy={y(values.at(-1)!)} r="3.5" />
       </svg>
     </div>
@@ -441,9 +466,10 @@ export function TrainingHeatmap({ weeks, today }: { weeks: TrainingDay[][]; toda
         role="img"
         aria-label={`Working sets per day over the last ${weeks.length} weeks: ${trainedDays} training days, ${totalSets} working sets.`}
       >
-        {days.map((day) => (
+        {days.map((day, index) => (
           <i
             key={day.date}
+            style={{ '--d': `${Math.floor(index / 7) * 22}ms` } as CSSProperties}
             data-level={day.future ? undefined : heatLevel(day.sets)}
             className={`${day.date === today ? 'today' : ''} ${day.future ? 'future' : ''}`}
             title={

@@ -1,4 +1,5 @@
 import { useId } from 'react';
+import { useSlidingIndicator } from './motionHooks';
 import { RPE_OPTIONS, steppedValue, type SetKind } from './setFieldValues';
 
 const SET_TYPES: Array<{ value: SetKind; label: string }> = [
@@ -84,12 +85,18 @@ export function RpeChips({
   autoFocus?: boolean;
 }) {
   const labelId = useId();
+  const chipsRef = useSlidingIndicator<HTMLDivElement>(value);
   return (
     <div className="chip-field">
       <span className="stepper-label" id={labelId}>
         RPE
       </span>
-      <div className="rpe-chips" role="radiogroup" aria-labelledby={labelId}>
+      <div
+        ref={chipsRef}
+        className="rpe-chips slide-indicator"
+        role="radiogroup"
+        aria-labelledby={labelId}
+      >
         {(['', ...RPE_OPTIONS.map(String)] as string[]).map((option) => {
           const selected = value === option;
           return (
@@ -122,13 +129,15 @@ export function SetTypeSegments({
   autoFocus?: boolean;
 }) {
   const labelId = useId();
+  const segmentsRef = useSlidingIndicator<HTMLDivElement>(value);
   return (
     <div className="chip-field">
       <span className="stepper-label" id={labelId}>
         Type
       </span>
       <div
-        className="segmented-control set-type-segments"
+        ref={segmentsRef}
+        className="segmented-control set-type-segments slide-indicator"
         role="radiogroup"
         aria-labelledby={labelId}
       >

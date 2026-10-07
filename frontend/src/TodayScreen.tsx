@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { ReactNode } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import { Icon } from './Icon';
 import { Meter, SparkBars, Sparkline, TrainingHeatmap } from './PulseCharts';
 import {
@@ -320,11 +320,18 @@ export function TodayScreen({
         </header>
         {muscles.length ? (
           <ul className="muscle-bars">
-            {muscles.slice(0, 8).map((muscle) => (
+            {muscles.slice(0, 8).map((muscle, index) => (
               <li key={muscle.muscle_group}>
                 <span>{muscle.muscle_group}</span>
                 <span className="muscle-bar-track">
-                  <i style={{ width: `${(muscle.raw_sets / maxMuscleSets) * 100}%` }} />
+                  <i
+                    style={
+                      {
+                        width: `${(muscle.raw_sets / maxMuscleSets) * 100}%`,
+                        '--d': `${index * 45}ms`,
+                      } as CSSProperties
+                    }
+                  />
                 </span>
                 <b className="num">{Number(muscle.raw_sets.toFixed(1))}</b>
               </li>
