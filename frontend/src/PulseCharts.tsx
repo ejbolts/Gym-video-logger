@@ -402,9 +402,16 @@ export function SparkBars({ values, label }: { values: number[]; label: string }
   );
 }
 
-export function Sparkline({ values, label }: { values: number[]; label: string }) {
+export function Sparkline({
+  values,
+  label,
+  height = 34,
+}: {
+  values: number[];
+  label: string;
+  height?: number;
+}) {
   const { ref, width } = useElementWidth<HTMLDivElement>(140);
-  const height = 34;
   if (values.length < 2) return <div className="pulse-sparkline" ref={ref} />;
   const min = Math.min(...values);
   const max = Math.max(...values);

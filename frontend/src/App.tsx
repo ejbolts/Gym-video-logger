@@ -5059,7 +5059,9 @@ function LandscapeChartFrame({
           }
           onClick={() => void (expanded ? exitLandscape() : enterLandscape())}
         >
-          <span aria-hidden="true">{expanded ? '×' : '⛶'}</span>
+          <span aria-hidden="true">
+            <Icon name={expanded ? 'close' : 'expand'} />
+          </span>
           {expanded ? 'Exit' : 'Landscape'}
         </button>
       </div>

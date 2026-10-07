@@ -1,5 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { progressExerciseMatches } from './exerciseSearch';
+import { Icon } from './Icon';
 import type { Exercise } from './types';
 
 export function ProgressExerciseSearch({
@@ -149,7 +150,7 @@ export function ProgressExerciseSearch({
             }
           }}
         >
-          {open ? '×' : '⌄'}
+          <Icon name={open ? 'close' : 'chevron-down'} />
         </button>
       </div>
       {open && (
