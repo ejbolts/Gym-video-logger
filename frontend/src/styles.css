@@ -8861,35 +8861,35 @@ body,
   font-size: 0.58rem;
 }
 
-.history-calendar-panel .calendar-scroll {
+.calendar-panel .calendar-scroll {
   grid-auto-columns: calc(100% - 0.1rem);
   gap: 0.6rem;
   padding-bottom: 0.2rem;
   scrollbar-width: none;
 }
 
-.history-calendar-panel .calendar-scroll::-webkit-scrollbar {
+.calendar-panel .calendar-scroll::-webkit-scrollbar {
   display: none;
 }
 
-.history-calendar-panel .calendar-month {
+.calendar-panel .calendar-month {
   border-radius: 5px;
   padding: 0.7rem;
   background: #141718;
 }
 
-.history-calendar-panel .calendar-month h3 {
+.calendar-panel .calendar-month h3 {
   color: #d8d5d2;
   font-size: 0.9rem;
   text-align: center;
 }
 
-.history-calendar-panel .calendar-days,
-.history-calendar-panel .calendar-weekdays {
+.calendar-panel .calendar-days,
+.calendar-panel .calendar-weekdays {
   gap: 0.22rem;
 }
 
-.history-calendar-panel .calendar-day {
+.calendar-panel .calendar-day {
   min-height: 2rem;
   border: 0;
   border-radius: 2px;
@@ -8897,18 +8897,18 @@ body,
   font-size: 0.7rem;
 }
 
-.history-calendar-panel .calendar-day.trained {
+.calendar-panel .calendar-day.trained {
   box-shadow: inset 0 0 0 1px rgb(255 255 255 / 10%);
 }
 
-.history-calendar-panel .calendar-day.in-progress {
+.calendar-panel .calendar-day.in-progress {
   border: 1px solid #557789;
   background: linear-gradient(135deg, #3b5561, #273a43);
   box-shadow: inset 0 0 0 1px rgb(159 207 229 / 14%);
   color: #d7e8ef;
 }
 
-.history-calendar-panel .calendar-day.today {
+.calendar-panel .calendar-day.today {
   outline-color: var(--accent);
 }
 
@@ -8980,7 +8980,7 @@ body,
 }
 
 @media (min-width: 700px) {
-  .history-calendar-panel .calendar-scroll {
+  .calendar-panel .calendar-scroll {
     grid-auto-columns: minmax(310px, calc(50% - 0.3rem));
   }
 }

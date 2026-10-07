@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { Icon } from './Icon';
-import { Meter, SparkBars, Sparkline, TrainingHeatmap } from './PulseCharts';
+import { Meter, SparkBars, Sparkline } from './PulseCharts';
 import {
   averageOf,
   CATEGORY_LABELS,
@@ -69,6 +69,7 @@ export interface TodayScreenProps {
   onOpenBody: () => void;
   onOpenSettings: () => void;
   onOpenVideos: () => void;
+  calendar?: ReactNode;
   today?: string;
 }
 
@@ -90,6 +91,7 @@ export function TodayScreen({
   onOpenBody,
   onOpenSettings,
   onOpenVideos,
+  calendar,
   today = localDate(),
 }: TodayScreenProps) {
   const weekStartDay = weekStartDayFrom(data?.weekly_sets?.week_start ?? data?.zone2?.week_start);
@@ -281,7 +283,7 @@ export function TodayScreen({
         </button>
       </section>
 
-      <section className="pulse-card" aria-labelledby="consistency-title">
+      <section className="calendar-panel pulse-card" aria-labelledby="consistency-title">
         <header className="pulse-card-header">
           <h2 id="consistency-title">Consistency</h2>
           <span>Last 12 weeks</span>
@@ -302,15 +304,7 @@ export function TodayScreen({
             <b>{(trainingDays / 12).toFixed(1)}</b>
           </div>
         </div>
-        <TrainingHeatmap weeks={grid} today={today} />
-        <div className="heat-legend" aria-hidden="true">
-          <span>Fewer sets</span>
-          <i data-level="0" />
-          <i data-level="1" />
-          <i data-level="2" />
-          <i data-level="3" />
-          <span>More</span>
-        </div>
+        {calendar}
       </section>
 
       <section className="pulse-card" aria-labelledby="muscle-sets-title">

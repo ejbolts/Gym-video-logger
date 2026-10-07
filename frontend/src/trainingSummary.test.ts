@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
   compactSetSummary,
   groupWorkoutsByWeek,
-  heatLevel,
   mostTrainedExerciseId,
   niceTicks,
   recentStrengthRecords,
@@ -132,7 +131,7 @@ describe('training summary helpers', () => {
     expect(weeks[0]).toMatchObject({ workouts: 1, sets: 1 });
   });
 
-  it('builds a week-by-day heatmap grid ending in the current week', () => {
+  it('builds a week-by-day training grid ending in the current week', () => {
     const grid = trainingDayGrid(workouts, '2026-10-06', 1, 2);
 
     expect(grid).toHaveLength(2);
@@ -140,7 +139,6 @@ describe('training summary helpers', () => {
     expect(grid[1][0]).toMatchObject({ date: '2026-10-05', sets: 1, categories: ['lower'] });
     expect(grid[1][2].future).toBe(true);
     expect(grid[0][5]).toMatchObject({ date: '2026-10-03', sets: 4 });
-    expect([0, 5, 15, 25].map(heatLevel)).toEqual([0, 1, 2, 3]);
   });
 
   it('chooses clean 1/2/5 axis ticks', () => {

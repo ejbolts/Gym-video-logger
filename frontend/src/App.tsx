@@ -939,6 +939,19 @@ export function App() {
                 onOpenBody={() => setTab('body')}
                 onOpenSettings={() => setTab('settings')}
                 onOpenVideos={() => setTab('videos')}
+                calendar={
+                  <InteractiveWorkoutCalendar
+                    entries={dashboard?.heatmap ?? []}
+                    workouts={workouts}
+                    categoryColors={workoutTypeColors}
+                    activeWorkout={activeWorkoutStartedAt !== null}
+                    activeWorkoutDate={activeWorkoutDate}
+                    onResumeWorkout={() => setTab('log')}
+                    onEditWorkout={editWorkout}
+                    onStartWorkout={(workoutDate) => startWorkout(workoutDate)}
+                    onReplaceActiveWorkout={(workoutDate) => startWorkout(workoutDate, true)}
+                  />
+                }
               />
             )}
           </CachedTabPanel>
@@ -1307,7 +1320,7 @@ function CalendarCreateWorkoutDialog({
   );
 }
 
-function WorkoutHeatmap({
+function WorkoutCalendar({
   entries,
   categoryColors,
   activeWorkoutDate = null,
@@ -1438,6 +1451,89 @@ function WorkoutHeatmap({
         </article>
       ))}
     </div>
+  );
+}
+
+function InteractiveWorkoutCalendar({
+  entries,
+  workouts,
+  categoryColors,
+  activeWorkout,
+  activeWorkoutDate,
+  onResumeWorkout,
+  onEditWorkout,
+  onStartWorkout,
+  onReplaceActiveWorkout,
+}: {
+  entries: DashboardData['heatmap'];
+  workouts: TrackedWorkout[];
+  categoryColors: WorkoutTypeColors;
+  activeWorkout: boolean;
+  activeWorkoutDate: string | null;
+  onResumeWorkout: () => void;
+  onEditWorkout: (workout: TrackedWorkout) => void;
+  onStartWorkout: (workoutDate: string) => void;
+  onReplaceActiveWorkout: (workoutDate: string) => void;
+}) {
+  const [selectedDay, setSelectedDay] = useState<DashboardData['heatmap'][number] | null>(null);
+  const [pendingWorkoutDate, setPendingWorkoutDate] = useState<string | null>(null);
+  const presentCategories = (Object.keys(categoryNames) as WorkoutCategory[]).filter((category) =>
+    entries.some((day) => day.categories.includes(category)),
+  );
+
+  return (
+    <>
+      <WorkoutCalendar
+        entries={entries}
+        categoryColors={categoryColors}
+        activeWorkoutDate={activeWorkoutDate}
+        onActiveWorkoutClick={onResumeWorkout}
+        onDayClick={(workoutDate, entry) => {
+          if (entry) setSelectedDay(entry);
+          else setPendingWorkoutDate(workoutDate);
+        }}
+      />
+      {presentCategories.length > 0 && (
+        <ul className="category-legend" aria-label="Workout types">
+          {presentCategories.map((category) => (
+            <li key={category}>
+              <i style={{ background: categoryColors[category] }} aria-hidden="true" />
+              {categoryNames[category]}
+            </li>
+          ))}
+        </ul>
+      )}
+      {selectedDay && (
+        <CalendarDayDetail
+          day={selectedDay}
+          categoryColors={categoryColors}
+          onClose={() => setSelectedDay(null)}
+          onStartWorkout={(workoutDate) => {
+            setSelectedDay(null);
+            setPendingWorkoutDate(workoutDate);
+          }}
+          onEditWorkout={(workoutId) => {
+            const workout = workouts.find((item) => item.id === workoutId);
+            if (!workout) return;
+            setSelectedDay(null);
+            onEditWorkout(workout);
+          }}
+        />
+      )}
+      {pendingWorkoutDate && (
+        <CalendarCreateWorkoutDialog
+          workoutDate={pendingWorkoutDate}
+          activeWorkout={activeWorkout}
+          onCancel={() => setPendingWorkoutDate(null)}
+          onConfirm={() => {
+            const workoutDate = pendingWorkoutDate;
+            setPendingWorkoutDate(null);
+            if (activeWorkout) onReplaceActiveWorkout(workoutDate);
+            else onStartWorkout(workoutDate);
+          }}
+        />
+      )}
+    </>
   );
 }
 
@@ -7438,10 +7534,6 @@ function HistoryScreen({
   const [targetExerciseId, setTargetExerciseId] = useState<string | null>(
     initialOpenId ? initialExerciseId : null,
   );
-  const [selectedCalendarDay, setSelectedCalendarDay] = useState<
-    DashboardData['heatmap'][number] | null
-  >(null);
-  const [pendingWorkoutDate, setPendingWorkoutDate] = useState<string | null>(null);
   const [expandedPhoto, setExpandedPhoto] = useState<MachinePhoto | null>(null);
   const openWorkoutSummaryRef = useRef<HTMLButtonElement>(null);
   const targetExerciseRef = useRef<HTMLDivElement>(null);
@@ -7456,9 +7548,6 @@ function HistoryScreen({
   const defaultExerciseId = useMemo(
     () => mostTrainedExerciseId(workouts, today),
     [today, workouts],
-  );
-  const presentCategories = (Object.keys(categoryNames) as WorkoutCategory[]).filter((category) =>
-    heatmap.some((day) => day.categories.includes(category)),
   );
 
   useEffect(() => {
@@ -7546,31 +7635,25 @@ function HistoryScreen({
         />
       ) : (
         <>
-          <section className="history-calendar-panel pulse-card" aria-label="Workout calendar">
+          <section
+            className="history-calendar-panel calendar-panel pulse-card"
+            aria-label="Workout calendar"
+          >
             <header className="pulse-card-header">
               <h2>Calendar</h2>
               <span>Sets per week · swipe for earlier months</span>
             </header>
-            <WorkoutHeatmap
+            <InteractiveWorkoutCalendar
               entries={heatmap}
+              workouts={workouts}
               categoryColors={categoryColors}
+              activeWorkout={activeWorkout}
               activeWorkoutDate={activeWorkoutDate}
-              onActiveWorkoutClick={onResumeWorkout}
-              onDayClick={(workoutDate, entry) => {
-                if (entry) setSelectedCalendarDay(entry);
-                else setPendingWorkoutDate(workoutDate);
-              }}
+              onResumeWorkout={onResumeWorkout}
+              onEditWorkout={onEdit}
+              onStartWorkout={onStartWorkout}
+              onReplaceActiveWorkout={onReplaceActiveWorkout}
             />
-            {presentCategories.length > 0 && (
-              <ul className="category-legend" aria-label="Workout types">
-                {presentCategories.map((category) => (
-                  <li key={category}>
-                    <i style={{ background: categoryColors[category] }} aria-hidden="true" />
-                    {categoryNames[category]}
-                  </li>
-                ))}
-              </ul>
-            )}
           </section>
           {!workouts.length && (
             <EmptyState
@@ -7631,36 +7714,6 @@ function HistoryScreen({
             </button>
           )}
         </>
-      )}
-      {section === 'history' && selectedCalendarDay && (
-        <CalendarDayDetail
-          day={selectedCalendarDay}
-          categoryColors={categoryColors}
-          onClose={() => setSelectedCalendarDay(null)}
-          onStartWorkout={(workoutDate) => {
-            setSelectedCalendarDay(null);
-            setPendingWorkoutDate(workoutDate);
-          }}
-          onEditWorkout={(workoutId) => {
-            const workout = workouts.find((item) => item.id === workoutId);
-            if (!workout) return;
-            setSelectedCalendarDay(null);
-            onEdit(workout);
-          }}
-        />
-      )}
-      {section === 'history' && pendingWorkoutDate && (
-        <CalendarCreateWorkoutDialog
-          workoutDate={pendingWorkoutDate}
-          activeWorkout={activeWorkout}
-          onCancel={() => setPendingWorkoutDate(null)}
-          onConfirm={() => {
-            const workoutDate = pendingWorkoutDate;
-            setPendingWorkoutDate(null);
-            if (activeWorkout) onReplaceActiveWorkout(workoutDate);
-            else onStartWorkout(workoutDate);
-          }}
-        />
       )}
     </section>
   );

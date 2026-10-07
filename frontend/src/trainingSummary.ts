@@ -110,7 +110,7 @@ export interface TrainingDay {
   future: boolean;
 }
 
-/** A week-per-column grid (oldest week first) of working sets per day for a consistency heatmap. */
+/** A week-per-column grid (oldest week first) of working sets per day for consistency stats. */
 export function trainingDayGrid(
   workouts: TrackedWorkout[],
   today: string,
@@ -132,14 +132,6 @@ export function trainingDayGrid(
   }
   const days = [...byDate.values()];
   return Array.from({ length: weeks }, (_, week) => days.slice(week * 7, week * 7 + 7));
-}
-
-/** Sequential intensity level 0–3 for a day's working-set count. */
-export function heatLevel(sets: number): 0 | 1 | 2 | 3 {
-  if (sets <= 0) return 0;
-  if (sets < 10) return 1;
-  if (sets < 20) return 2;
-  return 3;
 }
 
 /** Evenly stepped axis ticks on 1/2/5 multiples that cover [min, max]. */
