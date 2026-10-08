@@ -1178,6 +1178,10 @@ button.pulse-card:hover {
   font-weight: 600;
 }
 
+.calendar-panel .calendar-day.trained:not(.in-progress) {
+  border: 1px solid var(--p-good);
+}
+
 .calendar-panel .calendar-day.today {
   background: var(--p-surface-3);
   color: var(--p-ink);
