@@ -1979,8 +1979,16 @@ button.pulse-card:hover {
 }
 
 .logger-screen .movement-card header h2 .movement-history-link {
-  color: var(--p-ink);
+  color: var(--p-accent-text);
   font-weight: 650;
+  transition: color 160ms ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.logger-screen .movement-card header h2 .movement-history-link:hover,
+.logger-screen .movement-card header h2 .movement-history-link:focus-visible,
+.logger-screen .movement-card header h2 .movement-history-link:active {
+  color: #9cc4f3;
 }
 
 .logger-screen .add-exercise-button {
@@ -3070,6 +3078,15 @@ html.edge-swipe-ready .edge-swipe-indicator {
   border-radius: 12px;
   background: transparent;
   color: var(--p-muted);
+  transition:
+    transform 160ms var(--ease-out),
+    background-color 240ms ease,
+    border-color 240ms ease,
+    color 240ms ease;
+}
+
+.logger-screen .exercise-complete-button:active {
+  transform: scale(0.92);
 }
 
 .logger-screen .exercise-complete-button.active {
@@ -3618,6 +3635,10 @@ button.pulse-card:active,
 
 .row-complete-button.done .pulse-icon {
   animation: check-pop 340ms var(--ease-out) backwards;
+}
+
+.logger-screen .exercise-complete-button.active {
+  animation: tab-pop 380ms var(--ease-out);
 }
 
 /* Data comes in: bars grow from their baseline, lines draw from left to right. */

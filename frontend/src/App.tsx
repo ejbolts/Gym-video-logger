@@ -77,7 +77,12 @@ import {
   showRestTimerNotification,
   showWorkoutAutoSavedNotification,
 } from './push';
-import { useExpandAnimation, useFlipAnimation, useSlidingIndicator } from './motionHooks';
+import {
+  useCollapseAnimation,
+  useExpandAnimation,
+  useFlipAnimation,
+  useSlidingIndicator,
+} from './motionHooks';
 import {
   applyReduceMotion,
   motionReduced,
@@ -3213,6 +3218,7 @@ function MovementCard({
   const movementMenuRef = useRef<HTMLDetailsElement>(null);
   const movementNoteRef = useRef<HTMLInputElement>(null);
   const setGridRef = useRef<HTMLDivElement>(null);
+  const cardRef = useRef<HTMLElement>(null);
   const setNumbers = setNumberLabels(movement.sets);
 
   useEffect(() => {
@@ -3818,9 +3824,11 @@ function MovementCard({
 
   useFlipAnimation(setGridRef, movement.sets.map((item) => item.key).join('|'));
   useExpandAnimation(setGridRef);
+  useCollapseAnimation(cardRef, expanded);
 
   return (
     <article
+      ref={cardRef}
       className={`movement-card panel ${expanded ? '' : 'is-collapsed'} ${supersetLabel ? 'superset-card' : ''}`}
       data-flip-key={movement.key}
     >
