@@ -65,9 +65,26 @@ export function workoutVolumeKg(workout: TrackedWorkout): number {
   );
 }
 
+/**
+ * Cardio sessions in a workout: one per cardio movement with at least a minute of completed
+ * time, mirroring how the backend writes the cardio-session ledger (so cardio done after
+ * strength counts too).
+ */
+export function cardioSessionCount(workout: TrackedWorkout): number {
+  return workout.movements.filter(
+    (movement) =>
+      movement.exercise.kind === 'cardio' &&
+      movement.sets.reduce(
+        (seconds, item) => seconds + (item.completed ? Math.max(item.duration_seconds ?? 0, 0) : 0),
+        0,
+      ) >= 60,
+  ).length;
+}
+
 export interface WeeklyTotals {
   weekStart: string;
   workouts: number;
+  cardioSessions: number;
   sets: number;
   volumeKg: number;
 }
@@ -83,6 +100,7 @@ export function weeklyTrainingTotals(
   const buckets = Array.from({ length: weeks }, (_, index) => ({
     weekStart: addDays(currentWeek, (index - weeks + 1) * 7),
     workouts: 0,
+    cardioSessions: 0,
     sets: 0,
     volumeKg: 0,
   }));
@@ -92,6 +110,7 @@ export function weeklyTrainingTotals(
     const bucket = byStart.get(weekStartFor(workout.workout_date, weekStartDay));
     if (!bucket) continue;
     bucket.workouts += 1;
+    bucket.cardioSessions += cardioSessionCount(workout);
     bucket.sets += workingSets(workout).length;
     bucket.volumeKg += workoutVolumeKg(workout);
   }
@@ -102,6 +121,26 @@ export function averageOf(values: number[]): number | null {
   return values.length ? values.reduce((total, value) => total + value, 0) / values.length : null;
 }
 
+/** Average body weight per week for the last `weeks` weeks, oldest first; null where nothing was logged. */
+export function weeklyBodyweightAverages(
+  measurements: Array<{ measurement_date: string; weight_kg: number }>,
+  today: string,
+  weekStartDay: number,
+  weeks = 12,
+): Array<number | null> {
+  const currentWeek = weekStartFor(today, weekStartDay);
+  const firstWeek = addDays(currentWeek, (1 - weeks) * 7);
+  const buckets = new Map<string, number[]>();
+  for (const measurement of measurements) {
+    if (measurement.measurement_date > today || measurement.measurement_date < firstWeek) continue;
+    const week = weekStartFor(measurement.measurement_date, weekStartDay);
+    buckets.set(week, [...(buckets.get(week) ?? []), measurement.weight_kg]);
+  }
+  return Array.from({ length: weeks }, (_, index) =>
+    averageOf(buckets.get(addDays(firstWeek, index * 7)) ?? []),
+  );
+}
+
 export interface TrainingDay {
   date: string;
   sets: number;
@@ -110,7 +149,7 @@ export interface TrainingDay {
   future: boolean;
 }
 
-/** A week-per-column grid (oldest week first) of working sets per day for a consistency heatmap. */
+/** A week-per-column grid (oldest week first) of working sets per day for consistency stats. */
 export function trainingDayGrid(
   workouts: TrackedWorkout[],
   today: string,
@@ -132,14 +171,6 @@ export function trainingDayGrid(
   }
   const days = [...byDate.values()];
   return Array.from({ length: weeks }, (_, week) => days.slice(week * 7, week * 7 + 7));
-}
-
-/** Sequential intensity level 0–3 for a day's working-set count. */
-export function heatLevel(sets: number): 0 | 1 | 2 | 3 {
-  if (sets <= 0) return 0;
-  if (sets < 10) return 1;
-  if (sets < 20) return 2;
-  return 3;
 }
 
 /** Evenly stepped axis ticks on 1/2/5 multiples that cover [min, max]. */

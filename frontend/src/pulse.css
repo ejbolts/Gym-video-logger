@@ -431,8 +431,8 @@ button.pulse-card:hover {
   grid-template-columns: 1fr auto;
   align-items: center;
   gap: 0.25rem 1rem;
-  border-color: rgb(230 103 103 / 35%);
-  background: linear-gradient(160deg, #2a1a1c 0%, var(--p-surface) 70%);
+  border-color: rgb(57 135 229 / 35%);
+  background: linear-gradient(160deg, #15263a 0%, var(--p-surface) 70%);
 }
 
 .live-workout-label {
@@ -449,8 +449,8 @@ button.pulse-card:hover {
   width: 0.5rem;
   height: 0.5rem;
   border-radius: 50%;
-  background: var(--p-danger);
-  box-shadow: 0 0 0 0 rgb(230 103 103 / 55%);
+  background: var(--p-accent);
+  box-shadow: 0 0 0 0 rgb(57 135 229 / 55%);
   animation: pulse-live 1.6s ease-out infinite;
 }
 
@@ -482,10 +482,10 @@ button.pulse-card:hover {
 
 @keyframes pulse-live {
   70% {
-    box-shadow: 0 0 0 0.45rem rgb(230 103 103 / 0%);
+    box-shadow: 0 0 0 0.45rem rgb(57 135 229 / 0%);
   }
   100% {
-    box-shadow: 0 0 0 0 rgb(230 103 103 / 0%);
+    box-shadow: 0 0 0 0 rgb(57 135 229 / 0%);
   }
 }
 
@@ -503,11 +503,17 @@ button.pulse-card:hover {
   min-width: 0;
   display: block;
   border: 0;
-  padding: 0.875rem 0.875rem 0.75rem;
+  padding: 0.875rem 0.75rem 0.75rem;
   background: transparent;
   color: var(--p-ink);
   font: inherit;
   text-align: left;
+}
+
+@media (max-width: 374px) {
+  .pulse-kpi {
+    padding-inline: 0.5625rem;
+  }
 }
 
 .pulse-kpi + .pulse-kpi {
@@ -518,7 +524,7 @@ button.pulse-card:hover {
   display: block;
   overflow: hidden;
   color: var(--p-muted);
-  font-size: 0.75rem;
+  font-size: 0.6875rem;
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -562,6 +568,12 @@ button.pulse-card:hover {
   background: var(--p-accent);
 }
 
+/* Line chart in a KPI box: same footprint as the weekly bars beside it. */
+.pulse-kpi .pulse-sparkline {
+  height: 1.625rem;
+  margin-top: 0.625rem;
+}
+
 .consistency-stats {
   display: flex;
   gap: 1.25rem;
@@ -578,83 +590,6 @@ button.pulse-card:hover {
   font-size: 1.25rem;
   font-weight: 650;
   letter-spacing: -0.01em;
-}
-
-.pulse-heat-wrap {
-  display: grid;
-  grid-template-columns: 0.75rem 1fr;
-  gap: 0.375rem;
-}
-
-.pulse-heat-days {
-  display: grid;
-  grid-template-rows: repeat(7, 0.875rem);
-  gap: 3px;
-  color: var(--p-muted);
-  font-size: 0.59rem;
-  font-weight: 600;
-  line-height: 0.875rem;
-}
-
-.pulse-heat {
-  display: grid;
-  grid-auto-columns: 1fr;
-  grid-auto-flow: column;
-  grid-template-rows: repeat(7, 0.875rem);
-  gap: 3px;
-}
-
-.pulse-heat i,
-.heat-legend i {
-  border-radius: 3px;
-  background: var(--p-surface-2);
-}
-
-.pulse-heat i[data-level='1'],
-.heat-legend i[data-level='1'] {
-  background: #184f95;
-}
-
-.pulse-heat i[data-level='2'],
-.heat-legend i[data-level='2'] {
-  background: #2a78d6;
-}
-
-.pulse-heat i[data-level='3'],
-.heat-legend i[data-level='3'] {
-  background: #6da7ec;
-}
-
-.pulse-heat i.future {
-  background: transparent;
-  box-shadow: inset 0 0 0 1px var(--p-line);
-}
-
-.pulse-heat i.today {
-  box-shadow: inset 0 0 0 1.5px var(--p-ink);
-}
-
-.heat-legend {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 3px;
-  margin-top: 0.625rem;
-  color: var(--p-muted);
-  font-size: 0.6875rem;
-}
-
-.heat-legend i {
-  width: 0.625rem;
-  height: 0.625rem;
-}
-
-.heat-legend span:first-child {
-  margin-right: 0.25rem;
-}
-
-.heat-legend span:last-child {
-  margin-left: 0.25rem;
 }
 
 .muscle-bars {
@@ -796,29 +731,55 @@ button.pulse-card:hover {
 }
 
 .quick-bodyweight-form label {
-  position: relative;
-  display: block;
-}
-
-.quick-bodyweight-form input {
-  width: 100%;
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 0.3125rem;
+  box-sizing: border-box;
+  min-width: 0;
   height: 2.875rem;
   border: 1px solid var(--p-line-strong);
   border-radius: 12px;
-  padding: 0 2.25rem 0 0.875rem;
+  /* top padding vertically centres the baseline-aligned number + unit line */
+  padding: calc((2.875rem - 2px - 1.0625rem * 1.2) / 2) 0.875rem 0;
   background: var(--p-surface-2);
   color: var(--p-ink);
+  cursor: text;
+}
+
+.quick-bodyweight-form label:focus-within {
+  border-color: var(--p-accent);
+}
+
+.quick-bodyweight-form input {
+  box-sizing: content-box;
+  width: var(--bw-chars, 4ch);
+  min-width: 2ch;
+  max-width: 100%;
+  height: auto;
+  margin: 0;
+  border: 0;
+  padding: 0;
+  outline: 0;
+  background: transparent;
+  color: inherit;
   font-size: 1.0625rem;
   font-weight: 650;
+  line-height: 1.2;
   font-variant-numeric: tabular-nums;
-  text-align: center;
+  text-align: right;
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.quick-bodyweight-form input::-webkit-outer-spin-button,
+.quick-bodyweight-form input::-webkit-inner-spin-button {
+  margin: 0;
+  -webkit-appearance: none;
 }
 
 .quick-bodyweight-form label b {
-  position: absolute;
-  top: 50%;
-  right: 0.75rem;
-  transform: translateY(-50%);
+  flex: none;
   color: var(--p-muted);
   font-size: 0.8125rem;
   font-weight: 600;
@@ -1016,8 +977,12 @@ button.pulse-card:hover {
 }
 
 .app-tab-start.live .app-tab-start-bubble {
-  background: #3a1e21;
-  box-shadow: inset 0 0 0 1px rgb(230 103 103 / 55%);
+  background: #1b3552;
+  box-shadow: inset 0 0 0 1px rgb(57 135 229 / 55%);
+}
+
+.app-tab-start.live .live-dot {
+  background: var(--p-accent-text);
 }
 
 .app-tab-start.live > span:last-child {
@@ -1149,17 +1114,17 @@ button.pulse-card:hover {
   margin-bottom: 0;
 }
 
-.history-calendar-panel .calendar-scroll {
+.calendar-panel .calendar-scroll {
   margin: 0 -0.25rem;
 }
 
-.history-calendar-panel .calendar-month {
+.calendar-panel .calendar-month {
   border: 0;
   padding: 0 0.25rem;
   background: transparent;
 }
 
-.history-calendar-panel .calendar-month h3 {
+.calendar-panel .calendar-month h3 {
   margin: 0 0 0.5rem;
   color: var(--p-ink);
   font-size: 0.875rem;
@@ -1167,25 +1132,25 @@ button.pulse-card:hover {
   text-align: left;
 }
 
-.history-calendar-panel .calendar-weekdays,
-.history-calendar-panel .calendar-days {
+.calendar-panel .calendar-weekdays,
+.calendar-panel .calendar-days {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr)) 2.25rem;
   gap: 0.125rem;
 }
 
-.history-calendar-panel .calendar-weekdays span {
+.calendar-panel .calendar-weekdays span {
   color: var(--p-muted);
   font-size: 0.625rem;
   font-weight: 600;
   text-align: center;
 }
 
-.history-calendar-panel .calendar-week-total-heading {
+.calendar-panel .calendar-week-total-heading {
   text-align: right !important;
 }
 
-.history-calendar-panel .calendar-day {
+.calendar-panel .calendar-day {
   min-width: 0;
   height: 2.5rem;
   aspect-ratio: auto;
@@ -1204,31 +1169,40 @@ button.pulse-card:hover {
   font-weight: 500;
 }
 
-.history-calendar-panel .calendar-day.empty {
+.calendar-panel .calendar-day.empty {
   visibility: hidden;
 }
 
-.history-calendar-panel .calendar-day.trained {
+.calendar-panel .calendar-day.trained {
   color: var(--p-ink);
   font-weight: 600;
 }
 
-.history-calendar-panel .calendar-day.today {
+.calendar-panel .calendar-day.trained:not(.in-progress) {
+  border: 1px solid var(--p-good);
+}
+
+.calendar-panel .calendar-day.today {
   background: var(--p-surface-3);
   color: var(--p-ink);
   font-weight: 700;
 }
 
-.history-calendar-panel .calendar-day.future {
+.calendar-panel .calendar-day.future {
   color: #4a5157;
 }
 
-.history-calendar-panel .calendar-day.in-progress {
-  background: rgb(230 103 103 / 14%);
-  box-shadow: inset 0 0 0 1px rgb(230 103 103 / 45%);
+.calendar-panel .calendar-day.in-progress {
+  background: rgb(57 135 229 / 14%);
+  box-shadow: inset 0 0 0 1px rgb(57 135 229 / 45%);
 }
 
-.history-calendar-panel .calendar-day:hover {
+/* The live dot already marks the day; drop the legacy corner dot that stacked under it. */
+.calendar-panel .calendar-day.in-progress::after {
+  content: none;
+}
+
+.calendar-panel .calendar-day:hover {
   background: var(--p-surface-2);
 }
 
@@ -1245,7 +1219,7 @@ button.pulse-card:hover {
 }
 
 .calendar-day-dots .calendar-live-dot {
-  background: var(--p-danger);
+  background: var(--p-accent);
 }
 
 .calendar-week-total {
@@ -2264,14 +2238,28 @@ html.edge-swipe-ready .edge-swipe-indicator {
   font-weight: 600;
 }
 
+.landscape-chart-toggle > span {
+  display: grid;
+  place-items: center;
+}
+
+.landscape-chart-toggle .pulse-icon {
+  display: block;
+  width: 1rem;
+  height: 1rem;
+}
+
 .progress-screen .landscape-chart-frame:not(.landscape-chart-expanded) .landscape-chart-toggle,
 .body-trend-chart .landscape-chart-frame:not(.landscape-chart-expanded) .landscape-chart-toggle {
   width: 2rem;
   min-width: 2rem;
   height: 2rem;
   min-height: 2rem;
-  display: grid;
-  place-items: center;
+  /* Flex, not grid: the hidden label text would otherwise add a second row and lift the icon. */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
   padding: 0;
   font-size: 0;
 }
@@ -2419,12 +2407,21 @@ html.edge-swipe-ready .edge-swipe-indicator {
   padding: 0 0.875rem;
 }
 
+.progress-screen .progress-exercise-combobox > button .pulse-icon {
+  display: block;
+  width: 1.125rem;
+  height: 1.125rem;
+}
+
 .progress-screen .progress-exercise-combobox > button {
   width: 2.75rem;
   height: 2.75rem;
   border: 0;
   border-left: 1px solid var(--p-line);
   border-radius: 0 13px 13px 0;
+  display: grid;
+  place-items: center;
+  padding: 0;
   background: transparent;
   color: var(--p-ink-2);
 }
@@ -3752,11 +3749,6 @@ button.pulse-card:active,
 .pulse-meter i {
   transform-origin: left;
   animation: grow-x 760ms var(--ease-out) 120ms backwards;
-}
-
-.pulse-heat i {
-  animation: fade-in 480ms ease backwards;
-  animation-delay: var(--d, 0ms);
 }
 
 .pulse-chart-line,

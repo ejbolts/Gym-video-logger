@@ -1,18 +1,18 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { Icon } from './Icon';
-import { Meter, SparkBars, Sparkline, TrainingHeatmap } from './PulseCharts';
+import { Meter, SparkBars, Sparkline } from './PulseCharts';
 import {
   averageOf,
   CATEGORY_LABELS,
   daysBetween,
-  formatVolume,
   parseLocalDate,
   recentStrengthRecords,
   sessionTemplateFor,
   shortDate,
   trainingDayGrid,
   weekStartDayFrom,
+  weeklyBodyweightAverages,
   weeklyTrainingTotals,
   type SessionTemplate,
 } from './trainingSummary';
@@ -69,6 +69,7 @@ export interface TodayScreenProps {
   onOpenBody: () => void;
   onOpenSettings: () => void;
   onOpenVideos: () => void;
+  calendar?: ReactNode;
   today?: string;
 }
 
@@ -90,6 +91,7 @@ export function TodayScreen({
   onOpenBody,
   onOpenSettings,
   onOpenVideos,
+  calendar,
   today = localDate(),
 }: TodayScreenProps) {
   const weekStartDay = weekStartDayFrom(data?.weekly_sets?.week_start ?? data?.zone2?.week_start);
@@ -110,11 +112,14 @@ export function TodayScreen({
   const history = weeks.slice(0, -1);
   const haveWorkouts = workouts.length > 0;
   const workoutsThisWeek = haveWorkouts ? (currentWeek?.workouts ?? 0) : data?.workouts_this_week;
-  const setsThisWeek = haveWorkouts ? (currentWeek?.sets ?? 0) : data?.sets_this_week;
-  const volumeThisWeek = haveWorkouts ? (currentWeek?.volumeKg ?? 0) : data?.volume_this_week_kg;
+  // Cardio sessions are mirrored from workouts' cardio movements, so no workouts means none.
+  const cardioSessionsThisWeek = haveWorkouts
+    ? (currentWeek?.cardioSessions ?? 0)
+    : data
+      ? 0
+      : null;
   const averageWorkouts = averageOf(history.map((week) => week.workouts));
-  const averageSets = averageOf(history.map((week) => week.sets));
-  const averageVolume = averageOf(history.map((week) => week.volumeKg));
+  const averageCardioSessions = averageOf(history.map((week) => week.cardioSessions));
   const trainingDays = grid.flat().filter((day) => day.workouts > 0).length;
   const muscles = (data?.weekly_sets?.muscle_groups ?? [])
     .filter((muscle) => muscle.raw_sets > 0)
@@ -137,6 +142,13 @@ export function TodayScreen({
       )
     : null;
   const monthChange = latest && monthAgo ? latest.weight_kg - monthAgo.weight_kg : null;
+  const weeklyWeights = useMemo(
+    () =>
+      weeklyBodyweightAverages(measurements, today, weekStartDay, 12).filter(
+        (value): value is number => value !== null,
+      ),
+    [measurements, today, weekStartDay],
+  );
   const records = recentStrengthRecords(personalRecords, 3);
   const recommendationLabel = recommendation
     ? recommendation.category === 'cardio'
@@ -259,29 +271,38 @@ export function TodayScreen({
             label="Workouts per week, last 12 weeks"
           />
         </button>
-        <button type="button" className="pulse-kpi" onClick={onOpenHistory}>
-          <span>Working sets</span>
-          <strong>{setsThisWeek ?? '–'}</strong>
-          <em>{averageSets === null ? 'This week' : `12-wk avg ${Math.round(averageSets)}`}</em>
-          <SparkBars
-            values={weeks.map((week) => week.sets)}
-            label="Working sets per week, last 12 weeks"
-          />
-        </button>
-        <button type="button" className="pulse-kpi" onClick={onOpenHistory}>
-          <span>Volume</span>
-          <strong>{volumeThisWeek === undefined ? '–' : formatVolume(volumeThisWeek)}</strong>
+        <button type="button" className="pulse-kpi" onClick={onOpenCardio}>
+          <span>Cardio sessions</span>
+          <strong>{cardioSessionsThisWeek ?? '–'}</strong>
           <em>
-            {averageVolume === null ? 'This week' : `12-wk avg ${formatVolume(averageVolume)}`}
+            {averageCardioSessions === null
+              ? 'This week'
+              : `12-wk avg ${averageCardioSessions.toFixed(1)}`}
           </em>
           <SparkBars
-            values={weeks.map((week) => week.volumeKg)}
-            label="Volume per week, last 12 weeks"
+            values={weeks.map((week) => week.cardioSessions)}
+            label="Cardio sessions per week, last 12 weeks"
+          />
+        </button>
+        <button type="button" className="pulse-kpi" onClick={onOpenBody}>
+          <span>Body weight</span>
+          <strong>{latest ? `${latest.weight_kg.toFixed(1)} kg` : '–'}</strong>
+          <em>
+            {monthChange !== null
+              ? `${monthChange > 0 ? '+' : monthChange < 0 ? '−' : '±'}${Math.abs(monthChange).toFixed(1)} kg / 4 wk`
+              : measurements.length
+                ? `${measurements.length} ${measurements.length === 1 ? 'check-in' : 'check-ins'}`
+                : 'No check-ins'}
+          </em>
+          <Sparkline
+            values={weeklyWeights}
+            label="Average body weight per week, last 12 weeks"
+            height={26}
           />
         </button>
       </section>
 
-      <section className="pulse-card" aria-labelledby="consistency-title">
+      <section className="calendar-panel pulse-card" aria-labelledby="consistency-title">
         <header className="pulse-card-header">
           <h2 id="consistency-title">Consistency</h2>
           <span>Last 12 weeks</span>
@@ -302,15 +323,7 @@ export function TodayScreen({
             <b>{(trainingDays / 12).toFixed(1)}</b>
           </div>
         </div>
-        <TrainingHeatmap weeks={grid} today={today} />
-        <div className="heat-legend" aria-hidden="true">
-          <span>Fewer sets</span>
-          <i data-level="0" />
-          <i data-level="1" />
-          <i data-level="2" />
-          <i data-level="3" />
-          <span>More</span>
-        </div>
+        {calendar}
       </section>
 
       <section className="pulse-card" aria-labelledby="muscle-sets-title">
@@ -528,13 +541,14 @@ export function DashboardQuickBodyweight({
             max="500"
             step="0.1"
             value={weight}
+            style={{ '--bw-chars': `${Math.max(weight.length, 1)}ch` } as CSSProperties}
             onChange={(event) => {
               setWeight(event.target.value);
               setError(null);
               setMessage(null);
             }}
           />
-          <b>kg</b>
+          <b aria-hidden="true">kg</b>
         </label>
         <button
           type="button"

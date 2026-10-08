@@ -108,9 +108,10 @@ describe('App startup', () => {
     expect(markup).toContain('Up next');
     expect(markup).toContain('Next in your Push → Pull → Legs rotation.');
     expect(markup).toContain('Pull day');
-    expect(markup).toContain('Working sets</span><strong>25</strong>');
     expect(markup).toContain('Workouts</span><strong>4</strong>');
-    expect(markup).toContain('23.1 t');
+    expect(markup).toContain('Cardio sessions</span><strong>0</strong>');
+    expect(markup).toContain('Body weight</span><strong>–</strong><em>No check-ins</em>');
+    expect(markup).not.toContain('Working sets</span>');
     expect(markup).toContain('Quadriceps');
     expect(markup).not.toContain('Side delts</span>');
     expect(markup).toContain('1 muscles not trained yet');

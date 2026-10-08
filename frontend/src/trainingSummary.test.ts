@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
   compactSetSummary,
   groupWorkoutsByWeek,
-  heatLevel,
   mostTrainedExerciseId,
   niceTicks,
   recentStrengthRecords,
@@ -11,6 +10,7 @@ import {
   weekGroupLabel,
   weekStartFor,
   weeklyBestPoints,
+  weeklyBodyweightAverages,
   weeklyTrainingTotals,
   workoutDisplayName,
 } from './trainingSummary';
@@ -132,7 +132,43 @@ describe('training summary helpers', () => {
     expect(weeks[0]).toMatchObject({ workouts: 1, sets: 1 });
   });
 
-  it('builds a week-by-day heatmap grid ending in the current week', () => {
+  it('counts cardio sessions per week, including cardio after strength', () => {
+    const bike = exercise('bike', 'Bike', 'cardio');
+    const treadmill = exercise('treadmill', 'Treadmill', 'cardio');
+    const cardioSet = (seconds: number | null, completed = true) =>
+      trackedSet(0, 0, { weight_kg: null, reps: null, duration_seconds: seconds, completed });
+    const sessions = [
+      // Cardio-only workout: one session.
+      workout('c1', '2026-10-06', 'cardio', [{ exercise: bike, sets: [cardioSet(1800)] }]),
+      // Strength plus two cardio movements; one is under a minute and one is not completed.
+      workout('c2', '2026-10-05', 'lower', [
+        { exercise: squat, sets: [trackedSet(100, 5)] },
+        { exercise: treadmill, sets: [cardioSet(600), cardioSet(900)] },
+        { exercise: bike, sets: [cardioSet(45)] },
+        { exercise: bike, sets: [cardioSet(1200, false)] },
+      ]),
+      workout('c3', '2026-09-30', 'pull', [{ exercise: row, sets: [trackedSet(68, 10)] }]),
+    ];
+    const weeks = weeklyTrainingTotals(sessions, '2026-10-06', 1, 2);
+
+    expect(weeks.map((week) => week.cardioSessions)).toEqual([0, 2]);
+    expect(weeks.map((week) => week.workouts)).toEqual([1, 2]);
+  });
+
+  it('averages body weight per week and leaves empty weeks null', () => {
+    const entries = [
+      { measurement_date: '2026-10-06', weight_kg: 80 },
+      { measurement_date: '2026-10-05', weight_kg: 81 },
+      { measurement_date: '2026-09-17', weight_kg: 83 },
+      { measurement_date: '2026-09-10', weight_kg: 90 },
+      { measurement_date: '2026-10-09', weight_kg: 70 },
+    ];
+
+    expect(weeklyBodyweightAverages(entries, '2026-10-06', 1, 4)).toEqual([83, null, null, 80.5]);
+    expect(weeklyBodyweightAverages([], '2026-10-06', 1, 2)).toEqual([null, null]);
+  });
+
+  it('builds a week-by-day training grid ending in the current week', () => {
     const grid = trainingDayGrid(workouts, '2026-10-06', 1, 2);
 
     expect(grid).toHaveLength(2);
@@ -140,7 +176,6 @@ describe('training summary helpers', () => {
     expect(grid[1][0]).toMatchObject({ date: '2026-10-05', sets: 1, categories: ['lower'] });
     expect(grid[1][2].future).toBe(true);
     expect(grid[0][5]).toMatchObject({ date: '2026-10-03', sets: 4 });
-    expect([0, 5, 15, 25].map(heatLevel)).toEqual([0, 1, 2, 3]);
   });
 
   it('chooses clean 1/2/5 axis ticks', () => {

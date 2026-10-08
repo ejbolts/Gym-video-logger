@@ -5,13 +5,7 @@ import type {
   KeyboardEvent as ReactKeyboardEvent,
   PointerEvent as ReactPointerEvent,
 } from 'react';
-import {
-  heatLevel,
-  niceTicks,
-  parseLocalDate,
-  shortDate,
-  type TrainingDay,
-} from './trainingSummary';
+import { niceTicks, parseLocalDate, shortDate } from './trainingSummary';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -408,9 +402,16 @@ export function SparkBars({ values, label }: { values: number[]; label: string }
   );
 }
 
-export function Sparkline({ values, label }: { values: number[]; label: string }) {
+export function Sparkline({
+  values,
+  label,
+  height = 34,
+}: {
+  values: number[];
+  label: string;
+  height?: number;
+}) {
   const { ref, width } = useElementWidth<HTMLDivElement>(140);
-  const height = 34;
   if (values.length < 2) return <div className="pulse-sparkline" ref={ref} />;
   const min = Math.min(...values);
   const max = Math.max(...values);
@@ -441,45 +442,6 @@ export function Meter({ value, max, label }: { value: number; max: number; label
       aria-valuenow={value}
     >
       <i style={{ width: `${percent}%` }} />
-    </div>
-  );
-}
-
-const WEEKDAY_INITIALS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
-
-export function TrainingHeatmap({ weeks, today }: { weeks: TrainingDay[][]; today: string }) {
-  const firstWeek = weeks[0] ?? [];
-  const days = weeks.flat();
-  const trainedDays = days.filter((day) => !day.future && day.sets > 0).length;
-  const totalSets = days.reduce((total, day) => total + day.sets, 0);
-  return (
-    <div className="pulse-heat-wrap">
-      <div className="pulse-heat-days" aria-hidden="true">
-        {firstWeek.map((day, index) => (
-          <span key={day.date}>
-            {index % 2 === 0 ? WEEKDAY_INITIALS[parseLocalDate(day.date).getDay()] : ''}
-          </span>
-        ))}
-      </div>
-      <div
-        className="pulse-heat"
-        role="img"
-        aria-label={`Working sets per day over the last ${weeks.length} weeks: ${trainedDays} training days, ${totalSets} working sets.`}
-      >
-        {days.map((day, index) => (
-          <i
-            key={day.date}
-            style={{ '--d': `${Math.floor(index / 7) * 22}ms` } as CSSProperties}
-            data-level={day.future ? undefined : heatLevel(day.sets)}
-            className={`${day.date === today ? 'today' : ''} ${day.future ? 'future' : ''}`}
-            title={
-              day.future
-                ? undefined
-                : `${shortDate(day.date)}: ${day.sets ? `${day.sets} working sets` : 'rest day'}`
-            }
-          />
-        ))}
-      </div>
     </div>
   );
 }
