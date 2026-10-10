@@ -1,4 +1,4 @@
-import { defineConfig, loadEnv, type Plugin } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 
@@ -37,7 +37,7 @@ function resetProductionWorkerDuringDevelopment(): Plugin {
   };
 }
 
-export default defineConfig(({ mode }) => ({
+export default defineConfig({
   plugins: [
     react(),
     resetProductionWorkerDuringDevelopment(),
@@ -85,6 +85,6 @@ export default defineConfig(({ mode }) => ({
   ],
   server: {
     allowedHosts: ['mainpc.tail494810.ts.net'],
-    proxy: { '/api': loadEnv(mode, '.', 'GYM_').GYM_BACKEND_URL || 'http://127.0.0.1:8000' },
+    proxy: { '/api': 'http://127.0.0.1:8000' },
   },
-}));
+});

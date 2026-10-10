@@ -4,8 +4,8 @@ Revision ID: 0014_workout_cardio_sessions
 Revises: 0013_treadmill_set_fields
 """
 
-import uuid
 from datetime import UTC, datetime
+import uuid
 
 import sqlalchemy as sa
 from alembic import op

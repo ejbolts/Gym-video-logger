@@ -525,9 +525,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(tracker_router)
 
-    frontend_dist = settings.frontend_dist_dir or (
-        Path(__file__).resolve().parents[2] / "frontend" / "dist"
-    )
+    frontend_dist = Path(__file__).resolve().parents[2] / "frontend" / "dist"
     if frontend_dist.is_dir():
         app.mount("/", FrontendFiles(directory=frontend_dist, html=True), name="frontend")
 

@@ -273,7 +273,8 @@ def seed_muscle_mappings(db: Session) -> None:
                 exercise.muscle_contributions.remove(contribution)
                 changed = True
         existing = {
-            contribution.muscle_name: contribution for contribution in exercise.muscle_contributions
+            contribution.muscle_name: contribution
+            for contribution in exercise.muscle_contributions
         }
         for muscle, role, factor in mappings:
             contribution = existing.get(muscle)

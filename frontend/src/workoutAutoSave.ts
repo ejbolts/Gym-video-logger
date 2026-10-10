@@ -2,7 +2,10 @@ import type { ExerciseKind, WorkoutSetInput } from './types';
 
 type DraftSetForAutoSave = WorkoutSetInput & { fromPrevious?: boolean };
 
-export function isWorkoutSetAutoSavable(kind: ExerciseKind, set: DraftSetForAutoSave): boolean {
+export function isWorkoutSetAutoSavable(
+  kind: ExerciseKind,
+  set: DraftSetForAutoSave,
+): boolean {
   if (set.completed) return true;
 
   if (kind === 'cardio') {

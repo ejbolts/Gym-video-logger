@@ -96,7 +96,7 @@ uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000
 
 Open `http://127.0.0.1:8000`. For frontend hot reload during development, run `npm run dev` from `frontend/`; Vite proxies `/api` to the local FastAPI server.
 
-For Windows stable/verification use, follow the separate-worktree profiles below. `./start-app.ps1` now defaults to **verification on port 8001**, with isolated sample data. It refuses the main checkout. The stable phone URL remains `https://mainpc.tail494810.ts.net:8446`; verification uses `:8447`.
+On Windows, `./start-app.ps1` builds the current frontend before starting the server and opens that same production build on port 8000. `./start-app.ps1 -Dev` also refreshes that phone build before starting Vite on port 5173, so development cannot leave the phone endpoint on an older bundle. Phone access should proxy port 8000; this installation uses `https://mainpc.tail494810.ts.net:8446`.
 
 The menu has one current dark/blue theme, with three total stats above three weekly/bodyweight-trend stats. The old powerlifting stars menu is retired. Building replaces the previous `frontend/dist` assets. The server revalidates HTML, the service worker, and the manifest; fingerprinted assets may be cached. Service-worker updates activate in the background, clean obsolete precaches, and are checked when returning to the app or reconnecting. Normal screens reload when a new worker takes control. Workout and upload screens wait for the next manual reload so work is not interrupted. The Vite development server replaces any installed production worker with a cache-clearing pass-through worker while preserving push support. Workout data, drafts, settings, and push subscriptions are retained.
 
@@ -133,39 +133,6 @@ Set-Location frontend; npm run format:check; npm run lint; npm run build; npm te
 
 Use `ruff format backend` and `npm run format` to apply formatting.
 
-## Stable and verification instances on Windows
-
-Use two separate Git worktrees. The stable worktree is detached at an exact commit that has passed verification; feature work uses a task branch. Neither launcher updates Git or changes Tailscale configuration.
-
-```powershell
-git fetch origin
-$verifiedCommit = '<verified full commit SHA containing the profile launchers>'
-git worktree add --detach ../gym-stable $verifiedCommit
-git worktree add -b feature/gym-verification ../gym-verification $verifiedCommit
-```
-
-In the feature worktree:
-
-```powershell
-./start-verification.ps1
-# Optional hot reload: Vite on 5175, proxying the verification backend on 8001.
-./start-verification.ps1 -Dev
-```
-
-Verification always uses `.runtime/verification-data/` in its own worktree, `frontend/dist-verification/`, mock YouTube uploads, separate OAuth paths and its own Web Push key. It overrides inherited or `.env` storage/credential settings, so do not copy real data or secrets into that directory. API requests from Vite also go to port 8001. The phone URL serves the built app through the backend.
-
-In the stable worktree, explicitly select the existing real data directory:
-
-```powershell
-./start-stable.ps1 -VerifiedCommit $verifiedCommit -DataRoot 'C:\path\to\existing-gym-data'
-```
-
-Stable uses port 8000 and `frontend/dist-stable/`. It refuses a dirty checkout, an attached branch, a different commit, development mode or a directory marked as verification data. Sample seeding is disabled. Configure its local `.env` with the intended YouTube settings and absolute credential paths; real uploads require the OAuth setup described below. The explicit data directory is used for the database, media and push key. Never run migrations against real data as part of a verification task.
-
-The launchers install dependencies on first use, migrate the selected database and build their own frontend. `-NoBrowser` suppresses browser opening. `-PythonExecutable <absolute python.exe path>` can reuse an existing compatible Python environment; source imports still come from the selected worktree. Without it, each worktree creates its own `.venv`. Logs remain in that worktree's `.runtime/<profile>/logs/`. Startup refuses occupied ports and locks both the checkout and data directory, so a second instance cannot rebuild a running checkout or share its storage. Stop with Ctrl+C; only processes started by that launcher are stopped.
-
-Run the checks above before choosing a stable commit. A stable update is an explicit operation: stop the stable instance, create a new detached worktree for the newly verified commit, configure it, and start it using the same intended real data directory. Do not edit or pull the running stable worktree.
-
 ## Tailscale: private phone access
 
 Keep Uvicorn bound to `127.0.0.1`; do not bind it directly to a LAN or public interface, open a router port, or use Tailscale Funnel. Any person/device allowed by your Tailnet policy to reach this PC can use this intentionally unauthenticated app.
@@ -180,14 +147,11 @@ tailscale serve --help
 The current Tailscale Serve syntax is `tailscale serve [flags] <target>`. With FastAPI listening on port 8000, configure its private HTTPS reverse proxy as follows:
 
 ```powershell
-tailscale serve --bg --https=8446 http://127.0.0.1:8000
-tailscale serve --bg --https=8447 http://127.0.0.1:8001
+tailscale serve --https=443 http://127.0.0.1:8000
 tailscale serve status
 ```
 
-These commands use private Serve, not Funnel. Open the HTTPS MagicDNS URL shown by `tailscale serve status` on your phone while it is connected to the same Tailnet. Install the PWA from that HTTPS page:
-
-On MainPC, port **443** serves T3 Code on local port **3773** and must be preserved. Other existing routes are **8444 -> 8088** (Calorie Tracker), **8445 -> 5174** (an old gym Vite preview), **8886 -> 8000** (a gym alias), and **8443 -> 3000** (owner unconfirmed). Leave them in place unless a separate cleanup is requested; an offline backend alone does not prove an endpoint has no users. Inspect each host independently rather than assuming the laptop has the same assignments.
+The command above is private Serve, not Funnel. Open the HTTPS MagicDNS URL shown by `tailscale serve status` on your phone while it is connected to the same Tailnet. Install the PWA from that HTTPS page:
 
 - iPhone/iPad: Safari → Share → **Add to Home Screen**.
 - Android: Chrome menu → **Install app** / **Add to Home screen**.

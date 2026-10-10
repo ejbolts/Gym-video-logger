@@ -89,7 +89,8 @@ def merge_exercise(
         ):
             connection.execute(
                 sa.text(
-                    f"UPDATE {table} SET exercise_id = :canonical_id WHERE exercise_id = :alias_id"
+                    f"UPDATE {table} SET exercise_id = :canonical_id "
+                    "WHERE exercise_id = :alias_id"
                 ),
                 {"canonical_id": canonical.id, "alias_id": alias.id},
             )

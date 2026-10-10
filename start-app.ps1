@@ -1,34 +1,23 @@
 param(
   [switch]$NoBrowser,
-  [switch]$Dev,
-  [ValidateSet('Stable', 'Verification')][string]$Environment = 'Verification',
-  [string]$VerifiedCommit,
-  [string]$DataRoot,
-  [string]$PythonExecutable
+  [switch]$Dev
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $projectRoot = $PSScriptRoot
-. (Join-Path $projectRoot 'scripts\launch-profile.ps1')
-$launchProfile = Get-GymLaunchProfile -ProjectRoot $projectRoot -Environment $Environment `
-  -VerifiedCommit $VerifiedCommit -DataRoot $DataRoot -Dev:$Dev
 $frontendRoot = Join-Path $projectRoot 'frontend'
-$venvPython = if ($PythonExecutable) { (Resolve-Path -LiteralPath $PythonExecutable).Path } else { Join-Path $projectRoot '.venv\Scripts\python.exe' }
-$backendUrl = "http://127.0.0.1:$($launchProfile.BackendPort)"
-$frontendUrl = if ($Dev) { "http://127.0.0.1:$($launchProfile.FrontendPort)" } else { $backendUrl }
-$logRoot = $launchProfile.LogRoot
+$venvPython = Join-Path $projectRoot '.venv\Scripts\python.exe'
+$backendUrl = 'http://127.0.0.1:8000'
+$frontendUrl = if ($Dev) { 'http://127.0.0.1:5173' } else { $backendUrl }
+$logRoot = Join-Path ([IO.Path]::GetTempPath()) 'form-gym-logger'
 $backendLog = Join-Path $logRoot 'backend.log'
 $backendErrorLog = Join-Path $logRoot 'backend-error.log'
 $frontendLog = Join-Path $logRoot 'frontend.log'
 $frontendErrorLog = Join-Path $logRoot 'frontend-error.log'
 $backendProcess = $null
 $frontendProcess = $null
-$checkoutLock = $null
-$storageLock = $null
-$previousLocation = Get-Location
-$previousEnvironment = @{}
 
 function New-PythonEnvironment {
   Write-Host 'Creating the Python environment (first run only)...' -ForegroundColor Cyan
@@ -129,28 +118,10 @@ function Invoke-Alembic([string[]]$Arguments) {
   if ($LASTEXITCODE -ne 0) { throw 'Could not update the local database.' }
 }
 
-try {
-  Set-Location $projectRoot
-  foreach ($port in @($launchProfile.BackendPort) + $(if ($Dev) { @($launchProfile.FrontendPort) } else { @() })) {
-    if (Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue) {
-      throw "Port $port is already in use. Stop the owning instance explicitly; no process was changed."
-    }
-  }
-  New-Item -ItemType Directory -Path (Join-Path $projectRoot '.runtime') -Force | Out-Null
-  $checkoutLock = [IO.File]::Open((Join-Path $projectRoot '.runtime\instance.lock'), 'OpenOrCreate', 'ReadWrite', 'None')
-  New-Item -ItemType Directory -Path $launchProfile.DataRoot -Force | Out-Null
-  $storageLock = [IO.File]::Open((Join-Path $launchProfile.DataRoot '.gym-instance.lock'), 'OpenOrCreate', 'ReadWrite', 'None')
-  if ((Test-Path -LiteralPath $launchProfile.RolePath) -and
-      ([IO.File]::ReadAllText($launchProfile.RolePath)).Trim() -ne $Environment) {
-    throw 'This data directory belongs to the other environment.'
-  }
-  [IO.File]::WriteAllText($launchProfile.RolePath, $Environment)
-  New-Item -ItemType Directory -Path $logRoot -Force | Out-Null
-  foreach ($entry in $launchProfile.Variables.GetEnumerator()) {
-    $previousEnvironment[$entry.Key] = [Environment]::GetEnvironmentVariable($entry.Key, 'Process')
-    [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, 'Process')
-  }
+Set-Location $projectRoot
+New-Item -ItemType Directory -Path $logRoot -Force | Out-Null
 
+try {
   if (-not (Test-Path $venvPython)) {
     New-PythonEnvironment
     & $venvPython -m pip install --upgrade pip
@@ -191,7 +162,7 @@ try {
   Write-Host 'Building the current app for PC and phone...' -ForegroundColor Cyan
   Push-Location $frontendRoot
   try {
-    & $npm run build -- --outDir $launchProfile.FrontendDist
+    & $npm run build
     if ($LASTEXITCODE -ne 0) { throw 'Could not build the current app.' }
   }
   finally {
@@ -200,13 +171,13 @@ try {
 
   Write-Host 'Starting FORM...' -ForegroundColor Cyan
   $backendProcess = Start-Process -FilePath $venvPython `
-    -ArgumentList @('-m', 'uvicorn', 'app.main:app', '--app-dir', 'backend', '--host', '127.0.0.1', '--port', $launchProfile.BackendPort) `
+    -ArgumentList @('-m', 'uvicorn', 'app.main:app', '--app-dir', 'backend', '--host', '127.0.0.1', '--port', '8000') `
     -WorkingDirectory $projectRoot -WindowStyle Hidden -PassThru `
     -RedirectStandardOutput $backendLog -RedirectStandardError $backendErrorLog
 
   if ($Dev) {
     $frontendProcess = Start-Process -FilePath $npm `
-      -ArgumentList @('run', 'dev', '--', '--host', '127.0.0.1', '--port', $launchProfile.FrontendPort, '--strictPort') `
+      -ArgumentList @('run', 'dev', '--', '--host', '127.0.0.1', '--port', '5173', '--strictPort') `
       -WorkingDirectory $frontendRoot -WindowStyle Hidden -PassThru `
       -RedirectStandardOutput $frontendLog -RedirectStandardError $frontendErrorLog
   }
@@ -215,11 +186,7 @@ try {
   if ($Dev) { Wait-ForApp $frontendUrl $frontendProcess 'Frontend' }
 
   Write-Host ''
-  Write-Host "FORM $Environment is running at $frontendUrl (private HTTPS port $($launchProfile.HttpsPort))" -ForegroundColor Green
-  Write-Host "Commit: $($launchProfile.Commit); data: $($launchProfile.DataRoot)" -ForegroundColor DarkGray
-  if ($launchProfile.HasUncommittedChanges) {
-    Write-Host 'This verification build includes uncommitted worktree changes.' -ForegroundColor DarkGray
-  }
+  Write-Host "FORM is running at $frontendUrl" -ForegroundColor Green
   Write-Host 'Press Ctrl+C here to stop the app.' -ForegroundColor DarkGray
   Write-Host "Logs: $logRoot" -ForegroundColor DarkGray
 
@@ -236,11 +203,5 @@ try {
 finally {
   Stop-ProcessTree $frontendProcess
   Stop-ProcessTree $backendProcess
-  foreach ($entry in $previousEnvironment.GetEnumerator()) {
-    [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, 'Process')
-  }
-  if ($storageLock) { $storageLock.Dispose() }
-  if ($checkoutLock) { $checkoutLock.Dispose() }
-  Set-Location $previousLocation
   Write-Host 'FORM stopped.' -ForegroundColor DarkGray
 }

@@ -14,7 +14,6 @@ class Settings(BaseSettings):
 
     data_dir: Path = Field(default=Path("data"))
     database_path: Path = Field(default=Path("data/gym-video-logger.db"))
-    frontend_dist_dir: Path | None = None
     max_file_size_bytes: int = Field(default=20 * 1024 * 1024 * 1024, gt=0)
     max_session_size_bytes: int = Field(default=100 * 1024 * 1024 * 1024, gt=0)
     max_photo_size_bytes: int = Field(default=15 * 1024 * 1024, gt=0)
