@@ -166,6 +166,7 @@ import {
   isCompletedWorkingSet,
   latestExerciseSets,
   restTimerSecondsAfterSetUpdate,
+  suggestNextSetFromLoggedSet,
 } from './workoutSets';
 import { finalizeWorkoutIdentity } from './workoutCategory';
 import {
@@ -2241,18 +2242,25 @@ function WorkoutLogger({
       movement && currentSet
         ? restTimerSecondsAfterSetUpdate(movement.exercise.kind, currentSet, update)
         : null;
+    const loggingSet = update.completed === true && currentSet?.completed === false;
 
     setMovements((current) =>
-      current.map((movement) =>
-        movement.key === movementKey
-          ? {
-              ...movement,
-              sets: movement.sets.map((item) =>
-                item.key === setKey ? { ...item, ...update, fromPrevious: false } : item,
-              ),
-            }
-          : movement,
-      ),
+      current.map((movement) => {
+        if (movement.key !== movementKey) return movement;
+        const sets = movement.sets.map((item) =>
+          item.key === setKey ? { ...item, ...update, fromPrevious: false } : item,
+        );
+        return {
+          ...movement,
+          sets: loggingSet
+            ? suggestNextSetFromLoggedSet(
+                movement.exercise.kind,
+                sets,
+                sets.findIndex((item) => item.key === setKey),
+              )
+            : sets,
+        };
+      }),
     );
     if (restSeconds !== null) startRestTimer(restSeconds);
   }

@@ -7,6 +7,7 @@ import {
   latestExerciseSet,
   latestExerciseSets,
   restTimerSecondsAfterSetUpdate,
+  suggestNextSetFromLoggedSet,
 } from './workoutSets';
 
 const previousSet: WorkoutSetInput = {
@@ -271,5 +272,65 @@ describe('rest timer start', () => {
         { completed: true },
       ),
     ).toBeNull();
+  });
+});
+
+describe('next set suggestion after logging a set', () => {
+  type DraftSet = WorkoutSetInput & { fromPrevious?: boolean };
+  const working: DraftSet = { ...previousSet, set_type: 'normal', warmup: false, failed: false };
+  const logged: DraftSet = { ...working, weight_kg: 87.5, reps: 10, completed: true };
+  const suggested: DraftSet = {
+    ...working,
+    weight_kg: 70,
+    reps: 9,
+    completed: false,
+    fromPrevious: true,
+  };
+
+  it('copies the logged weight and reps into the next suggested set', () => {
+    const [, next] = suggestNextSetFromLoggedSet('strength', [logged, suggested], 0);
+
+    expect(next).toEqual({ ...suggested, weight_kg: 87.5, reps: 10 });
+    expect(next.fromPrevious).toBe(true);
+  });
+
+  it('only changes the set immediately after the logged one', () => {
+    const third = { ...suggested, reps: 8 };
+    const sets = suggestNextSetFromLoggedSet('strength', [logged, suggested, third], 0);
+
+    expect(sets[2]).toBe(third);
+  });
+
+  it('keeps sets the lifter has already entered or logged', () => {
+    const typed = { ...suggested, fromPrevious: false };
+    const done = { ...suggested, completed: true };
+
+    expect(suggestNextSetFromLoggedSet('strength', [logged, typed], 0)[1]).toBe(typed);
+    expect(suggestNextSetFromLoggedSet('strength', [logged, done], 0)[1]).toBe(done);
+  });
+
+  it('ignores warm-ups, drop sets, cardio and sets that are not logged', () => {
+    const warmup: DraftSet = { ...logged, set_type: 'warmup', warmup: true };
+    const drop: DraftSet = { ...suggested, set_type: 'drop' };
+    const unlogged = { ...logged, completed: false };
+
+    expect(suggestNextSetFromLoggedSet('strength', [warmup, suggested], 0)[1]).toBe(suggested);
+    expect(suggestNextSetFromLoggedSet('strength', [logged, drop], 0)[1]).toBe(drop);
+    expect(suggestNextSetFromLoggedSet('cardio', [logged, suggested], 0)[1]).toBe(suggested);
+    expect(suggestNextSetFromLoggedSet('strength', [unlogged, suggested], 0)[1]).toBe(suggested);
+  });
+
+  it('carries a set to failure forward like a working set', () => {
+    const failure = { ...logged, failed: true };
+
+    expect(suggestNextSetFromLoggedSet('strength', [failure, suggested], 0)[1].weight_kg).toBe(
+      87.5,
+    );
+  });
+
+  it('leaves the list alone when the logged set is the last one', () => {
+    const sets = [suggested, logged];
+
+    expect(suggestNextSetFromLoggedSet('strength', sets, 1)).toBe(sets);
   });
 });
