@@ -2243,6 +2243,10 @@ function WorkoutLogger({
         ? restTimerSecondsAfterSetUpdate(movement.exercise.kind, currentSet, update)
         : null;
     const loggingSet = update.completed === true && currentSet?.completed === false;
+    // Correcting the weight or reps of a logged set also moves the untouched suggestion after it.
+    const correctingLoggedSet =
+      currentSet?.completed === true &&
+      (update.weight_kg !== undefined || update.reps !== undefined);
 
     setMovements((current) =>
       current.map((movement) => {
@@ -2252,13 +2256,14 @@ function WorkoutLogger({
         );
         return {
           ...movement,
-          sets: loggingSet
-            ? suggestNextSetFromLoggedSet(
-                movement.exercise.kind,
-                sets,
-                sets.findIndex((item) => item.key === setKey),
-              )
-            : sets,
+          sets:
+            loggingSet || correctingLoggedSet
+              ? suggestNextSetFromLoggedSet(
+                  movement.exercise.kind,
+                  sets,
+                  sets.findIndex((item) => item.key === setKey),
+                )
+              : sets,
         };
       }),
     );
