@@ -57,6 +57,7 @@ import { CardioEnergyCard } from './CardioEnergyCard';
 import { CardioMetricsEditor } from './CardioMetricsEditor';
 import { fatEnergyEquivalent } from './cardioEnergy';
 import { cardioSetUpdateFromScan } from './cardioScreenshot';
+import { useBackdropDismiss } from './backdropDismiss';
 import { CachedTabPanel } from './CachedTabPanel';
 import { ConfettiBurst } from './ConfettiBurst';
 import { EdgeSwipeBack } from './EdgeSwipeBack';
@@ -355,6 +356,7 @@ function WorkoutCompletionDialog({
 }) {
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const onCloseRef = useRef(onClose);
+  const backdropDismiss = useBackdropDismiss(onClose);
 
   useEffect(() => {
     onCloseRef.current = onClose;
@@ -380,12 +382,7 @@ function WorkoutCompletionDialog({
   }, []);
 
   return createPortal(
-    <div
-      className="modal-backdrop pr-summary-backdrop"
-      onPointerDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
+    <div className="modal-backdrop pr-summary-backdrop" {...backdropDismiss}>
       <ConfettiBurst />
       <section
         className="pr-summary panel"
@@ -1297,6 +1294,7 @@ function CalendarCreateWorkoutDialog({
 }) {
   const cancelButtonRef = useRef<HTMLButtonElement>(null);
   const onCancelRef = useRef(onCancel);
+  const backdropDismiss = useBackdropDismiss(onCancel);
 
   useEffect(() => {
     onCancelRef.current = onCancel;
@@ -1322,12 +1320,7 @@ function CalendarCreateWorkoutDialog({
   }, []);
 
   return createPortal(
-    <div
-      className="modal-backdrop calendar-create-backdrop"
-      onPointerDown={(event) => {
-        if (event.target === event.currentTarget) onCancel();
-      }}
-    >
+    <div className="modal-backdrop calendar-create-backdrop" {...backdropDismiss}>
       <section
         className="calendar-create-dialog panel"
         role="dialog"
@@ -1600,6 +1593,7 @@ function CalendarDayDetail({
 }) {
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const onCloseRef = useRef(onClose);
+  const backdropDismiss = useBackdropDismiss(onClose);
 
   useEffect(() => {
     onCloseRef.current = onClose;
@@ -1625,12 +1619,7 @@ function CalendarDayDetail({
   }, []);
 
   return createPortal(
-    <div
-      className="modal-backdrop calendar-day-backdrop"
-      onPointerDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
+    <div className="modal-backdrop calendar-day-backdrop" {...backdropDismiss}>
       <section
         className="calendar-day-detail"
         role="dialog"
@@ -2893,6 +2882,8 @@ function WorkoutNameDialog({
     };
   }, []);
 
+  const backdropDismiss = useBackdropDismiss(onCancel);
+
   return createPortal(
     <dialog
       ref={dialogRef}
@@ -2904,9 +2895,7 @@ function WorkoutNameDialog({
         event.preventDefault();
         onCancel();
       }}
-      onPointerDown={(event) => {
-        if (event.target === event.currentTarget) onCancel();
-      }}
+      {...backdropDismiss}
     >
       <form
         onSubmit={(event) => {
@@ -2979,6 +2968,7 @@ function SupersetPicker({
   );
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const onCloseRef = useRef(onClose);
+  const backdropDismiss = useBackdropDismiss(onClose);
 
   useEffect(() => {
     onCloseRef.current = onClose;
@@ -3013,12 +3003,7 @@ function SupersetPicker({
   };
 
   return createPortal(
-    <div
-      className="modal-backdrop superset-picker-backdrop"
-      onPointerDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
+    <div className="modal-backdrop superset-picker-backdrop" {...backdropDismiss}>
       <section
         className="superset-picker panel"
         role="dialog"
@@ -3115,6 +3100,7 @@ function WorkoutCloseDialog({
 }) {
   const safeButtonRef = useRef<HTMLButtonElement>(null);
   const onCancelRef = useRef(onCancel);
+  const backdropDismiss = useBackdropDismiss(onCancel);
 
   useEffect(() => {
     onCancelRef.current = onCancel;
@@ -3140,12 +3126,7 @@ function WorkoutCloseDialog({
   }, []);
 
   return createPortal(
-    <div
-      className="modal-backdrop workout-close-backdrop"
-      onPointerDown={(event) => {
-        if (event.target === event.currentTarget) onCancel();
-      }}
-    >
+    <div className="modal-backdrop workout-close-backdrop" {...backdropDismiss}>
       <section
         className="workout-close-dialog panel"
         role="dialog"
@@ -4175,6 +4156,7 @@ function SetEntryConfirmationDialog({
 }) {
   const confirmButtonRef = useRef<HTMLButtonElement>(null);
   const onCancelRef = useRef(onCancel);
+  const backdropDismiss = useBackdropDismiss(onCancel);
   onCancelRef.current = onCancel;
 
   useEffect(() => {
@@ -4187,12 +4169,7 @@ function SetEntryConfirmationDialog({
   }, []);
 
   return createPortal(
-    <div
-      className="modal-backdrop set-entry-confirmation-backdrop"
-      onPointerDown={(event) => {
-        if (event.target === event.currentTarget) onCancel();
-      }}
-    >
+    <div className="modal-backdrop set-entry-confirmation-backdrop" {...backdropDismiss}>
       <section
         className="set-entry-confirmation panel"
         role="alertdialog"
@@ -4694,6 +4671,7 @@ function ExercisePicker({
   const listRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const onCloseRef = useRef(onClose);
+  const backdropDismiss = useBackdropDismiss(onClose);
   const initialViewportHeightRef = useRef(window.visualViewport?.height ?? window.innerHeight);
   const query = search.trim();
   const available = exercises.filter((exercise) => !excludedIds.includes(exercise.id));
@@ -4858,10 +4836,10 @@ function ExercisePicker({
       className="modal-backdrop exercise-picker-backdrop"
       style={viewportStyle}
       onPointerDown={(event) => {
-        if (event.target !== event.currentTarget) return;
-        event.preventDefault();
-        onClose();
+        backdropDismiss.onPointerDown(event);
+        if (event.target === event.currentTarget) event.preventDefault();
       }}
+      onClick={backdropDismiss.onClick}
     >
       <section
         className={`exercise-picker panel ${viewport.keyboardVisible ? 'keyboard-visible' : ''}`}
