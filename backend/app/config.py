@@ -7,6 +7,8 @@ from typing import Literal
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+DEFAULT_SESSION_COOKIE = "gym_session"
+
 
 class Settings(BaseSettings):
     """Runtime configuration loaded from environment variables or a local .env file."""
@@ -36,7 +38,10 @@ class Settings(BaseSettings):
     trim_end_seconds: float = Field(default=5, ge=0, le=60)
     seed_sample_data: bool = True
     cookie_secure: bool = False
-    session_days: int = Field(default=30, ge=1, le=365)
+    # Days without using the app before a sign-in ends; any use pushes the deadline back.
+    session_days: int = Field(default=90, ge=1, le=365)
+    # Browsers share cookies across ports, so a second instance on the same host needs its own name.
+    session_cookie: str = Field(default=DEFAULT_SESSION_COOKIE, pattern=r"^[A-Za-z0-9_-]+$")
     allow_registration: bool = False
     registration_invite_code: str | None = None
     # Starting value for the admin console's video switch; the console overrides it.

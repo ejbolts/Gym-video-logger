@@ -22,13 +22,13 @@ from starlette.datastructures import Headers
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from .config import Settings
+from .config import DEFAULT_SESSION_COOKIE, Settings
 from .database import get_db
 from .errors import api_error
 from .models import User, UserSession
 from .server_settings import VideoUploads, load_runtime_settings
 
-SESSION_COOKIE = "gym_session"
+SESSION_COOKIE = DEFAULT_SESSION_COOKIE
 # One of OWASP's equivalent scrypt profiles: 32 MiB per hash keeps a small VM comfortable.
 SCRYPT_N = 2**15
 SCRYPT_R = 8
@@ -42,6 +42,8 @@ MAX_PASSWORD_LENGTH = 256
 # lower, so locking someone out needs many addresses rather than ten guesses from anywhere.
 ACCOUNT_LOGIN_MAX_FAILURES = 100
 LAST_SEEN_WRITE_INTERVAL = timedelta(minutes=5)
+# How often a session in use has its expiry pushed back to a full lifetime.
+SESSION_REFRESH_INTERVAL = timedelta(days=1)
 UNSAFE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
 
@@ -122,7 +124,7 @@ def session_lifetime(settings: Settings) -> timedelta:
 
 def set_session_cookie(response: Response, token: str, settings: Settings) -> None:
     response.set_cookie(
-        SESSION_COOKIE,
+        settings.session_cookie,
         token,
         max_age=int(session_lifetime(settings).total_seconds()),
         httponly=True,
@@ -134,7 +136,7 @@ def set_session_cookie(response: Response, token: str, settings: Settings) -> No
 
 def clear_session_cookie(response: Response, settings: Settings) -> None:
     response.delete_cookie(
-        SESSION_COOKIE,
+        settings.session_cookie,
         httponly=True,
         samesite="lax",
         secure=settings.cookie_secure,
@@ -201,7 +203,7 @@ def get_auth_context(
     settings: AppSettings,
     db: Annotated[Session, Depends(get_db)],
 ) -> AuthContext:
-    token = request.cookies.get(SESSION_COOKIE)
+    token = request.cookies.get(settings.session_cookie)
     if not token:
         raise not_authenticated()
     row = db.execute(
@@ -220,8 +222,9 @@ def get_auth_context(
         db.commit()
         raise not_authenticated()
     lifetime = session_lifetime(settings)
-    if expires_at - now < lifetime / 2:
-        # Sliding expiry: keep active users signed in, and refresh the browser cookie to match.
+    if expires_at - now < lifetime - min(SESSION_REFRESH_INTERVAL, lifetime / 2):
+        # Sliding expiry: a sign-in only ends after a full lifetime without use. Refresh the
+        # browser cookie to match.
         session.expires_at = now + lifetime
         session.last_seen_at = user.last_active_at = now
         db.commit()

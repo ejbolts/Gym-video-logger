@@ -905,10 +905,18 @@ def test_expired_sessions_are_pruned_when_someone_signs_in(client):
         assert db.scalar(select(func.count(UserSession.id))) == 2
 
 
-def test_session_expiry_slides_forward_when_less_than_half_remains(client):
+def test_sign_in_lasts_ninety_days_by_default(client):
+    response = login(TestClient(client.app), "owner@example.com")
+    assert f"max-age={90 * 24 * 60 * 60}" in response.headers["set-cookie"].lower()
+    with SessionLocal() as db:
+        expires = db.scalar(select(UserSession.expires_at)).replace(tzinfo=UTC)
+    assert expires > datetime.now(UTC) + timedelta(days=89, hours=23)
+
+
+def test_session_expiry_slides_forward_after_a_day_of_use(client):
     with SessionLocal() as db:
         row = db.scalar(select(UserSession))
-        row.expires_at = datetime.now(UTC) + timedelta(days=1)
+        row.expires_at = datetime.now(UTC) + timedelta(days=88, hours=23)
         db.commit()
     response = client.get("/api/auth/me")
     assert response.status_code == 200
@@ -916,11 +924,35 @@ def test_session_expiry_slides_forward_when_less_than_half_remains(client):
     with SessionLocal() as db:
         row = db.scalar(select(UserSession))
         expires = row.expires_at.replace(tzinfo=UTC)
-        assert expires > datetime.now(UTC) + timedelta(days=29)
+        assert expires > datetime.now(UTC) + timedelta(days=89, hours=23)
 
-    # With plenty of time left nothing is rewritten or re-sent.
+    # Within a day of the last refresh nothing is rewritten or re-sent.
     again = client.get("/api/auth/me")
     assert "set-cookie" not in again.headers
+
+
+def test_short_session_lifetimes_still_slide_forward():
+    with app_client(session_days=1) as short_client:
+        register_user(short_client)
+        with SessionLocal() as db:
+            row = db.scalar(select(UserSession))
+            row.expires_at = datetime.now(UTC) + timedelta(hours=11)
+            db.commit()
+        assert "set-cookie" in short_client.get("/api/auth/me").headers
+
+
+def test_session_cookie_name_is_configurable_so_instances_on_one_host_stay_separate():
+    with app_client(session_cookie="gym_session_test") as test_client:
+        register_user(test_client)
+        assert SESSION_COOKIE not in test_client.cookies
+        assert test_client.get("/api/auth/me").status_code == 200
+        # The other instance's cookie is ignored rather than treated as this instance's session.
+        token = test_client.cookies.get("gym_session_test")
+        stray = TestClient(test_client.app, cookies={SESSION_COOKIE: token})
+        assert stray.get("/api/auth/me").status_code == 401
+        logout = test_client.post("/api/auth/logout")
+        assert "gym_session_test=" in logout.headers["set-cookie"]
+        assert test_client.get("/api/auth/me").status_code == 401
 
 
 # --- cross-user isolation ---
