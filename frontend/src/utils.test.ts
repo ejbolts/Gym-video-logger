@@ -6,6 +6,7 @@ import {
   formatSeconds,
   formatWorkoutTimeRange,
   mergeUniqueById,
+  itemsInSelectionOrder,
   reorder,
   workoutDurationMinutes,
   workoutTimeInputValue,
@@ -42,6 +43,35 @@ describe('display formatting', () => {
 });
 
 describe('workout list helpers', () => {
+  const library = [{ id: 'bench' }, { id: 'row' }, { id: 'squat' }];
+
+  it('adds exercises in selection order rather than library order', () => {
+    const selected = itemsInSelectionOrder(library, ['squat', 'bench', 'row']);
+    expect(mergeUniqueById([{ id: 'existing' }], selected).map((item) => item.id)).toEqual([
+      'existing',
+      'squat',
+      'bench',
+      'row',
+    ]);
+  });
+
+  it('puts a deselected and reselected exercise at the end', () => {
+    expect(itemsInSelectionOrder(library, ['row', 'squat', 'bench'])).toEqual([
+      library[1],
+      library[2],
+      library[0],
+    ]);
+  });
+
+  it('handles empty selections and ignores unavailable exercise IDs', () => {
+    expect(itemsInSelectionOrder(library, [])).toEqual([]);
+    expect(itemsInSelectionOrder(library, ['squat', 'missing', 'bench'])).toEqual([
+      library[2],
+      library[0],
+    ]);
+    expect(library.map((item) => item.id)).toEqual(['bench', 'row', 'squat']);
+  });
+
   it('adds multiple selections predictably without duplicates', () => {
     const existing = [{ id: 'bench', name: 'Bench' }];
     const selected = [

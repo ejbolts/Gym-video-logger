@@ -65,6 +65,17 @@ export function formatWorkoutTimeRange(startTime: string | null, endTime: string
   return `${start}–${end}${overnight ? ' next day' : ''}`;
 }
 
+export function itemsInSelectionOrder<T extends { id: string }>(
+  items: T[],
+  selectedIds: readonly string[],
+): T[] {
+  const itemsById = new Map(items.map((item) => [item.id, item]));
+  return selectedIds.flatMap((id) => {
+    const item = itemsById.get(id);
+    return item ? [item] : [];
+  });
+}
+
 export function mergeUniqueById<T extends { id: string }>(existing: T[], selected: T[]): T[] {
   const seen = new Set(existing.map((item) => item.id));
   return [...existing, ...selected.filter((item) => !seen.has(item.id))];

@@ -142,6 +142,7 @@ import {
   formatWorkoutTimeRange,
   localDate,
   mergeUniqueById,
+  itemsInSelectionOrder,
   reorder,
   workoutDurationMinutes,
   workoutTimeInputValue,
@@ -4957,11 +4958,7 @@ function ExercisePicker({
               className="create-superset-button"
               type="button"
               disabled={selectedIds.length < 2}
-              onClick={() =>
-                onCreateSuperset?.(
-                  exercises.filter((exercise) => selectedIds.includes(exercise.id)),
-                )
-              }
+              onClick={() => onCreateSuperset?.(itemsInSelectionOrder(exercises, selectedIds))}
             >
               Create super set
             </button>
@@ -4970,9 +4967,7 @@ function ExercisePicker({
             className="add-selected-button"
             type="button"
             disabled={!selectedIds.length}
-            onClick={() =>
-              onChoose(exercises.filter((exercise) => selectedIds.includes(exercise.id)))
-            }
+            onClick={() => onChoose(itemsInSelectionOrder(exercises, selectedIds))}
           >
             {singleSelect ? 'Switch exercise' : `Add selected exercises (${selectedIds.length})`}
           </button>
