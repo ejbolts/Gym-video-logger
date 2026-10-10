@@ -1,3 +1,4 @@
+import { setKindOf } from './setFieldValues';
 import type { ExerciseKind, TrackedSet, TrackedWorkout, WorkoutSetInput } from './types';
 
 export const DEFAULT_REST_SECONDS = 180;
@@ -39,6 +40,30 @@ export function createSuggestedWorkoutSet(
     ...createWorkoutSet(kind, previous, false),
     rest_seconds: kind === 'strength' ? DEFAULT_REST_SECONDS : null,
   };
+}
+
+const isWorkingKind = (item: WorkoutSetInput) => ['normal', 'failure'].includes(setKindOf(item));
+
+/**
+ * After a working set is logged, the next set takes its weight and reps while it is still an
+ * untouched suggestion from the last workout, so it suggests repeating what was just lifted.
+ */
+export function suggestNextSetFromLoggedSet<T extends WorkoutSetInput & { fromPrevious?: boolean }>(
+  kind: ExerciseKind,
+  sets: T[],
+  loggedIndex: number,
+): T[] {
+  const logged = sets[loggedIndex];
+  const next = sets[loggedIndex + 1];
+  if (kind !== 'strength' || !logged?.completed || !next?.fromPrevious || next.completed) {
+    return sets;
+  }
+  if (!isWorkingKind(logged) || !isWorkingKind(next)) return sets;
+  if (next.weight_kg === logged.weight_kg && next.reps === logged.reps) return sets;
+
+  return sets.map((item, index) =>
+    index === loggedIndex + 1 ? { ...item, weight_kg: logged.weight_kg, reps: logged.reps } : item,
+  );
 }
 
 export function latestExerciseSet(
