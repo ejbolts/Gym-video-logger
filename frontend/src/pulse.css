@@ -3169,6 +3169,96 @@ html.edge-swipe-ready .edge-swipe-indicator {
   color: #fff;
 }
 
+/* ───────── Undo toast: floats over the page without blocking it ───────── */
+
+.undo-toast {
+  position: fixed;
+  z-index: 90;
+  bottom: calc(1rem + env(safe-area-inset-bottom));
+  left: 50%;
+  width: min(calc(100% - 2rem), 26rem);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  overflow: hidden;
+  border: 1px solid var(--p-line-strong);
+  border-radius: 16px;
+  padding: 0.5rem 0.5rem 0.5rem 1rem;
+  background: rgb(30 34 38 / 94%);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: 0 14px 36px rgb(0 0 0 / 45%);
+  color: var(--p-ink);
+  transform: translateX(-50%);
+  animation: undo-toast-in 220ms var(--ease-out) backwards;
+}
+
+.undo-toast > span {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.9375rem;
+  font-weight: 650;
+}
+
+.undo-toast button {
+  min-height: 2.5rem;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--p-accent-text);
+}
+
+.undo-toast .undo-toast-action {
+  padding: 0 0.875rem;
+  font-size: 0.9375rem;
+  font-weight: 750;
+}
+
+.undo-toast .undo-toast-close {
+  width: 2.5rem;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  color: var(--p-muted);
+}
+
+.undo-toast .undo-toast-close .pulse-icon {
+  width: 1.125rem;
+  height: 1.125rem;
+}
+
+/* Shrinks over the toast's lifetime to show when it will close. */
+.undo-toast::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  background: var(--p-accent);
+  transform-origin: left;
+  animation: undo-toast-timer var(--undo-toast-duration, 4s) linear forwards;
+}
+
+@keyframes undo-toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 0.75rem);
+  }
+}
+
+@keyframes undo-toast-timer {
+  to {
+    transform: scaleX(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .undo-toast::after {
+    display: none;
+  }
+}
+
 /* ───────── Popups: one sheet style everywhere ───────── */
 
 .modal-backdrop {

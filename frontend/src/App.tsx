@@ -216,6 +216,7 @@ const defaultCategoryColors: WorkoutTypeColors = {
 const restOptions = [60, 90, 120, 150, 180, 210, 240, 270, 300];
 const HISTORY_PAGE_SIZE = 8;
 const CARDIO_HISTORY_PAGE_SIZE = 5;
+const UNDO_TOAST_MS = 4000;
 const IMPORTED_BODYWEIGHT_NOTE = 'Imported from workout CSV.';
 
 function emptySet(
@@ -2016,6 +2017,14 @@ function WorkoutLogger({
     set: DraftSet;
     index: number;
   } | null>(null);
+
+  // The undo toast is temporary; each new deletion restarts its timer.
+  useEffect(() => {
+    if (!undoDeletion) return;
+    const timer = window.setTimeout(() => setUndoDeletion(null), UNDO_TOAST_MS);
+    return () => window.clearTimeout(timer);
+  }, [undoDeletion]);
+
   const prBadges = useMemo(
     () =>
       calculateDraftPrs(movements, personalRecords, historicalWorkouts, initialWorkout?.id ?? null),
@@ -2750,17 +2759,22 @@ function WorkoutLogger({
       </div>
 
       {undoDeletion && (
-        <div className="inline-undo panel" role="status">
+        <div
+          className="undo-toast"
+          role="status"
+          style={{ '--undo-toast-duration': `${UNDO_TOAST_MS}ms` } as CSSProperties}
+        >
           <span>Set deleted</span>
-          <button type="button" onClick={undoSetDeletion}>
+          <button className="undo-toast-action" type="button" onClick={undoSetDeletion}>
             Undo
           </button>
           <button
+            className="undo-toast-close"
             type="button"
             onClick={() => setUndoDeletion(null)}
             aria-label="Dismiss set deletion notification"
           >
-            Dismiss
+            <Icon name="close" />
           </button>
         </div>
       )}

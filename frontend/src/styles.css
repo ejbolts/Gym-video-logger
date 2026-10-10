@@ -5952,40 +5952,6 @@ body,
   grid-column: 1 / -2;
 }
 
-.undo-toast {
-  position: fixed;
-  z-index: 90;
-  right: 1rem;
-  bottom: calc(6rem + env(safe-area-inset-bottom));
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 0.7rem 1rem;
-  background: #1b2320;
-  box-shadow: 0 12px 35px rgb(0 0 0 / 40%);
-}
-.undo-toast button {
-  border: 0;
-  background: transparent;
-  color: var(--accent-dark);
-  font-weight: 900;
-}
-
-.undo-toast .undo-toast-close {
-  width: 1.8rem;
-  height: 1.8rem;
-  display: grid;
-  place-items: center;
-  border-left: 1px solid var(--line);
-  border-radius: 0;
-  padding: 0 0 0 0.55rem;
-  color: var(--muted-ink);
-  font-size: 1.15rem;
-  line-height: 1;
-}
-
 .exercise-picker {
   grid-template-rows: auto auto auto 1fr auto;
 }
@@ -7134,7 +7100,6 @@ body:has(.notification-dialog[open]) {
   border-bottom: 1px solid var(--line);
 }
 
-.inline-undo button,
 .inline-confirmation > button {
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -7143,20 +7108,6 @@ body:has(.notification-dialog[open]) {
   color: var(--ink);
   font-size: 0.64rem;
   font-weight: 850;
-}
-
-.inline-undo {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  margin: 0.8rem 0;
-  padding: 0.7rem 0.8rem;
-}
-
-.inline-undo > span {
-  flex: 1;
-  color: var(--muted-ink);
-  font-size: 0.7rem;
 }
 
 .photo-inline-editor,
