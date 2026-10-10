@@ -1,22 +1,38 @@
 from __future__ import annotations
 
 import logging
-import shutil
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
+from .accounts import auth_router, profile_router
+from .admin import admin_router
+from .auth import (
+    CsrfOriginMiddleware,
+    CurrentUser,
+    LoginThrottle,
+    get_current_user,
+    require_video_access,
+)
 from .config import Settings, get_settings
 from .database import Base, SessionLocal, engine, get_db
+from .errors import api_error
 from .frontend import FrontendFiles
-from .models import Clip, ClipUploadStatus, PushSubscription, SessionStatus, WorkoutSession
+from .models import (
+    Clip,
+    ClipUploadStatus,
+    PushSubscription,
+    SessionStatus,
+    User,
+    WorkoutSession,
+)
 from .notifications import (
     ActiveWorkoutReminderScheduler,
     RestTimerNotificationScheduler,
@@ -39,10 +55,14 @@ from .schemas import (
     SessionCreate,
     SessionRead,
 )
-from .storage import UploadValidationError, clean_abandoned_partials, stream_upload_to_disk
+from .storage import (
+    UploadValidationError,
+    clean_abandoned_partials,
+    remove_session_files,
+    stream_upload_to_disk,
+)
 from .tracker import router as tracker_router
 from .tracker import seed_default_exercises, sync_all_workout_cardio_sessions
-from .tracker_seed import seed_sample_body_measurements, seed_sample_workouts
 from .training_metrics import rebuild_personal_records
 
 logging.basicConfig(
@@ -52,16 +72,10 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def api_error(status_code: int, code: str, message: str) -> HTTPException:
-    return HTTPException(
-        status_code=status_code, detail={"error": {"code": code, "message": message}}
-    )
-
-
-def load_session(db: Session, session_id: str) -> WorkoutSession:
+def load_session(db: Session, user_id: str, session_id: str) -> WorkoutSession:
     session = db.scalar(
         select(WorkoutSession)
-        .where(WorkoutSession.id == session_id)
+        .where(WorkoutSession.id == session_id, WorkoutSession.user_id == user_id)
         .options(selectinload(WorkoutSession.clips), selectinload(WorkoutSession.timestamps))
     )
     if not session:
@@ -77,11 +91,15 @@ def can_accept_uploads(session: WorkoutSession) -> bool:
     }
 
 
-def remove_session_files(session_id: str, settings: Settings) -> None:
-    # session IDs are server-generated UUIDs; every root is owned by this application.
-    for directory in (settings.uploads_dir / session_id, settings.normalized_dir / session_id):
-        shutil.rmtree(directory, ignore_errors=True)
-    (settings.output_dir / f"{session_id}.mp4").unlink(missing_ok=True)
+def owns_subscription(db: Session, user_id: str, endpoint: str) -> bool:
+    return (
+        db.scalar(
+            select(PushSubscription.id).where(
+                PushSubscription.endpoint == endpoint, PushSubscription.user_id == user_id
+            )
+        )
+        is not None
+    )
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -92,14 +110,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         settings.ensure_directories()
         Base.metadata.create_all(bind=engine)
         with SessionLocal() as db:
-            seed_default_exercises(db)
-            if settings.seed_sample_data:
-                seeded = seed_sample_workouts(db)
-                seed_sample_body_measurements(db)
-                if seeded:
-                    logger.info("Seeded sample workouts", extra={"count": seeded})
+            user_ids = list(db.scalars(select(User.id)))
+            for user_id in user_ids:
+                seed_default_exercises(db, user_id)
             sync_all_workout_cardio_sessions(db)
-            rebuild_personal_records(db)
+            for user_id in user_ids:
+                rebuild_personal_records(db, user_id)
             db.commit()
         removed = clean_abandoned_partials(settings)
         if removed:
@@ -119,7 +135,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             await rest_timer_notifications.stop()
             await processor.stop()
 
-    app = FastAPI(title="Gym Video Logger", version="0.1.0", lifespan=lifespan)
+    # The interactive docs describe every endpoint, so a public server keeps them off by default.
+    docs = settings.api_docs
+    app = FastAPI(
+        title="Gym Video Logger",
+        version="0.1.0",
+        lifespan=lifespan,
+        docs_url="/docs" if docs else None,
+        redoc_url="/redoc" if docs else None,
+        openapi_url="/openapi.json" if docs else None,
+    )
+    app.state.settings = settings
+    app.state.login_throttle = LoginThrottle()
+    app.add_middleware(CsrfOriginMiddleware)
 
     @app.exception_handler(HTTPException)
     async def http_exception_handler(_: Request, exc: HTTPException) -> JSONResponse:
@@ -144,6 +172,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             },
         )
 
+    # Public routes are registered directly on the app (health) or through the auth router.
+    # Everything else hangs off a router that requires a signed-in user, so a new endpoint is
+    # protected unless someone deliberately moves it here.
+    protected = APIRouter(dependencies=[Depends(get_current_user)])
+    video = APIRouter(prefix="/api/sessions", dependencies=[Depends(require_video_access)])
+
     @app.get("/api/health", response_model=HealthRead)
     def health() -> HealthRead:
         return HealthRead(
@@ -152,106 +186,122 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             youtube_mock_mode=settings.youtube_mock_mode,
         )
 
-    @app.get("/api/notifications/push/config", response_model=PushConfigRead)
+    @protected.get("/api/notifications/push/config", response_model=PushConfigRead)
     def push_config() -> PushConfigRead:
         enabled = push_available(settings)
         return PushConfigRead(
             enabled=enabled, public_key=vapid_public_key(settings) if enabled else None
         )
 
-    @app.post("/api/notifications/push/subscriptions", status_code=204)
-    def save_push_subscription(
-        payload: PushSubscriptionCreate, db: Session = Depends(get_db)
-    ) -> None:
-        subscription = db.scalar(
-            select(PushSubscription).where(PushSubscription.endpoint == payload.endpoint)
-        )
-        if subscription:
-            subscription.p256dh = payload.p256dh
-            subscription.auth = payload.auth
-        else:
-            db.add(PushSubscription(**payload.model_dump()))
-        db.commit()
-
-    @app.delete("/api/notifications/push/subscriptions", status_code=204)
-    async def delete_push_subscription(
-        payload: PushSubscriptionDelete,
+    @protected.post("/api/notifications/push/subscriptions", status_code=204)
+    async def save_push_subscription(
+        payload: PushSubscriptionCreate,
         request: Request,
+        user: CurrentUser,
         db: Session = Depends(get_db),
     ) -> None:
         subscription = db.scalar(
             select(PushSubscription).where(PushSubscription.endpoint == payload.endpoint)
         )
+        reassigned = False
+        if subscription:
+            # A browser endpoint belongs to whoever registered it last (shared device, new login).
+            reassigned = subscription.user_id != user.id
+            subscription.user_id = user.id
+            subscription.p256dh = payload.p256dh
+            subscription.auth = payload.auth
+        else:
+            db.add(PushSubscription(user_id=user.id, **payload.model_dump()))
+        db.commit()
+        if reassigned:
+            request.app.state.rest_timer_notifications.cancel_endpoint(payload.endpoint)
+            request.app.state.workout_reminders.cancel(endpoint=payload.endpoint)
+
+    @protected.delete("/api/notifications/push/subscriptions", status_code=204)
+    async def delete_push_subscription(
+        payload: PushSubscriptionDelete,
+        request: Request,
+        user: CurrentUser,
+        db: Session = Depends(get_db),
+    ) -> None:
+        subscription = db.scalar(
+            select(PushSubscription).where(
+                PushSubscription.endpoint == payload.endpoint,
+                PushSubscription.user_id == user.id,
+            )
+        )
         if subscription:
             db.delete(subscription)
             db.commit()
-        request.app.state.rest_timer_notifications.cancel_endpoint(payload.endpoint)
-        request.app.state.workout_reminders.cancel(endpoint=payload.endpoint)
+            request.app.state.rest_timer_notifications.cancel_endpoint(payload.endpoint)
+            request.app.state.workout_reminders.cancel(endpoint=payload.endpoint, user_id=user.id)
 
-    @app.post("/api/notifications/push/test", status_code=204)
-    def send_test_push_notification() -> None:
+    @protected.post("/api/notifications/push/test", status_code=204)
+    def send_test_push_notification(user: CurrentUser) -> None:
         send_push_notification(
             SessionLocal,
             settings,
             title="Gym logger alerts are ready",
             body="This phone will be notified when YouTube finishes processing a workout.",
+            user_id=user.id,
         )
 
-    @app.put("/api/notifications/push/rest-timer", status_code=204)
+    @protected.put("/api/notifications/push/rest-timer", status_code=204)
     async def schedule_rest_timer_notification(
         payload: RestTimerNotificationCreate,
         request: Request,
+        user: CurrentUser,
         db: Session = Depends(get_db),
     ) -> None:
-        subscription_id = db.scalar(
-            select(PushSubscription.id).where(PushSubscription.endpoint == payload.endpoint)
-        )
-        if subscription_id is None:
+        if not owns_subscription(db, user.id, payload.endpoint):
             raise api_error(404, "push_subscription_not_found", "This phone is not subscribed.")
-        request.app.state.rest_timer_notifications.schedule(**payload.model_dump())
+        request.app.state.rest_timer_notifications.schedule(**payload.model_dump(), user_id=user.id)
 
-    @app.post("/api/notifications/push/rest-timer/cancel", status_code=204)
+    @protected.post("/api/notifications/push/rest-timer/cancel", status_code=204)
     async def cancel_rest_timer_notification(
         payload: RestTimerNotificationCancel,
         request: Request,
+        user: CurrentUser,
+        db: Session = Depends(get_db),
     ) -> None:
-        request.app.state.rest_timer_notifications.cancel(**payload.model_dump())
+        if owns_subscription(db, user.id, payload.endpoint):
+            request.app.state.rest_timer_notifications.cancel(**payload.model_dump())
 
-    @app.put("/api/notifications/push/active-workout", status_code=204)
+    @protected.put("/api/notifications/push/active-workout", status_code=204)
     def schedule_workout_reminder(
         payload: ActiveWorkoutReminderCreate,
         request: Request,
+        user: CurrentUser,
         db: Session = Depends(get_db),
     ) -> None:
-        if (
-            db.scalar(
-                select(PushSubscription.id).where(PushSubscription.endpoint == payload.endpoint)
-            )
-            is None
-        ):
+        if not owns_subscription(db, user.id, payload.endpoint):
             raise api_error(404, "push_subscription_not_found", "This phone is not subscribed.")
-        request.app.state.workout_reminders.schedule(**payload.model_dump())
+        request.app.state.workout_reminders.schedule(**payload.model_dump(), user_id=user.id)
 
-    @app.post("/api/notifications/push/active-workout/cancel", status_code=204)
+    @protected.post("/api/notifications/push/active-workout/cancel", status_code=204)
     def cancel_workout_reminder(
         payload: RestTimerNotificationCancel,
         request: Request,
+        user: CurrentUser,
     ) -> None:
-        request.app.state.workout_reminders.cancel(**payload.model_dump())
+        request.app.state.workout_reminders.cancel(**payload.model_dump(), user_id=user.id)
 
-    @app.post("/api/sessions", response_model=SessionRead, status_code=201)
-    def create_session(payload: SessionCreate, db: Session = Depends(get_db)) -> WorkoutSession:
-        session = WorkoutSession(**payload.model_dump())
+    @video.post("", response_model=SessionRead, status_code=201)
+    def create_session(
+        payload: SessionCreate, user: CurrentUser, db: Session = Depends(get_db)
+    ) -> WorkoutSession:
+        session = WorkoutSession(user_id=user.id, **payload.model_dump())
         db.add(session)
         db.commit()
         db.refresh(session)
         return session
 
-    @app.get("/api/sessions", response_model=list[SessionRead])
-    def list_sessions(db: Session = Depends(get_db)) -> list[WorkoutSession]:
+    @video.get("", response_model=list[SessionRead])
+    def list_sessions(user: CurrentUser, db: Session = Depends(get_db)) -> list[WorkoutSession]:
         return list(
             db.scalars(
                 select(WorkoutSession)
+                .where(WorkoutSession.user_id == user.id)
                 .options(
                     selectinload(WorkoutSession.clips), selectinload(WorkoutSession.timestamps)
                 )
@@ -259,13 +309,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
         )
 
-    @app.get("/api/sessions/{session_id}", response_model=SessionRead)
-    def get_session(session_id: str, db: Session = Depends(get_db)) -> WorkoutSession:
-        return load_session(db, session_id)
+    @video.get("/{session_id}", response_model=SessionRead)
+    def get_session(
+        session_id: str, user: CurrentUser, db: Session = Depends(get_db)
+    ) -> WorkoutSession:
+        return load_session(db, user.id, session_id)
 
-    @app.delete("/api/sessions/{session_id}", status_code=204)
-    def delete_session(session_id: str, db: Session = Depends(get_db)) -> None:
-        session = load_session(db, session_id)
+    @video.delete("/{session_id}", status_code=204)
+    def delete_session(session_id: str, user: CurrentUser, db: Session = Depends(get_db)) -> None:
+        session = load_session(db, user.id, session_id)
         if session.status in {
             SessionStatus.QUEUED,
             SessionStatus.NORMALIZING,
@@ -278,16 +330,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         db.commit()
         remove_session_files(session_id, settings)
 
-    @app.post("/api/sessions/{session_id}/clips", response_model=ClipRead)
+    @video.post("/{session_id}/clips", response_model=ClipRead)
     async def upload_clip(
         session_id: str,
+        user: CurrentUser,
         client_clip_id: Annotated[str, Form(min_length=1, max_length=100)],
         order_index: Annotated[int, Form(ge=0)],
         file: Annotated[UploadFile, File(...)],
         exercise_label: Annotated[str | None, Form(max_length=200)] = None,
         db: Session = Depends(get_db),
     ) -> Clip:
-        session = load_session(db, session_id)
+        session = load_session(db, user.id, session_id)
         if not can_accept_uploads(session):
             raise api_error(
                 409, "uploads_not_allowed", "This session is no longer accepting uploads."
@@ -376,11 +429,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 409, "duplicate_order", "Another clip already uses this order position."
             ) from error
 
-    @app.patch("/api/sessions/{session_id}/clips/{clip_id}", response_model=ClipRead)
+    @video.patch("/{session_id}/clips/{clip_id}", response_model=ClipRead)
     def patch_clip(
-        session_id: str, clip_id: str, payload: ClipPatch, db: Session = Depends(get_db)
+        session_id: str,
+        clip_id: str,
+        payload: ClipPatch,
+        user: CurrentUser,
+        db: Session = Depends(get_db),
     ) -> Clip:
-        session = load_session(db, session_id)
+        session = load_session(db, user.id, session_id)
         if not can_accept_uploads(session):
             raise api_error(
                 409, "clips_locked", "Clips cannot be changed after processing is queued."
@@ -393,9 +450,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         db.refresh(clip)
         return clip
 
-    @app.delete("/api/sessions/{session_id}/clips/{clip_id}", status_code=204)
-    def delete_clip(session_id: str, clip_id: str, db: Session = Depends(get_db)) -> None:
-        session = load_session(db, session_id)
+    @video.delete("/{session_id}/clips/{clip_id}", status_code=204)
+    def delete_clip(
+        session_id: str, clip_id: str, user: CurrentUser, db: Session = Depends(get_db)
+    ) -> None:
+        session = load_session(db, user.id, session_id)
         if not can_accept_uploads(session):
             raise api_error(
                 409, "clips_locked", "Clips cannot be changed after processing is queued."
@@ -418,11 +477,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if path:
             path.unlink(missing_ok=True)
 
-    @app.post("/api/sessions/{session_id}/clips/reorder", response_model=SessionRead)
+    @video.post("/{session_id}/clips/reorder", response_model=SessionRead)
     def reorder_clips(
-        session_id: str, payload: ReorderRequest, db: Session = Depends(get_db)
+        session_id: str,
+        payload: ReorderRequest,
+        user: CurrentUser,
+        db: Session = Depends(get_db),
     ) -> WorkoutSession:
-        session = load_session(db, session_id)
+        session = load_session(db, user.id, session_id)
         if not can_accept_uploads(session):
             raise api_error(
                 409, "clips_locked", "Clips cannot be changed after processing is queued."
@@ -447,11 +509,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         for clip in clips:
             clip.order_index = requested[clip.id]
         db.commit()
-        return load_session(db, session_id)
+        return load_session(db, user.id, session_id)
 
-    @app.post("/api/sessions/{session_id}/process", response_model=SessionRead, status_code=202)
-    def process_session(session_id: str, db: Session = Depends(get_db)) -> WorkoutSession:
-        session = load_session(db, session_id)
+    @video.post("/{session_id}/process", response_model=SessionRead, status_code=202)
+    def process_session(
+        session_id: str, user: CurrentUser, db: Session = Depends(get_db)
+    ) -> WorkoutSession:
+        session = load_session(db, user.id, session_id)
         if session.status in {
             SessionStatus.QUEUED,
             SessionStatus.NORMALIZING,
@@ -474,13 +538,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         session.processing_error = None
         db.commit()
         app.state.processor.enqueue(session.id)
-        return load_session(db, session.id)
+        return load_session(db, user.id, session.id)
 
-    @app.post(
-        "/api/sessions/{session_id}/retry-processing", response_model=SessionRead, status_code=202
-    )
-    def retry_processing(session_id: str, db: Session = Depends(get_db)) -> WorkoutSession:
-        session = load_session(db, session_id)
+    @video.post("/{session_id}/retry-processing", response_model=SessionRead, status_code=202)
+    def retry_processing(
+        session_id: str, user: CurrentUser, db: Session = Depends(get_db)
+    ) -> WorkoutSession:
+        session = load_session(db, user.id, session_id)
         if session.status != SessionStatus.FAILED:
             raise api_error(409, "not_failed", "Only failed sessions can be retried.")
         try:
@@ -491,15 +555,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         session.processing_error = None
         db.commit()
         app.state.processor.enqueue(session.id)
-        return load_session(db, session.id)
+        return load_session(db, user.id, session.id)
 
-    @app.post(
-        "/api/sessions/{session_id}/retry-youtube-processing",
+    @video.post(
+        "/{session_id}/retry-youtube-processing",
         response_model=SessionRead,
         status_code=202,
     )
-    def retry_youtube_processing(session_id: str, db: Session = Depends(get_db)) -> WorkoutSession:
-        session = load_session(db, session_id)
+    def retry_youtube_processing(
+        session_id: str, user: CurrentUser, db: Session = Depends(get_db)
+    ) -> WorkoutSession:
+        session = load_session(db, user.id, session_id)
         if session.status != SessionStatus.FAILED or not session.youtube_video_id:
             raise api_error(
                 409,
@@ -509,11 +575,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         session.status = SessionStatus.YOUTUBE_PROCESSING
         session.processing_error = None
         db.commit()
-        return load_session(db, session.id)
+        return load_session(db, user.id, session.id)
 
-    @app.post("/api/sessions/{session_id}/cancel", response_model=SessionRead)
-    def cancel_session(session_id: str, db: Session = Depends(get_db)) -> WorkoutSession:
-        session = load_session(db, session_id)
+    @video.post("/{session_id}/cancel", response_model=SessionRead)
+    def cancel_session(
+        session_id: str, user: CurrentUser, db: Session = Depends(get_db)
+    ) -> WorkoutSession:
+        session = load_session(db, user.id, session_id)
         if not can_accept_uploads(session):
             raise api_error(
                 409, "cannot_cancel", "Only a session still uploading can be cancelled."
@@ -521,8 +589,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         session.status = SessionStatus.CANCELLED
         session.processing_error = None
         db.commit()
-        return load_session(db, session.id)
+        return load_session(db, user.id, session.id)
 
+    app.include_router(auth_router)
+    app.include_router(profile_router)
+    app.include_router(admin_router)
+    app.include_router(protected)
+    app.include_router(video)
     app.include_router(tracker_router)
 
     frontend_dist = Path(__file__).resolve().parents[2] / "frontend" / "dist"

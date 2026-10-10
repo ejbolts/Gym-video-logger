@@ -3,6 +3,18 @@ import { api } from './api';
 import { existingPhonePushSubscription, PHONE_PUSH_PREFERENCE_EVENT } from './push';
 
 const KEY = 'gym-video-logger.active-workout-reminder';
+
+/** Forgets the stored reminder record without contacting the server. */
+export function clearActiveWorkoutReminderKey(
+  storage: Pick<Storage, 'removeItem'> = window.localStorage,
+): void {
+  try {
+    storage.removeItem(KEY);
+  } catch {
+    // Storage can be unavailable in private modes.
+  }
+}
+
 // Serialize scheduling and cancellation, including when a workout changes mid-request.
 let pending = Promise.resolve();
 

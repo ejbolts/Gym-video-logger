@@ -6,10 +6,10 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .models import (
-    AppSetting,
     BodyMeasurement,
     Exercise,
     TrainingWorkout,
+    UserSetting,
     WorkoutCategory,
     WorkoutMovement,
     WorkoutSet,
@@ -18,15 +18,17 @@ from .models import (
 SAMPLE_SEED_KEY = "sample_data_seeded"
 
 
-def seed_sample_workouts(db: Session) -> int:
-    """Seed an evaluation week once, and never mix samples into an existing training log."""
-    if db.get(AppSetting, SAMPLE_SEED_KEY):
+def seed_sample_workouts(db: Session, user_id: str) -> int:
+    """Seed an evaluation week once per user, never mixing samples into an existing log."""
+    if db.get(UserSetting, (user_id, SAMPLE_SEED_KEY)):
         return 0
-    if db.scalar(select(func.count(TrainingWorkout.id))):
-        db.add(AppSetting(key=SAMPLE_SEED_KEY, value="skipped_existing_workouts"))
+    if db.scalar(select(func.count(TrainingWorkout.id)).where(TrainingWorkout.user_id == user_id)):
+        db.add(UserSetting(user_id=user_id, key=SAMPLE_SEED_KEY, value="skipped_existing_workouts"))
         db.commit()
         return 0
-    exercises = {item.name: item for item in db.scalars(select(Exercise))}
+    exercises = {
+        item.name: item for item in db.scalars(select(Exercise).where(Exercise.user_id == user_id))
+    }
     today = date.today()
     specs = (
         (
@@ -76,6 +78,7 @@ def seed_sample_workouts(db: Session) -> int:
     )
     for days_ago, name, category, movements in specs:
         workout = TrainingWorkout(
+            user_id=user_id,
             name=name,
             workout_date=today - timedelta(days=days_ago),
             category=category,
@@ -103,6 +106,7 @@ def seed_sample_workouts(db: Session) -> int:
         db.add(workout)
 
     cardio = TrainingWorkout(
+        user_id=user_id,
         name="Sample conditioning",
         workout_date=today - timedelta(days=1),
         category=WorkoutCategory.CARDIO,
@@ -122,22 +126,25 @@ def seed_sample_workouts(db: Session) -> int:
     )
     cardio.movements.append(running)
     db.add(cardio)
-    db.add(AppSetting(key=SAMPLE_SEED_KEY, value=today.isoformat()))
+    db.add(UserSetting(user_id=user_id, key=SAMPLE_SEED_KEY, value=today.isoformat()))
     db.commit()
     return 5
 
 
-def seed_sample_body_measurements(db: Session) -> int:
-    if db.scalar(select(func.count(BodyMeasurement.id))):
+def seed_sample_body_measurements(db: Session, user_id: str) -> int:
+    if db.scalar(select(func.count(BodyMeasurement.id)).where(BodyMeasurement.user_id == user_id)):
         return 0
     if not db.scalar(
-        select(func.count(TrainingWorkout.id)).where(TrainingWorkout.is_sample.is_(True))
+        select(func.count(TrainingWorkout.id)).where(
+            TrainingWorkout.user_id == user_id, TrainingWorkout.is_sample.is_(True)
+        )
     ):
         return 0
     today = date.today()
     for days_ago, weight, body_fat in ((4, 83.8, 17.6), (2, 83.5, 17.3), (1, 83.3, 17.1)):
         db.add(
             BodyMeasurement(
+                user_id=user_id,
                 measurement_date=today - timedelta(days=days_ago),
                 weight_kg=weight,
                 body_fat_pct=body_fat,

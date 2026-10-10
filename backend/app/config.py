@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -34,6 +35,13 @@ class Settings(BaseSettings):
     trim_start_seconds: float = Field(default=5, ge=0, le=60)
     trim_end_seconds: float = Field(default=5, ge=0, le=60)
     seed_sample_data: bool = True
+    cookie_secure: bool = False
+    session_days: int = Field(default=30, ge=1, le=365)
+    allow_registration: bool = False
+    registration_invite_code: str | None = None
+    # Starting value for the admin console's video switch; the console overrides it.
+    video_uploads: Literal["off", "admin", "everyone"] = "admin"
+    api_docs: bool = False
 
     @field_validator("youtube_privacy_status")
     @classmethod
@@ -41,6 +49,13 @@ class Settings(BaseSettings):
         if value not in {"private", "unlisted", "public"}:
             raise ValueError("must be private, unlisted, or public")
         return value
+
+    @field_validator("registration_invite_code", mode="before")
+    @classmethod
+    def blank_invite_code_is_none(cls, value: str | None) -> str | None:
+        if isinstance(value, str):
+            value = value.strip()
+        return value or None
 
     @field_validator("youtube_title_template", "youtube_description_template", mode="before")
     @classmethod

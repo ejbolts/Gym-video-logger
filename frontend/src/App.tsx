@@ -25,6 +25,7 @@ import type {
   TrackedWorkout,
   TrainingPreferences,
   WorkoutCategory,
+  User,
   WorkoutTypeColors,
   WorkoutInput,
   WorkoutRecommendation,
@@ -146,6 +147,9 @@ import {
   workoutTimeInputValue,
 } from './utils';
 import { VideoUpload } from './VideoUpload';
+import { ProfileScreen } from './ProfileScreen';
+import { AdminScreen } from './AdminScreen';
+import { canUploadVideos, useUserSession } from './userContext';
 import { WorkoutHeaderMeta } from './WorkoutRestTimer';
 import {
   clearActiveWorkoutDraft,
@@ -425,6 +429,9 @@ function WorkoutCompletionDialog({
 }
 
 export function App() {
+  const { user } = useUserSession();
+  const videosAllowed = canUploadVideos(user);
+  const isAdmin = user?.is_admin === true;
   const initialHistoryState = isAppHistoryState(window.history.state) ? window.history.state : null;
   const [tab, setTabState] = useState<AppTab>(() =>
     initialHistoryState ? initialHistoryState.tab : appTabFromHash(window.location.hash),
@@ -479,6 +486,18 @@ export function App() {
   const [message, setMessage] = useState<string | null>(null);
   const [backgroundActivities, setBackgroundActivities] = useState<BackgroundActivity[]>([]);
   useActiveWorkoutReminder(activeWorkoutStartedAt);
+  useEffect(() => {
+    // Accounts without upload access never reach the video screen, even from an old #videos link.
+    if (tab !== 'videos' || videosAllowed) return;
+    navigationActionRef.current = 'replace';
+    setTabState('dashboard');
+  }, [tab, videosAllowed]);
+  useEffect(() => {
+    // Only administrators can open the admin console, even from an old #admin link.
+    if (tab !== 'admin' || isAdmin) return;
+    navigationActionRef.current = 'replace';
+    setTabState('settings');
+  }, [tab, isAdmin]);
   useEffect(() => {
     if (loading || activeWorkoutStartedAt === null) return;
     const draft = readActiveWorkoutDraft();
@@ -874,9 +893,13 @@ export function App() {
   const nestedHeader =
     tab === 'settings'
       ? { title: 'Settings', subtitle: 'Timers • notifications • data' }
-      : tab === 'videos'
+      : tab === 'videos' && videosAllowed
         ? { title: 'Videos', subtitle: 'Workout clips • uploads' }
-        : null;
+        : tab === 'profile'
+          ? { title: 'Profile', subtitle: user ? user.display_name : 'Account • security' }
+          : tab === 'admin' && isAdmin
+            ? { title: 'Admin console', subtitle: 'Accounts • switches • server' }
+            : null;
   const activeMainTab = mainTabFor(tab);
   const showTabBar = tab !== 'log';
 
@@ -913,7 +936,11 @@ export function App() {
         className={`tracker-content ${tab === 'videos' ? 'video-content' : ''} ${nestedHeader || tab === 'log' ? 'with-overlay-header' : ''}`}
         data-nav-direction={navDirection}
       >
-        {loading && tab !== 'dashboard' && tab !== 'videos' && <TodaySkeleton />}
+        {loading &&
+          tab !== 'dashboard' &&
+          tab !== 'videos' &&
+          tab !== 'profile' &&
+          tab !== 'admin' && <TodaySkeleton />}
         {(tab === 'dashboard' || visitedTabs.has('dashboard')) && (
           <CachedTabPanel active={tab === 'dashboard'}>
             {loading && dashboard === null ? (
@@ -943,7 +970,9 @@ export function App() {
                 onOpenCardio={() => openHistorySection('cardio')}
                 onOpenBody={() => setTab('body')}
                 onOpenSettings={() => setTab('settings')}
-                onOpenVideos={() => setTab('videos')}
+                onOpenVideos={videosAllowed ? () => setTab('videos') : undefined}
+                onOpenProfile={user ? () => setTab('profile') : undefined}
+                profileLabel={user?.display_name}
                 calendar={
                   <InteractiveWorkoutCalendar
                     entries={dashboard?.heatmap ?? []}
@@ -1068,10 +1097,23 @@ export function App() {
               onExportWorkouts={exportWorkoutCsv}
               onDeleteSamples={deleteSampleData}
               onDataChange={refreshAfterMutation}
+              account={user}
+              onOpenProfile={() => setTab('profile')}
+              onOpenAdmin={isAdmin ? () => setTab('admin') : undefined}
             />
           </CachedTabPanel>
         )}
-        {(tab === 'videos' || visitedTabs.has('videos')) && (
+        {user && (tab === 'profile' || visitedTabs.has('profile')) && (
+          <CachedTabPanel active={tab === 'profile'}>
+            <ProfileScreen />
+          </CachedTabPanel>
+        )}
+        {isAdmin && (tab === 'admin' || visitedTabs.has('admin')) && (
+          <CachedTabPanel active={tab === 'admin'}>
+            <AdminScreen active={tab === 'admin'} />
+          </CachedTabPanel>
+        )}
+        {videosAllowed && (tab === 'videos' || visitedTabs.has('videos')) && (
           <CachedTabPanel active={tab === 'videos'}>
             <VideoUpload />
           </CachedTabPanel>
@@ -5472,7 +5514,14 @@ function SettingsScreen({
   onExportWorkouts,
   onDeleteSamples,
   onDataChange,
+  account,
+  onOpenProfile,
+  onOpenAdmin,
 }: {
+  account: User | null;
+  onOpenProfile: () => void;
+  /** Present only for administrators. */
+  onOpenAdmin?: () => void;
   workouts: TrackedWorkout[];
   measurements: BodyMeasurement[];
   workoutTypeColors: WorkoutTypeColors;
@@ -5686,6 +5735,34 @@ function SettingsScreen({
 
   return (
     <section className="settings-screen content-page">
+      {account && (
+        <section className="settings-panel panel" aria-labelledby="account-settings-title">
+          <header>
+            <div>
+              <p className="section-kicker">ACCOUNT</p>
+              <h2 id="account-settings-title">{account.display_name}</h2>
+            </div>
+          </header>
+          <p>{account.email}</p>
+          <button type="button" className="profile-secondary" onClick={onOpenProfile}>
+            Manage profile
+          </button>
+        </section>
+      )}
+      {onOpenAdmin && (
+        <section className="settings-panel panel" aria-labelledby="admin-settings-title">
+          <header>
+            <div>
+              <p className="section-kicker">ADMIN</p>
+              <h2 id="admin-settings-title">Admin console</h2>
+            </div>
+          </header>
+          <p>Manage accounts, turn video uploads and sign-ups on or off, and check the server.</p>
+          <button type="button" className="profile-secondary" onClick={onOpenAdmin}>
+            Open admin console
+          </button>
+        </section>
+      )}
       <section className="settings-panel panel" aria-labelledby="notification-settings-title">
         <header>
           <div>

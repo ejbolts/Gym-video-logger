@@ -68,7 +68,12 @@ export interface TodayScreenProps {
   onOpenCardio: () => void;
   onOpenBody: () => void;
   onOpenSettings: () => void;
-  onOpenVideos: () => void;
+  /** Omitted when the account cannot upload videos, which hides the video entry point. */
+  onOpenVideos?: () => void;
+  /** Omitted outside the signed-in app (tests). */
+  onOpenProfile?: () => void;
+  /** Shown on the profile button so the signed-in account is visible at a glance. */
+  profileLabel?: string;
   calendar?: ReactNode;
   today?: string;
 }
@@ -91,6 +96,8 @@ export function TodayScreen({
   onOpenBody,
   onOpenSettings,
   onOpenVideos,
+  onOpenProfile,
+  profileLabel,
   calendar,
   today = localDate(),
 }: TodayScreenProps) {
@@ -167,14 +174,32 @@ export function TodayScreen({
         title="Today"
         actions={
           <>
-            <button
-              className="icon-button-pulse"
-              type="button"
-              onClick={onOpenVideos}
-              aria-label="Video logger"
-            >
-              <Icon name="video" />
-            </button>
+            {onOpenProfile && (
+              <button
+                className="icon-button-pulse profile-button"
+                type="button"
+                onClick={onOpenProfile}
+                aria-label={profileLabel ? `Profile: ${profileLabel}` : 'Profile'}
+              >
+                {profileLabel ? (
+                  <span className="profile-button-initial" aria-hidden="true">
+                    {profileLabel.trim().charAt(0).toUpperCase() || '?'}
+                  </span>
+                ) : (
+                  <Icon name="user" />
+                )}
+              </button>
+            )}
+            {onOpenVideos && (
+              <button
+                className="icon-button-pulse"
+                type="button"
+                onClick={onOpenVideos}
+                aria-label="Video logger"
+              >
+                <Icon name="video" />
+              </button>
+            )}
             <button
               className="icon-button-pulse"
               type="button"

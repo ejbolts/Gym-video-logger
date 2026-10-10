@@ -48,6 +48,9 @@ export default defineConfig({
         skipWaiting: true,
         clientsClaim: true,
         cleanupOutdatedCaches: true,
+        // Never answer API navigations with the app shell, and never cache /api responses:
+        // auth state must always come from the server.
+        navigateFallbackDenylist: [/^\/api\//],
         importScripts: ['push-notifications.js'],
         // The bundled Inter font must be precached so the installed PWA renders offline.
         globPatterns: ['**/*.{js,css,html,woff2}'],

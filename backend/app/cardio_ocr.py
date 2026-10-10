@@ -240,9 +240,7 @@ def _duration_minutes(lines: list[OcrLine]) -> int | None:
             second = int(second_text)
             third = int(third_text) if third_text is not None else None
             total_seconds = (
-                first * 3600 + second * 60 + third
-                if third is not None
-                else first * 60 + second
+                first * 3600 + second * 60 + third if third is not None else first * 60 + second
             )
             return max(1, (total_seconds + 30) // 60)
     combined = " ".join(line.text for line in lines)

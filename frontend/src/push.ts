@@ -89,6 +89,28 @@ export async function disablePhonePushNotifications(): Promise<void> {
   ]);
 }
 
+/**
+ * Detaches this device from the signed-in account: the server stops sending it alerts and the
+ * browser drops the subscription. Must run while the session is still valid.
+ */
+export async function releasePhonePushSubscription(): Promise<void> {
+  try {
+    if (pushNotificationsSupported()) {
+      const registration = await navigator.serviceWorker.getRegistration();
+      const subscription = await registration?.pushManager.getSubscription();
+      if (subscription) {
+        await Promise.allSettled([
+          api.deletePushSubscription(subscription.endpoint),
+          subscription.unsubscribe(),
+        ]);
+      }
+    }
+  } finally {
+    // Back to the default so the next account starts from a clean slate.
+    window.localStorage.removeItem(PHONE_PUSH_PREFERENCE_KEY);
+  }
+}
+
 export async function showRestTimerNotification(): Promise<void> {
   if (
     !pushNotificationsSupported() ||

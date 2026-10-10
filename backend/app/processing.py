@@ -138,6 +138,7 @@ def exercise_match_score(clip_label: str, exercise_name: str) -> int:
 
 
 def link_session_videos_to_workout(db: Session, session: WorkoutSession) -> int:
+    # Only the session owner's own workouts are ever touched.
     """Attach each timestamp to the best matching exercise in a completed workout."""
     if session.status != SessionStatus.COMPLETE or not session.youtube_video_id:
         return 0
@@ -155,6 +156,7 @@ def link_session_videos_to_workout(db: Session, session: WorkoutSession) -> int:
         db.scalars(
             select(TrainingWorkout)
             .where(
+                TrainingWorkout.user_id == session.user_id,
                 TrainingWorkout.workout_date == session.workout_date,
                 TrainingWorkout.is_sample.is_(False),
             )
@@ -206,7 +208,9 @@ def link_session_videos_to_workout(db: Session, session: WorkoutSession) -> int:
     return linked
 
 
-def backfill_completed_video_links(db: Session, workout_date: date | None = None) -> int:
+def backfill_completed_video_links(
+    db: Session, workout_date: date | None = None, user_id: str | None = None
+) -> int:
     linked = 0
     query = select(WorkoutSession).where(
         WorkoutSession.status == SessionStatus.COMPLETE,
@@ -214,6 +218,8 @@ def backfill_completed_video_links(db: Session, workout_date: date | None = None
     )
     if workout_date is not None:
         query = query.where(WorkoutSession.workout_date == workout_date)
+    if user_id is not None:
+        query = query.where(WorkoutSession.user_id == user_id)
     sessions = list(db.scalars(query))
     for session in sessions:
         linked += link_session_videos_to_workout(db, session)
@@ -409,10 +415,12 @@ class SessionProcessor:
     def check_youtube_processing(self, session_id: str) -> None:
         """Promote an uploaded video only after YouTube has finished processing it."""
         notification: tuple[str, str] | None = None
+        owner_id: str | None = None
         with self.session_factory() as db:
             session = db.get(WorkoutSession, session_id)
             if not session or session.status != SessionStatus.YOUTUBE_PROCESSING:
                 return
+            owner_id = session.user_id
             if not session.youtube_video_id:
                 session.status = SessionStatus.FAILED
                 session.processing_error = "The YouTube upload did not return a video ID."
@@ -468,12 +476,15 @@ class SessionProcessor:
                     completed = self._load_session(db, session_id)
                     if completed:
                         self._cleanup_after_youtube_success(completed.id, completed.clips)
-            send_push_notification(
-                self.session_factory,
-                self.settings,
-                title=notification[0],
-                body=notification[1],
-            )
+            if owner_id is not None:
+                # Only the account that owns this video is told about it.
+                send_push_notification(
+                    self.session_factory,
+                    self.settings,
+                    title=notification[0],
+                    body=notification[1],
+                    user_id=owner_id,
+                )
 
     def _trim_window(self, source_duration_ms: int | None) -> tuple[float, float] | None:
         """Return the requested trim start and retained duration without emptying a short clip."""

@@ -473,3 +473,72 @@ export interface CsvImportResult {
   body_measurements_updated: number;
   warnings: string[];
 }
+
+export interface User {
+  id: string;
+  email: string;
+  display_name: string;
+  is_admin: boolean;
+  can_upload_videos: boolean;
+  created_at: string;
+}
+
+/** Who may upload workout videos: nobody, administrators only, or every account. */
+export type VideoUploadMode = 'off' | 'admin' | 'everyone';
+
+export interface AdminUser {
+  id: string;
+  email: string;
+  display_name: string;
+  is_admin: boolean;
+  disabled_at: string | null;
+  created_at: string;
+  last_active_at: string | null;
+  signed_in_devices: number;
+  workouts: number;
+  photos: number;
+  photo_bytes: number;
+  video_sessions: number;
+}
+
+export interface ServerSettings {
+  video_uploads: VideoUploadMode;
+  allow_registration: boolean;
+  invite_code_required: boolean;
+}
+
+export interface ServerSettingsUpdate {
+  video_uploads?: VideoUploadMode;
+  allow_registration?: boolean;
+}
+
+export interface ServerStatus {
+  disk: { total_bytes: number; used_bytes: number; free_bytes: number };
+  database_bytes: number;
+  photos: number;
+  photo_bytes: number;
+  video_file_bytes: number;
+  video_queue: Record<string, number>;
+}
+
+export interface AuthConfig {
+  registration_open: boolean;
+  invite_code_required: boolean;
+}
+
+export interface LoginInput {
+  email: string;
+  password: string;
+}
+
+export interface RegisterInput {
+  email: string;
+  password: string;
+  display_name: string;
+  invite_code: string | null;
+}
+
+export interface ProfileUpdateInput {
+  display_name?: string;
+  email?: string;
+}

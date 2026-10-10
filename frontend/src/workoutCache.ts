@@ -77,6 +77,26 @@ export async function writeDashboardCache(dashboard: DashboardData): Promise<voi
   return writeCacheValue(DASHBOARD_CACHE_KEY, dashboard);
 }
 
+/** Removes every cached snapshot. Used when the signed-in account changes on this device. */
+export async function clearWorkoutCache(): Promise<void> {
+  try {
+    const database = await openCacheDatabase();
+    if (!database) return;
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(STORE_NAME, 'readwrite');
+      transaction.objectStore(STORE_NAME).clear();
+      transaction.oncomplete = () => {
+        database.close();
+        resolve();
+      };
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+    });
+  } catch {
+    // Nothing to clear when IndexedDB is unavailable.
+  }
+}
+
 export function cachedWorkoutsForRevision(
   cached: CachedWorkoutSnapshot | null,
   revision: string,

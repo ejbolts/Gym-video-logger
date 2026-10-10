@@ -1,6 +1,6 @@
 # Gym Video Logger
 
-A private, single-user mobile PWA for batching individual gym-set videos, stitching them locally, and uploading one unlisted workout video to YouTube. It intentionally has **no application authentication**: access is restricted by a private Tailscale network, not a login page.
+A private, multi-user mobile PWA for batching individual gym-set videos, stitching them locally, and uploading one unlisted workout video to YouTube. Each person signs in with their own account and a cookie session, and each user's workout data is private to that account. The first account created becomes the admin and claims any existing data. The admin console (Settings → Admin console) lets the admin disable accounts, see each account's activity and storage, check disk space and the video queue, and switch video uploads (off, admins only, or everyone) and new sign-ups on or off without a restart. Video uploads are admin-only by default.
 
 The app also includes a structured, dark, mobile-first workout tracker: an exercise library, set/reps/weight logging, RPE and rest tracking, per-set notes, a live rest timer, workout history, a colour-coded training heatmap, weekly muscle-set tracking, and per-exercise progression charts. Reusable machine photos can be captured from a phone, captioned, pinned to an exercise in a particular workout, and expanded from History. Workout records and photo metadata live in the local SQLite database independently of the optional video workflow; processed photo files live under `data/machine-photos/`.
 
@@ -27,7 +27,7 @@ Phone PWA ── private Tailnet HTTPS ── Tailscale Serve ── 127.0.0.1:8
 - `backend/migrations/`: Alembic initial schema migration.
 - `data/` (ignored by Git): SQLite database, reusable machine photos, original uploads, normalized temp files, and stitched outputs.
 
-The backend serves the built PWA from the same origin when `frontend/dist/` exists. No cookies, bearer tokens, account models, login endpoints, authorization middleware, cloud storage, Redis, Celery, AI recognition, or rep counting are present.
+The backend serves the built PWA from the same origin when `frontend/dist/` exists. Sign-in uses cookie-based sessions with per-user accounts and authorization checks on each request. Cloud storage, Redis, Celery, AI recognition, and rep counting are not present.
 
 ## Prerequisites
 
@@ -94,7 +94,7 @@ alembic upgrade head
 uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000
 ```
 
-Open `http://127.0.0.1:8000`. For frontend hot reload during development, run `npm run dev` from `frontend/`; Vite proxies `/api` to the local FastAPI server.
+Open `http://127.0.0.1:8000`. To create the first (admin) account, either set `GYM_REGISTRATION_INVITE_CODE` in `.env` and sign up in the browser with that code, or run `python -m app.manage create-user --email you@example.com --display-name "Your Name"` from the repository root. That first account takes ownership of any existing workout data. Other people can sign up only when `GYM_ALLOW_REGISTRATION=true`; `GYM_ALLOW_REGISTRATION` and `GYM_VIDEO_UPLOADS` are starting values that the admin console overrides once changed. For frontend hot reload during development, run `npm run dev` from `frontend/`; Vite proxies `/api` to the local FastAPI server.
 
 On Windows, `./start-app.ps1` builds the current frontend before starting the server and opens that same production build on port 8000. `./start-app.ps1 -Dev` also refreshes that phone build before starting Vite on port 5173, so development cannot leave the phone endpoint on an older bundle. Phone access should proxy port 8000; this installation uses `https://mainpc.tail494810.ts.net:8446`.
 
@@ -135,7 +135,7 @@ Use `ruff format backend` and `npm run format` to apply formatting.
 
 ## Tailscale: private phone access
 
-Keep Uvicorn bound to `127.0.0.1`; do not bind it directly to a LAN or public interface, open a router port, or use Tailscale Funnel. Any person/device allowed by your Tailnet policy to reach this PC can use this intentionally unauthenticated app.
+Keep Uvicorn bound to `127.0.0.1`; do not bind it directly to a LAN or public interface, open a router port, or use Tailscale Funnel. Anyone your Tailnet policy lets reach this PC can reach the sign-in page. Each account's data stays private, but keep the Tailnet restricted to your own devices anyway.
 
 On the home PC, first inspect the installed client instead of assuming an older CLI form:
 
@@ -157,6 +157,10 @@ The command above is private Serve, not Funnel. Open the HTTPS MagicDNS URL show
 - Android: Chrome menu → **Install app** / **Add to Home screen**.
 
 Use restrictive Tailscale grants or ACLs that permit only your phone identity/device to connect to this home PC and service. Re-check `tailscale serve --help` after updating the Tailscale client; Tailscale changed Serve and Funnel CLI syntax in client version 1.52.
+
+## Hosting on Oracle Cloud
+
+To run the app on an always-on Oracle Cloud VM with a public HTTPS address instead of the home PC, follow [docs/DEPLOY-ORACLE-CLOUD.md](docs/DEPLOY-ORACLE-CLOUD.md). The `deploy/` folder contains the VM setup, update, and backup scripts, the systemd unit, the Caddy reverse-proxy configuration, and a production `.env` template.
 
 ## Switching to real YouTube uploads
 

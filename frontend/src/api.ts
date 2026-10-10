@@ -1,4 +1,5 @@
 import type {
+  AdminUser,
   BodyMeasurement,
   BodyMeasurementCsvImportResult,
   BodyWeightGoal,
@@ -15,11 +16,19 @@ import type {
   ExerciseCreateInput,
   ExerciseProgress,
   Health,
+  AuthConfig,
+  LoginInput,
   MachinePhoto,
   MuscleVolume,
   PersonalRecord,
+  ProfileUpdateInput,
   PushConfig,
+  RegisterInput,
+  ServerSettings,
+  ServerSettingsUpdate,
+  ServerStatus,
   TrackedWorkout,
+  User,
   WorkoutInput,
   WorkoutCacheRevision,
   WorkoutSnapshot,
@@ -29,6 +38,7 @@ import type {
 } from './types';
 import { cachedWorkoutsForRevision, readWorkoutCache, writeWorkoutCache } from './workoutCache';
 import { dateRangeQuery, type DateRange } from './dateRanges';
+import { emitAuthExpired, NOT_AUTHENTICATED_CODE } from './authEvents';
 
 export class ApiError extends Error {
   constructor(
@@ -40,12 +50,28 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, { ...init, credentials: 'omit' });
+interface RequestOptions {
+  /** Public auth endpoints handle their own 401s (for example a wrong password). */
+  signalExpiredSession?: boolean;
+}
+
+async function request<T>(
+  path: string,
+  init?: RequestInit,
+  { signalExpiredSession = true }: RequestOptions = {},
+): Promise<T> {
+  const response = await fetch(path, { ...init, credentials: 'same-origin' });
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as {
       error?: { code?: string; message?: string };
     } | null;
+    if (
+      signalExpiredSession &&
+      response.status === 401 &&
+      body?.error?.code === NOT_AUTHENTICATED_CODE
+    ) {
+      emitAuthExpired();
+    }
     throw new ApiError(
       body?.error?.message ?? `Request failed (${response.status})`,
       body?.error?.code,
@@ -56,9 +82,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 async function requestBlob(path: string): Promise<Blob> {
-  const response = await fetch(path, { credentials: 'omit' });
-  if (!response.ok)
+  const response = await fetch(path, { credentials: 'same-origin' });
+  if (!response.ok) {
+    if (response.status === 401) emitAuthExpired();
     throw new ApiError(`Export failed (${response.status})`, 'export_failed', response.status);
+  }
   return response.blob();
 }
 
@@ -75,7 +103,63 @@ async function listCachedWorkouts(): Promise<TrackedWorkout[]> {
   return snapshot.workouts;
 }
 
+const jsonHeaders = { 'Content-Type': 'application/json' };
+
 export const api = {
+  auth: {
+    config: () =>
+      request<AuthConfig>('/api/auth/config', undefined, { signalExpiredSession: false }),
+    me: () => request<User>('/api/auth/me', undefined, { signalExpiredSession: false }),
+    login: (payload: LoginInput) =>
+      request<User>(
+        '/api/auth/login',
+        { method: 'POST', headers: jsonHeaders, body: JSON.stringify(payload) },
+        { signalExpiredSession: false },
+      ),
+    register: (payload: RegisterInput) =>
+      request<User>(
+        '/api/auth/register',
+        { method: 'POST', headers: jsonHeaders, body: JSON.stringify(payload) },
+        { signalExpiredSession: false },
+      ),
+    logout: () =>
+      request<void>('/api/auth/logout', { method: 'POST' }, { signalExpiredSession: false }),
+  },
+  admin: {
+    users: () => request<AdminUser[]>('/api/admin/users'),
+    setUserDisabled: (userId: string, disabled: boolean) =>
+      request<AdminUser>(`/api/admin/users/${encodeURIComponent(userId)}`, {
+        method: 'PATCH',
+        headers: jsonHeaders,
+        body: JSON.stringify({ disabled }),
+      }),
+    settings: () => request<ServerSettings>('/api/admin/settings'),
+    updateSettings: (payload: ServerSettingsUpdate) =>
+      request<ServerSettings>('/api/admin/settings', {
+        method: 'PATCH',
+        headers: jsonHeaders,
+        body: JSON.stringify(payload),
+      }),
+    status: () => request<ServerStatus>('/api/admin/status'),
+  },
+  updateProfile: (payload: ProfileUpdateInput) =>
+    request<User>('/api/profile', {
+      method: 'PATCH',
+      headers: jsonHeaders,
+      body: JSON.stringify(payload),
+    }),
+  changePassword: (payload: { current_password: string; new_password: string }) =>
+    request<void>('/api/profile/password', {
+      method: 'PUT',
+      headers: jsonHeaders,
+      body: JSON.stringify(payload),
+    }),
+  deleteAccount: (password: string) =>
+    request<void>('/api/profile', {
+      method: 'DELETE',
+      headers: jsonHeaders,
+      body: JSON.stringify({ password }),
+    }),
   health: () => request<Health>('/api/health'),
   pushConfig: () => request<PushConfig>('/api/notifications/push/config'),
   savePushSubscription: (payload: { endpoint: string; p256dh: string; auth: string }) =>
@@ -319,7 +403,6 @@ export const api = {
       form.append('file', clip.file, clip.file.name);
       const xhr = new XMLHttpRequest();
       xhr.open('POST', `/api/sessions/${sessionId}/clips`);
-      xhr.withCredentials = false;
       xhr.upload.onprogress = (event) => {
         if (event.lengthComputable) onProgress(Math.round((event.loaded / event.total) * 100));
       };
@@ -332,6 +415,7 @@ export const api = {
           resolve(body as unknown as Clip);
           return;
         }
+        if (xhr.status === 401 && body?.error?.code === NOT_AUTHENTICATED_CODE) emitAuthExpired();
         reject(
           new ApiError(
             body?.error?.message ?? `Upload failed (${xhr.status})`,

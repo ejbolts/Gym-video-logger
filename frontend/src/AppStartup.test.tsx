@@ -3,7 +3,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import { AppTabBar } from './AppTabBar';
 import { TodayScreen } from './TodayScreen';
-import type { DashboardData, WorkoutTypeColors } from './types';
+import type { DashboardData, User, WorkoutTypeColors } from './types';
+import { UserContext, type UserSession } from './userContext';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -25,6 +26,30 @@ function stubWindow(hash: string) {
     location: { hash },
     localStorage: { getItem: () => null },
   });
+}
+
+const account: User = {
+  id: 'user-1',
+  email: 'lifter@example.com',
+  display_name: 'Lifter',
+  is_admin: true,
+  can_upload_videos: true,
+  created_at: '2026-10-01T10:00:00Z',
+};
+
+function renderSignedIn(hash: string, user: User) {
+  stubWindow(hash);
+  const session: UserSession = {
+    user,
+    updateUser: vi.fn(),
+    signOut: vi.fn(),
+    accountDeleted: vi.fn(),
+  };
+  return renderToStaticMarkup(
+    <UserContext.Provider value={session}>
+      <App />
+    </UserContext.Provider>,
+  );
 }
 
 function renderToday(overrides: Partial<Parameters<typeof TodayScreen>[0]> = {}) {
@@ -183,6 +208,30 @@ describe('App startup', () => {
       expect(markup).toContain('class="tracker-app has-tab-bar"');
     },
   );
+
+  it('shows the Profile screen with the account name, email and admin badge', () => {
+    const markup = renderSignedIn('#profile', account);
+
+    expect(markup).toContain('<strong>Profile</strong>');
+    expect(markup).toContain('lifter@example.com');
+    expect(markup).toContain('Admin');
+    expect(markup).toContain('Change password');
+    expect(markup).toContain('Sign out');
+    expect(markup).toContain('Delete account');
+  });
+
+  it('offers the Profile entry point on Today', () => {
+    const today = renderToday({ onOpenProfile: vi.fn(), profileLabel: 'Lifter' });
+    expect(today).toContain('aria-label="Profile: Lifter"');
+  });
+
+  it('hides the video entry points for accounts that cannot upload videos', () => {
+    expect(renderToday({ onOpenVideos: undefined })).not.toContain('aria-label="Video logger"');
+
+    const markup = renderSignedIn('#videos', { ...account, can_upload_videos: false });
+    expect(markup).not.toContain('<strong>Videos</strong>');
+    expect(markup).not.toContain('video-module');
+  });
 
   it('hides the tab bar during a live workout', () => {
     stubWindow('#log');

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "gym-video-logger"
 version = "0.1.0"
-description = "Private, single-user gym video processing PWA"
+description = "Multi-user gym workout tracker and video processing PWA"
 requires-python = ">=3.12"
 dependencies = [
   "fastapi>=0.115,<1",
@@ -21,11 +21,11 @@ dependencies = [
   "google-auth-oauthlib>=1.2,<2",
   "cryptography>=42,<50",
   "pywebpush>=2.0,<3",
+  "alembic>=1.14,<2",
 ]
 
 [project.optional-dependencies]
 dev = [
-  "alembic>=1.14,<2",
   "httpx>=0.27,<1",
   "pytest>=8.3,<9",
   "pytest-cov>=6,<7",

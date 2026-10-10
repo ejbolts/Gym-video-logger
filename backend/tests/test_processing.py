@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
+from conftest import make_user
+
 from app.config import Settings, get_settings
 from app.database import SessionLocal
 from app.models import (
@@ -229,8 +231,10 @@ def test_youtube_processing_completion_sends_a_phone_notification(monkeypatch):
             return "succeeded"
 
     settings = get_settings()
+    owner_id = make_user()
     with SessionLocal() as db:
         session = WorkoutSession(
+            user_id=owner_id,
             name="Push day",
             workout_date=date(2026, 7, 12),
             expected_clip_count=1,
@@ -255,7 +259,11 @@ def test_youtube_processing_completion_sends_a_phone_notification(monkeypatch):
         completed = db.get(WorkoutSession, session_id)
         assert completed and completed.status == SessionStatus.COMPLETE
     assert notifications == [
-        {"title": "Workout video ready", "body": "Push day is ready on YouTube."}
+        {
+            "title": "Workout video ready",
+            "body": "Push day is ready on YouTube.",
+            "user_id": owner_id,
+        }
     ]
 
 

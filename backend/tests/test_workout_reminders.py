@@ -1,5 +1,7 @@
 from datetime import UTC, date, datetime, timedelta
 
+from conftest import make_user
+
 from app.config import get_settings
 from app.database import SessionLocal
 from app.models import (
@@ -14,12 +16,13 @@ from app.notifications import ActiveWorkoutReminderScheduler
 
 def test_reminder_survives_restart_and_delivers_only_once(monkeypatch):
     endpoint = "https://push.example.test/phone"
+    user_id = make_user()
     with SessionLocal() as db:
-        db.add(PushSubscription(endpoint=endpoint, p256dh="key", auth="auth"))
+        db.add(PushSubscription(user_id=user_id, endpoint=endpoint, p256dh="key", auth="auth"))
         db.commit()
     scheduler = ActiveWorkoutReminderScheduler(SessionLocal, get_settings())
     started = datetime.now(UTC).timestamp()
-    scheduler.schedule(endpoint=endpoint, timer_id="one", started_at=started)
+    scheduler.schedule(endpoint=endpoint, timer_id="one", started_at=started, user_id=user_id)
     calls = []
     monkeypatch.setattr(
         "app.notifications.send_push_notification", lambda *a, **kw: calls.append(kw) or True
@@ -34,18 +37,20 @@ def test_reminder_survives_restart_and_delivers_only_once(monkeypatch):
         reminder.due_at = datetime.now(UTC) - timedelta(seconds=1)
         db.commit()
     restarted = ActiveWorkoutReminderScheduler(SessionLocal, get_settings())
-    restarted.schedule(endpoint=endpoint, timer_id="one", started_at=started)
+    restarted.schedule(endpoint=endpoint, timer_id="one", started_at=started, user_id=user_id)
     restarted.deliver_due()
     restarted.deliver_due()
     assert len(calls) == 1
     assert calls[0]["endpoint"] == endpoint
+    assert calls[0]["user_id"] == user_id
     assert calls[0]["url"] == "/#log"
 
 
 def test_cancel_and_old_cancel_do_not_interfere_with_new_workout(monkeypatch):
     endpoint = "https://push.example.test/phone"
+    user_id = make_user()
     with SessionLocal() as db:
-        db.add(PushSubscription(endpoint=endpoint, p256dh="key", auth="auth"))
+        db.add(PushSubscription(user_id=user_id, endpoint=endpoint, p256dh="key", auth="auth"))
         db.commit()
     scheduler = ActiveWorkoutReminderScheduler(SessionLocal, get_settings())
     started = (datetime.now(UTC) - timedelta(hours=3)).timestamp()
@@ -53,12 +58,12 @@ def test_cancel_and_old_cancel_do_not_interfere_with_new_workout(monkeypatch):
     monkeypatch.setattr(
         "app.notifications.send_push_notification", lambda *a, **kw: calls.append(kw) or True
     )
-    scheduler.schedule(endpoint=endpoint, timer_id="one", started_at=started)
+    scheduler.schedule(endpoint=endpoint, timer_id="one", started_at=started, user_id=user_id)
     scheduler.cancel(endpoint=endpoint, timer_id="one")
-    scheduler.schedule(endpoint=endpoint, timer_id="one", started_at=started)
+    scheduler.schedule(endpoint=endpoint, timer_id="one", started_at=started, user_id=user_id)
     scheduler.deliver_due()
     assert not calls
-    scheduler.schedule(endpoint=endpoint, timer_id="two", started_at=started)
+    scheduler.schedule(endpoint=endpoint, timer_id="two", started_at=started, user_id=user_id)
     scheduler.cancel(endpoint=endpoint, timer_id="one")
     monkeypatch.setattr("app.notifications.send_push_notification", lambda *a, **kw: False)
     scheduler.deliver_due()
@@ -102,10 +107,12 @@ def test_sunday_week_is_shared_and_future_cardio_is_excluded(client, monkeypatch
         json={"preferred_weight_unit": "kg", "week_start": "sunday", "zone2_goal_minutes": 150},
     )
     monkeypatch.setattr("app.tracker.date", Today)
+    user_id = client.user["id"]
     with SessionLocal() as db:
         for day, minutes, zone2 in [(5, 90, True), (6, 40, True), (9, 71, False), (10, 80, True)]:
             db.add(
                 CardioSession(
+                    user_id=user_id,
                     session_date=date(2026, 9, day),
                     activity_type="Walking",
                     duration_minutes=minutes,
@@ -114,7 +121,10 @@ def test_sunday_week_is_shared_and_future_cardio_is_excluded(client, monkeypatch
             )
             db.add(
                 TrainingWorkout(
-                    name="Push", workout_date=date(2026, 9, day), category=WorkoutCategory.PUSH
+                    user_id=user_id,
+                    name="Push",
+                    workout_date=date(2026, 9, day),
+                    category=WorkoutCategory.PUSH,
                 )
             )
         db.commit()

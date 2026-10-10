@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import subprocess
 import uuid
 from dataclasses import dataclass
@@ -151,3 +152,10 @@ def original_clip_path(clip: Clip) -> Path:
     if not clip.original_path:
         raise FileNotFoundError("Clip does not have an original file path.")
     return Path(clip.original_path)
+
+
+def remove_session_files(session_id: str, settings: Settings) -> None:
+    # session IDs are server-generated UUIDs; every root is owned by this application.
+    for directory in (settings.uploads_dir / session_id, settings.normalized_dir / session_id):
+        shutil.rmtree(directory, ignore_errors=True)
+    (settings.output_dir / f"{session_id}.mp4").unlink(missing_ok=True)
