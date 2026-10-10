@@ -27,7 +27,7 @@ Phone PWA ── private Tailnet HTTPS ── Tailscale Serve ── 127.0.0.1:8
 - `backend/migrations/`: Alembic initial schema migration.
 - `data/` (ignored by Git): SQLite database, reusable machine photos, original uploads, normalized temp files, and stitched outputs.
 
-The backend serves the built PWA from the same origin when `frontend/dist/` exists. Sign-in uses cookie-based sessions with per-user accounts and authorization checks on each request. Cloud storage, Redis, Celery, AI recognition, and rep counting are not present.
+The backend serves the built PWA from the same origin when `frontend/dist/` exists. Sign-in uses cookie-based sessions with per-user accounts and authorization checks on each request. A sign-in lasts until the person signs out or goes 90 days (`GYM_SESSION_DAYS`) without using the app; each day of use restarts the count. Signing out, changing the password (other devices), disabling an account, or deleting it ends sessions immediately. Another instance on the same host, such as a test copy on a different port, must set its own `GYM_SESSION_COOKIE`, because browsers share cookies across ports. Cloud storage, Redis, Celery, AI recognition, and rep counting are not present.
 
 ## Prerequisites
 

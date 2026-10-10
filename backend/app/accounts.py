@@ -18,7 +18,6 @@ from .auth import (
     ACCOUNT_LOGIN_MAX_FAILURES,
     MAX_PASSWORD_LENGTH,
     MIN_PASSWORD_LENGTH,
-    SESSION_COOKIE,
     AppSettings,
     AuthContextDependency,
     CurrentUser,
@@ -423,7 +422,7 @@ def login(
 
 @auth_router.post("/logout", status_code=204)
 def logout(request: Request, response: Response, db: DbDependency, settings: AppSettings) -> None:
-    revoke_session_token(db, request.cookies.get(SESSION_COOKIE))
+    revoke_session_token(db, request.cookies.get(settings.session_cookie))
     clear_session_cookie(response, settings)
 
 
