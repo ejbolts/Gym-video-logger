@@ -3,12 +3,14 @@ import { useState } from 'react';
 export function InlineConfirmButton({
   label,
   confirmLabel = 'Confirm delete',
+  workingLabel = 'Deleting…',
   className,
   disabled = false,
   onConfirm,
 }: {
   label: string;
   confirmLabel?: string;
+  workingLabel?: string;
   className?: string;
   disabled?: boolean;
   onConfirm: () => void | Promise<void>;
@@ -46,7 +48,7 @@ export function InlineConfirmButton({
             });
         }}
       >
-        {working ? 'Deleting…' : confirmLabel}
+        {working ? workingLabel : confirmLabel}
       </button>
       <button type="button" disabled={working} onClick={() => setConfirming(false)}>
         Cancel

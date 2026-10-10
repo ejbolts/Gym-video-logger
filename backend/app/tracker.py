@@ -11,6 +11,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
+from .auth import CurrentUser, get_current_user
 from .body_measurement_csv import export_body_measurements, import_body_measurements
 from .cardio_energy import cardio_energy_periods
 from .cardio_ocr import CardioScreenshotError, scan_cardio_screenshot
@@ -94,7 +95,9 @@ from .training_metrics import (
     start_of_week,
 )
 
-router = APIRouter(prefix="/api", tags=["workout tracking"])
+router = APIRouter(
+    prefix="/api", tags=["workout tracking"], dependencies=[Depends(get_current_user)]
+)
 DbSession = Annotated[Session, Depends(get_db)]
 SettingsDependency = Annotated[Settings, Depends(get_settings)]
 WORKOUT_CACHE_REVISION_KEY = "workout_cache_revision"
@@ -110,12 +113,18 @@ DEFAULT_WORKOUT_TYPE_COLORS = WorkoutTypeColors(
 )
 
 
-def workout_cache_revision(db: Session) -> str:
-    return get_setting(db, WORKOUT_CACHE_REVISION_KEY, "0")
+def workout_cache_revision(db: Session, user_id: str) -> str:
+    return get_setting(db, user_id, WORKOUT_CACHE_REVISION_KEY, "0")
 
 
-def bump_workout_cache_revision(db: Session) -> None:
-    set_setting(db, WORKOUT_CACHE_REVISION_KEY, str(uuid.uuid4()))
+def bump_workout_cache_revision(db: Session, user_id: str) -> None:
+    set_setting(db, user_id, WORKOUT_CACHE_REVISION_KEY, str(uuid.uuid4()))
+
+
+def get_owned(db: Session, model, item_id: str, user_id: str):
+    """Load a user-owned row by id; another user's row is indistinguishable from a missing one."""
+    item = db.get(model, item_id)
+    return item if item is not None and item.user_id == user_id else None
 
 
 DEFAULT_EXERCISES = (
@@ -345,8 +354,11 @@ def workout_recommendation(
     )
 
 
-def seed_default_exercises(db: Session) -> None:
-    existing = {item.name.casefold(): item for item in db.scalars(select(Exercise))}
+def seed_default_exercises(db: Session, user_id: str) -> None:
+    existing = {
+        item.name.casefold(): item
+        for item in db.scalars(select(Exercise).where(Exercise.user_id == user_id))
+    }
     renamed_default = False
     legacy_leg_curl = existing.get("leg curl")
     seated_leg_curl = existing.get("seated leg curl")
@@ -386,6 +398,7 @@ def seed_default_exercises(db: Session) -> None:
         elif not exercise:
             db.add(
                 Exercise(
+                    user_id=user_id,
                     name=name,
                     category=category,
                     kind=kind,
@@ -394,9 +407,9 @@ def seed_default_exercises(db: Session) -> None:
                 )
             )
     if renamed_default:
-        bump_workout_cache_revision(db)
+        bump_workout_cache_revision(db, user_id)
     db.commit()
-    seed_muscle_mappings(db)
+    seed_muscle_mappings(db, user_id)
 
 
 def workout_options():
@@ -410,9 +423,11 @@ def workout_options():
     )
 
 
-def load_workout(db: Session, workout_id: str) -> TrainingWorkout:
+def load_workout(db: Session, user_id: str, workout_id: str) -> TrainingWorkout:
     workout = db.scalar(
-        select(TrainingWorkout).where(TrainingWorkout.id == workout_id).options(*workout_options())
+        select(TrainingWorkout)
+        .where(TrainingWorkout.id == workout_id, TrainingWorkout.user_id == user_id)
+        .options(*workout_options())
     )
     if not workout:
         raise HTTPException(status_code=404, detail="Workout was not found.")
@@ -420,7 +435,7 @@ def load_workout(db: Session, workout_id: str) -> TrainingWorkout:
 
 
 def replace_workout_contents(
-    db: Session, workout: TrainingWorkout, payload: TrainingWorkoutCreate
+    db: Session, user_id: str, workout: TrainingWorkout, payload: TrainingWorkoutCreate
 ) -> None:
     workout.name = payload.name
     workout.workout_date = payload.workout_date
@@ -447,7 +462,7 @@ def replace_workout_contents(
     workout.superset_groups.extend(groups.values())
     db.flush()
     for movement_index, movement_payload in enumerate(payload.movements):
-        exercise = db.get(Exercise, movement_payload.exercise_id)
+        exercise = get_owned(db, Exercise, movement_payload.exercise_id, user_id)
         if not exercise:
             raise HTTPException(
                 status_code=422,
@@ -463,7 +478,8 @@ def replace_workout_contents(
             photos = list(
                 db.scalars(
                     select(MachinePhoto).where(
-                        MachinePhoto.id.in_(movement_payload.machine_photo_ids)
+                        MachinePhoto.id.in_(movement_payload.machine_photo_ids),
+                        MachinePhoto.user_id == user_id,
                     )
                 )
             )
@@ -522,6 +538,7 @@ def sync_workout_cardio_sessions(db: Session, workout: TrainingWorkout) -> None:
         created = session is None
         if session is None:
             session = CardioSession(
+                user_id=workout.user_id,
                 source_workout_id=workout.id,
                 source_movement_index=movement.order_index,
             )
@@ -602,8 +619,11 @@ def sync_workout_cardio_sessions(db: Session, workout: TrainingWorkout) -> None:
             db.delete(session)
 
 
-def sync_all_workout_cardio_sessions(db: Session) -> None:
-    workouts = list(db.scalars(select(TrainingWorkout).options(*workout_options())))
+def sync_all_workout_cardio_sessions(db: Session, user_id: str | None = None) -> None:
+    query = select(TrainingWorkout).options(*workout_options())
+    if user_id is not None:
+        query = query.where(TrainingWorkout.user_id == user_id)
+    workouts = list(db.scalars(query))
     for workout in workouts:
         sync_workout_cardio_sessions(db, workout)
 
@@ -611,25 +631,35 @@ def sync_all_workout_cardio_sessions(db: Session) -> None:
 @router.get("/exercises", response_model=list[ExerciseRead])
 def list_exercises(
     db: DbSession,
+    user: CurrentUser,
     search: str | None = Query(default=None, max_length=100),
 ) -> list[Exercise]:
-    query = select(Exercise).order_by(Exercise.name)
+    query = select(Exercise).where(Exercise.user_id == user.id).order_by(Exercise.name)
     if search:
         query = query.where(Exercise.name.ilike(f"%{search.strip()}%"))
     return list(db.scalars(query))
 
 
 @router.get("/body-measurements", response_model=list[BodyMeasurementRead])
-def list_body_measurements(db: DbSession) -> list[BodyMeasurement]:
+def list_body_measurements(db: DbSession, user: CurrentUser) -> list[BodyMeasurement]:
     return list(
-        db.scalars(select(BodyMeasurement).order_by(BodyMeasurement.measurement_date.desc()))
+        db.scalars(
+            select(BodyMeasurement)
+            .where(BodyMeasurement.user_id == user.id)
+            .order_by(BodyMeasurement.measurement_date.desc())
+        )
     )
 
 
 @router.post("/body-measurements", response_model=BodyMeasurementRead)
-def save_body_measurement(payload: BodyMeasurementCreate, db: DbSession) -> BodyMeasurement:
+def save_body_measurement(
+    payload: BodyMeasurementCreate, db: DbSession, user: CurrentUser
+) -> BodyMeasurement:
     measurement = db.scalar(
-        select(BodyMeasurement).where(BodyMeasurement.measurement_date == payload.measurement_date)
+        select(BodyMeasurement).where(
+            BodyMeasurement.user_id == user.id,
+            BodyMeasurement.measurement_date == payload.measurement_date,
+        )
     )
     if measurement:
         measurement.weight_kg = payload.weight_kg
@@ -637,7 +667,7 @@ def save_body_measurement(payload: BodyMeasurementCreate, db: DbSession) -> Body
         measurement.notes = payload.notes
         measurement.is_sample = False
     else:
-        measurement = BodyMeasurement(**payload.model_dump())
+        measurement = BodyMeasurement(user_id=user.id, **payload.model_dump())
         db.add(measurement)
     db.commit()
     db.refresh(measurement)
@@ -646,11 +676,18 @@ def save_body_measurement(payload: BodyMeasurementCreate, db: DbSession) -> Body
 
 @router.get("/body-measurements/export.csv")
 def export_body_measurement_csv(
-    db: DbSession, start_date: date | None = None, end_date: date | None = None
+    db: DbSession,
+    user: CurrentUser,
+    start_date: date | None = None,
+    end_date: date | None = None,
 ) -> Response:
     if start_date and end_date and start_date > end_date:
         raise HTTPException(status_code=422, detail="Start date must not be after end date.")
-    statement = select(BodyMeasurement).order_by(BodyMeasurement.measurement_date)
+    statement = (
+        select(BodyMeasurement)
+        .where(BodyMeasurement.user_id == user.id)
+        .order_by(BodyMeasurement.measurement_date)
+    )
     if start_date:
         statement = statement.where(BodyMeasurement.measurement_date >= start_date)
     if end_date:
@@ -671,7 +708,7 @@ def export_body_measurement_csv(
     status_code=201,
 )
 async def import_body_measurement_csv(
-    db: DbSession, file: Annotated[UploadFile, File(...)]
+    db: DbSession, user: CurrentUser, file: Annotated[UploadFile, File(...)]
 ) -> BodyMeasurementCsvImportRead:
     if file.content_type not in {
         None,
@@ -687,7 +724,7 @@ async def import_body_measurement_csv(
     if len(raw) > 5 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="Body-weight CSV imports are limited to 5 MB.")
     try:
-        summary = import_body_measurements(db, raw)
+        summary = import_body_measurements(db, user.id, raw)
     except CsvImportError as error:
         db.rollback()
         raise HTTPException(status_code=422, detail=str(error)) from error
@@ -696,8 +733,8 @@ async def import_body_measurement_csv(
 
 
 @router.delete("/body-measurements/{measurement_id}", status_code=204)
-def delete_body_measurement(measurement_id: str, db: DbSession) -> None:
-    measurement = db.get(BodyMeasurement, measurement_id)
+def delete_body_measurement(measurement_id: str, db: DbSession, user: CurrentUser) -> None:
+    measurement = get_owned(db, BodyMeasurement, measurement_id, user.id)
     if not measurement:
         raise HTTPException(status_code=404, detail="Body measurement was not found.")
     db.delete(measurement)
@@ -705,10 +742,10 @@ def delete_body_measurement(measurement_id: str, db: DbSession) -> None:
 
 
 @router.post("/exercises", response_model=ExerciseRead, status_code=201)
-def create_exercise(payload: ExerciseCreate, db: DbSession) -> Exercise:
+def create_exercise(payload: ExerciseCreate, db: DbSession, user: CurrentUser) -> Exercise:
     exercise_data = payload.model_dump()
     exercise_data["name"] = canonical_exercise_name(payload.name)
-    exercise = Exercise(**exercise_data, is_custom=True)
+    exercise = Exercise(user_id=user.id, **exercise_data, is_custom=True)
     try:
         db.add(exercise)
         db.commit()
@@ -723,26 +760,26 @@ def create_exercise(payload: ExerciseCreate, db: DbSession) -> Exercise:
 
 @router.patch("/exercises/{exercise_id}/favorite", response_model=ExerciseRead)
 def update_exercise_favorite(
-    exercise_id: str, payload: ExerciseFavoriteUpdate, db: DbSession
+    exercise_id: str, payload: ExerciseFavoriteUpdate, db: DbSession, user: CurrentUser
 ) -> Exercise:
-    exercise = db.get(Exercise, exercise_id)
+    exercise = get_owned(db, Exercise, exercise_id, user.id)
     if not exercise:
         raise HTTPException(status_code=404, detail="Exercise was not found.")
     exercise.is_favorite = payload.is_favorite
-    bump_workout_cache_revision(db)
+    bump_workout_cache_revision(db, user.id)
     db.commit()
     db.refresh(exercise)
     return exercise
 
 
 @router.get("/exercises/{exercise_id}/machine-photos", response_model=list[MachinePhotoRead])
-def list_machine_photos(exercise_id: str, db: DbSession) -> list[MachinePhoto]:
-    if not db.get(Exercise, exercise_id):
+def list_machine_photos(exercise_id: str, db: DbSession, user: CurrentUser) -> list[MachinePhoto]:
+    if not get_owned(db, Exercise, exercise_id, user.id):
         raise HTTPException(status_code=404, detail="Exercise was not found.")
     return list(
         db.scalars(
             select(MachinePhoto)
-            .where(MachinePhoto.exercise_id == exercise_id)
+            .where(MachinePhoto.exercise_id == exercise_id, MachinePhoto.user_id == user.id)
             .order_by(MachinePhoto.created_at.desc())
         )
     )
@@ -752,8 +789,10 @@ def list_machine_photos(exercise_id: str, db: DbSession) -> list[MachinePhoto]:
     "/exercises/{exercise_id}/machine-photos/last-used",
     response_model=list[MachinePhotoRead],
 )
-def last_used_machine_photos(exercise_id: str, db: DbSession) -> list[MachinePhoto]:
-    if not db.get(Exercise, exercise_id):
+def last_used_machine_photos(
+    exercise_id: str, db: DbSession, user: CurrentUser
+) -> list[MachinePhoto]:
+    if not get_owned(db, Exercise, exercise_id, user.id):
         raise HTTPException(status_code=404, detail="Exercise was not found.")
     movement_id = db.scalar(
         select(WorkoutMovement.id)
@@ -762,7 +801,7 @@ def last_used_machine_photos(exercise_id: str, db: DbSession) -> list[MachinePho
             movement_machine_photos,
             movement_machine_photos.c.movement_id == WorkoutMovement.id,
         )
-        .where(WorkoutMovement.exercise_id == exercise_id)
+        .where(WorkoutMovement.exercise_id == exercise_id, TrainingWorkout.user_id == user.id)
         .order_by(TrainingWorkout.workout_date.desc(), TrainingWorkout.created_at.desc())
         .limit(1)
     )
@@ -775,7 +814,10 @@ def last_used_machine_photos(exercise_id: str, db: DbSession) -> list[MachinePho
                 movement_machine_photos,
                 movement_machine_photos.c.machine_photo_id == MachinePhoto.id,
             )
-            .where(movement_machine_photos.c.movement_id == movement_id)
+            .where(
+                movement_machine_photos.c.movement_id == movement_id,
+                MachinePhoto.user_id == user.id,
+            )
             .order_by(MachinePhoto.created_at)
         )
     )
@@ -789,11 +831,12 @@ def last_used_machine_photos(exercise_id: str, db: DbSession) -> list[MachinePho
 async def upload_machine_photo(
     exercise_id: str,
     db: DbSession,
+    user: CurrentUser,
     settings: SettingsDependency,
     file: Annotated[UploadFile, File(...)],
     caption: Annotated[str, Form(min_length=1, max_length=160)],
 ) -> MachinePhoto:
-    if not db.get(Exercise, exercise_id):
+    if not get_owned(db, Exercise, exercise_id, user.id):
         raise HTTPException(status_code=404, detail="Exercise was not found.")
     cleaned_caption = caption.strip()
     if not cleaned_caption:
@@ -804,6 +847,7 @@ async def upload_machine_photo(
         raise HTTPException(status_code=error.status_code, detail=error.message) from error
 
     photo = MachinePhoto(
+        user_id=user.id,
         exercise_id=exercise_id,
         caption=cleaned_caption,
         original_filename=stored.original_filename,
@@ -827,13 +871,13 @@ async def upload_machine_photo(
 
 @router.patch("/machine-photos/{photo_id}", response_model=MachinePhotoRead)
 def update_machine_photo_caption(
-    photo_id: str, payload: MachinePhotoCaptionUpdate, db: DbSession
+    photo_id: str, payload: MachinePhotoCaptionUpdate, db: DbSession, user: CurrentUser
 ) -> MachinePhoto:
-    photo = db.get(MachinePhoto, photo_id)
+    photo = get_owned(db, MachinePhoto, photo_id, user.id)
     if not photo:
         raise HTTPException(status_code=404, detail="Machine photo was not found.")
     photo.caption = payload.caption
-    bump_workout_cache_revision(db)
+    bump_workout_cache_revision(db, user.id)
     db.commit()
     db.refresh(photo)
     return photo
@@ -843,10 +887,11 @@ def update_machine_photo_caption(
 def get_machine_photo_image(
     photo_id: str,
     db: DbSession,
+    user: CurrentUser,
     settings: SettingsDependency,
     variant: str = Query(default="full", pattern="^(thumbnail|full)$"),
 ) -> FileResponse:
-    photo = db.get(MachinePhoto, photo_id)
+    photo = get_owned(db, MachinePhoto, photo_id, user.id)
     if not photo:
         raise HTTPException(status_code=404, detail="Machine photo was not found.")
     filename = photo.thumbnail_filename if variant == "thumbnail" else photo.full_filename
@@ -862,8 +907,10 @@ def get_machine_photo_image(
 
 
 @router.delete("/machine-photos/{photo_id}", status_code=204)
-def delete_machine_photo(photo_id: str, db: DbSession, settings: SettingsDependency) -> None:
-    photo = db.get(MachinePhoto, photo_id)
+def delete_machine_photo(
+    photo_id: str, db: DbSession, user: CurrentUser, settings: SettingsDependency
+) -> None:
+    photo = get_owned(db, MachinePhoto, photo_id, user.id)
     if not photo:
         raise HTTPException(status_code=404, detail="Machine photo was not found.")
     reference = db.scalar(
@@ -883,13 +930,13 @@ def delete_machine_photo(photo_id: str, db: DbSession, settings: SettingsDepende
     delete_machine_photo_files(settings, full_filename, thumbnail_filename)
 
 
-def training_preferences(db: Session) -> TrainingPreferencesRead:
-    unit = preferred_weight_unit(db)
-    week_start_value = get_setting(db, "week_start", "monday")
+def training_preferences(db: Session, user_id: str) -> TrainingPreferencesRead:
+    unit = preferred_weight_unit(db, user_id)
+    week_start_value = get_setting(db, user_id, "week_start", "monday")
     if week_start_value not in {"monday", "sunday", "saturday"}:
         week_start_value = "monday"
     try:
-        zone2_goal = max(1, int(get_setting(db, "zone2_goal_minutes", "150")))
+        zone2_goal = max(1, int(get_setting(db, user_id, "zone2_goal_minutes", "150")))
     except ValueError:
         zone2_goal = 150
     return TrainingPreferencesRead(
@@ -923,13 +970,13 @@ def zone2_week(
 
 
 @router.get("/training-preferences", response_model=TrainingPreferencesRead)
-def get_training_preferences(db: DbSession) -> TrainingPreferencesRead:
-    return training_preferences(db)
+def get_training_preferences(db: DbSession, user: CurrentUser) -> TrainingPreferencesRead:
+    return training_preferences(db, user.id)
 
 
 @router.get("/workout-type-colors", response_model=WorkoutTypeColors)
-def get_workout_type_colors(db: DbSession) -> WorkoutTypeColors:
-    stored = get_setting(db, WORKOUT_TYPE_COLORS_KEY, "")
+def get_workout_type_colors(db: DbSession, user: CurrentUser) -> WorkoutTypeColors:
+    stored = get_setting(db, user.id, WORKOUT_TYPE_COLORS_KEY, "")
     if stored:
         try:
             return WorkoutTypeColors.model_validate_json(stored)
@@ -939,31 +986,34 @@ def get_workout_type_colors(db: DbSession) -> WorkoutTypeColors:
 
 
 @router.put("/workout-type-colors", response_model=WorkoutTypeColors)
-def update_workout_type_colors(payload: WorkoutTypeColors, db: DbSession) -> WorkoutTypeColors:
-    set_setting(db, WORKOUT_TYPE_COLORS_KEY, payload.model_dump_json())
+def update_workout_type_colors(
+    payload: WorkoutTypeColors, db: DbSession, user: CurrentUser
+) -> WorkoutTypeColors:
+    set_setting(db, user.id, WORKOUT_TYPE_COLORS_KEY, payload.model_dump_json())
     db.commit()
     return payload
 
 
 @router.put("/training-preferences", response_model=TrainingPreferencesRead)
 def update_training_preferences(
-    payload: TrainingPreferencesUpdate, db: DbSession
+    payload: TrainingPreferencesUpdate, db: DbSession, user: CurrentUser
 ) -> TrainingPreferencesRead:
-    set_setting(db, "preferred_weight_unit", payload.preferred_weight_unit)
-    set_setting(db, "week_start", payload.week_start)
-    set_setting(db, "zone2_goal_minutes", str(payload.zone2_goal_minutes))
+    set_setting(db, user.id, "preferred_weight_unit", payload.preferred_weight_unit)
+    set_setting(db, user.id, "week_start", payload.week_start)
+    set_setting(db, user.id, "zone2_goal_minutes", str(payload.zone2_goal_minutes))
     db.flush()
-    rebuild_personal_records(db)
+    rebuild_personal_records(db, user.id)
     db.commit()
-    return training_preferences(db)
+    return training_preferences(db, user.id)
 
 
 @router.get("/cardio", response_model=CardioOverviewRead)
-def cardio_overview(db: DbSession) -> CardioOverviewRead:
-    preferences = training_preferences(db)
+def cardio_overview(db: DbSession, user: CurrentUser) -> CardioOverviewRead:
+    preferences = training_preferences(db, user.id)
     sessions = list(
         db.scalars(
             select(CardioSession)
+            .where(CardioSession.user_id == user.id)
             .options(
                 selectinload(CardioSession.source_workout)
                 .selectinload(TrainingWorkout.movements)
@@ -1001,13 +1051,16 @@ async def scan_cardio_workout_screenshot(
 
 
 @router.post("/cardio", response_model=CardioSessionRead, status_code=201)
-def create_cardio_session(payload: CardioSessionCreate, db: DbSession) -> CardioSession:
+def create_cardio_session(
+    payload: CardioSessionCreate, db: DbSession, user: CurrentUser
+) -> CardioSession:
     if payload.exercise_id:
-        exercise = db.get(Exercise, payload.exercise_id)
+        exercise = get_owned(db, Exercise, payload.exercise_id, user.id)
         if not exercise or exercise.kind != ExerciseKind.CARDIO:
             raise HTTPException(status_code=422, detail="Choose a cardio exercise.")
 
         workout = TrainingWorkout(
+            user_id=user.id,
             name=f"{exercise.name} cardio",
             workout_date=payload.session_date,
             category=WorkoutCategory.CARDIO,
@@ -1033,6 +1086,7 @@ def create_cardio_session(payload: CardioSessionCreate, db: DbSession) -> Cardio
         db.add(workout)
         db.flush()
         session = CardioSession(
+            user_id=user.id,
             session_date=payload.session_date,
             activity_type=exercise.name,
             duration_minutes=payload.duration_minutes,
@@ -1052,13 +1106,13 @@ def create_cardio_session(payload: CardioSessionCreate, db: DbSession) -> Cardio
             source_movement_index=0,
         )
         db.add(session)
-        rebuild_personal_records(db)
-        bump_workout_cache_revision(db)
+        rebuild_personal_records(db, user.id)
+        bump_workout_cache_revision(db, user.id)
         db.commit()
         db.refresh(session)
         return session
 
-    session = CardioSession(**payload.model_dump(exclude={"exercise_id"}))
+    session = CardioSession(user_id=user.id, **payload.model_dump(exclude={"exercise_id"}))
     db.add(session)
     db.commit()
     db.refresh(session)
@@ -1067,9 +1121,9 @@ def create_cardio_session(payload: CardioSessionCreate, db: DbSession) -> Cardio
 
 @router.put("/cardio/{session_id}", response_model=CardioSessionRead)
 def update_cardio_session(
-    session_id: str, payload: CardioSessionCreate, db: DbSession
+    session_id: str, payload: CardioSessionCreate, db: DbSession, user: CurrentUser
 ) -> CardioSession:
-    session = db.get(CardioSession, session_id)
+    session = get_owned(db, CardioSession, session_id, user.id)
     if not session:
         raise HTTPException(status_code=404, detail="Cardio session was not found.")
     if session.source_workout_id:
@@ -1094,15 +1148,15 @@ def update_cardio_session(
 
 @router.patch("/cardio/{session_id}/calories", response_model=CardioSessionRead)
 def update_cardio_calories(
-    session_id: str, payload: CardioCaloriesUpdate, db: DbSession
+    session_id: str, payload: CardioCaloriesUpdate, db: DbSession, user: CurrentUser
 ) -> CardioSession:
-    session = db.get(CardioSession, session_id)
+    session = get_owned(db, CardioSession, session_id, user.id)
     if not session:
         raise HTTPException(status_code=404, detail="Cardio session was not found.")
     session.calories_kcal = payload.calories_kcal
     if sync_cardio_session_metrics_to_workout_sets(db, session, {"calories_kcal"}):
-        rebuild_personal_records(db)
-        bump_workout_cache_revision(db)
+        rebuild_personal_records(db, user.id)
+        bump_workout_cache_revision(db, user.id)
     db.commit()
     db.refresh(session)
     return session
@@ -1122,7 +1176,7 @@ def sync_cardio_session_metrics_to_workout_sets(
         return False
     if not session.source_workout_id:
         return False
-    workout = load_workout(db, session.source_workout_id)
+    workout = load_workout(db, session.user_id, session.source_workout_id)
     movement = next(
         (item for item in workout.movements if item.order_index == session.source_movement_index),
         None,
@@ -1178,24 +1232,24 @@ def sync_cardio_session_metrics_to_workout_sets(
 
 @router.patch("/cardio/{session_id}/metrics", response_model=CardioSessionRead)
 def update_cardio_metrics(
-    session_id: str, payload: CardioMetricsUpdate, db: DbSession
+    session_id: str, payload: CardioMetricsUpdate, db: DbSession, user: CurrentUser
 ) -> CardioSession:
-    session = db.get(CardioSession, session_id)
+    session = get_owned(db, CardioSession, session_id, user.id)
     if not session:
         raise HTTPException(status_code=404, detail="Cardio session was not found.")
     for key in payload.model_fields_set:
         setattr(session, key, getattr(payload, key))
     if sync_cardio_session_metrics_to_workout_sets(db, session, payload.model_fields_set):
-        rebuild_personal_records(db)
-        bump_workout_cache_revision(db)
+        rebuild_personal_records(db, user.id)
+        bump_workout_cache_revision(db, user.id)
     db.commit()
     db.refresh(session)
     return session
 
 
 @router.delete("/cardio/{session_id}", status_code=204)
-def delete_cardio_session(session_id: str, db: DbSession) -> None:
-    session = db.get(CardioSession, session_id)
+def delete_cardio_session(session_id: str, db: DbSession, user: CurrentUser) -> None:
+    session = get_owned(db, CardioSession, session_id, user.id)
     if not session:
         raise HTTPException(status_code=404, detail="Cardio session was not found.")
     if session.source_workout_id:
@@ -1205,18 +1259,28 @@ def delete_cardio_session(session_id: str, db: DbSession) -> None:
 
 
 @router.get("/body-weight-goals", response_model=list[BodyWeightGoalRead])
-def list_body_weight_goals(db: DbSession) -> list[BodyWeightGoal]:
-    return list(db.scalars(select(BodyWeightGoal).order_by(BodyWeightGoal.created_at.desc())))
+def list_body_weight_goals(db: DbSession, user: CurrentUser) -> list[BodyWeightGoal]:
+    return list(
+        db.scalars(
+            select(BodyWeightGoal)
+            .where(BodyWeightGoal.user_id == user.id)
+            .order_by(BodyWeightGoal.created_at.desc())
+        )
+    )
 
 
 @router.post("/body-weight-goals", response_model=BodyWeightGoalRead, status_code=201)
-def create_body_weight_goal(payload: BodyWeightGoalCreate, db: DbSession) -> BodyWeightGoal:
+def create_body_weight_goal(
+    payload: BodyWeightGoalCreate, db: DbSession, user: CurrentUser
+) -> BodyWeightGoal:
     if payload.active:
         for existing_goal in db.scalars(
-            select(BodyWeightGoal).where(BodyWeightGoal.active.is_(True))
+            select(BodyWeightGoal).where(
+                BodyWeightGoal.user_id == user.id, BodyWeightGoal.active.is_(True)
+            )
         ):
             existing_goal.active = False
-    goal = BodyWeightGoal(**payload.model_dump())
+    goal = BodyWeightGoal(user_id=user.id, **payload.model_dump())
     db.add(goal)
     db.commit()
     db.refresh(goal)
@@ -1225,13 +1289,17 @@ def create_body_weight_goal(payload: BodyWeightGoalCreate, db: DbSession) -> Bod
 
 @router.put("/body-weight-goals/{goal_id}", response_model=BodyWeightGoalRead)
 def update_body_weight_goal(
-    goal_id: str, payload: BodyWeightGoalCreate, db: DbSession
+    goal_id: str, payload: BodyWeightGoalCreate, db: DbSession, user: CurrentUser
 ) -> BodyWeightGoal:
-    goal = db.get(BodyWeightGoal, goal_id)
+    goal = get_owned(db, BodyWeightGoal, goal_id, user.id)
     if not goal:
         raise HTTPException(status_code=404, detail="Body-weight goal was not found.")
     if payload.active:
-        for other in db.scalars(select(BodyWeightGoal).where(BodyWeightGoal.active.is_(True))):
+        for other in db.scalars(
+            select(BodyWeightGoal).where(
+                BodyWeightGoal.user_id == user.id, BodyWeightGoal.active.is_(True)
+            )
+        ):
             if other.id != goal_id:
                 other.active = False
     values = payload.model_dump()
@@ -1243,8 +1311,8 @@ def update_body_weight_goal(
 
 
 @router.delete("/body-weight-goals/{goal_id}", status_code=204)
-def delete_body_weight_goal(goal_id: str, db: DbSession) -> None:
-    goal = db.get(BodyWeightGoal, goal_id)
+def delete_body_weight_goal(goal_id: str, db: DbSession, user: CurrentUser) -> None:
+    goal = get_owned(db, BodyWeightGoal, goal_id, user.id)
     if not goal:
         raise HTTPException(status_code=404, detail="Body-weight goal was not found.")
     db.delete(goal)
@@ -1254,10 +1322,15 @@ def delete_body_weight_goal(goal_id: str, db: DbSession) -> None:
 @router.get("/personal-records", response_model=list[PersonalRecordRead])
 def list_personal_records(
     db: DbSession,
+    user: CurrentUser,
     exercise_id: str | None = None,
     workout_id: str | None = None,
 ) -> list[PersonalRecord]:
-    query = select(PersonalRecord).options(selectinload(PersonalRecord.exercise))
+    query = (
+        select(PersonalRecord)
+        .where(PersonalRecord.user_id == user.id)
+        .options(selectinload(PersonalRecord.exercise))
+    )
     if exercise_id:
         query = query.where(PersonalRecord.exercise_id == exercise_id)
     if workout_id:
@@ -1272,14 +1345,21 @@ def list_personal_records(
 @router.get("/muscle-volume", response_model=list[MuscleVolumeRead])
 def weekly_muscle_volume(
     db: DbSession,
+    user: CurrentUser,
     start: date | None = None,
     end: date | None = None,
 ) -> list[MuscleVolumeRead]:
     end_date = end or date.today()
-    start_date = start or start_of_week(end_date, training_preferences(db).week_start)
+    start_date = start or start_of_week(end_date, training_preferences(db, user.id).week_start)
     if start_date > end_date:
         raise HTTPException(status_code=422, detail="Start date must not be after end date.")
-    workouts = list(db.scalars(select(TrainingWorkout).options(*workout_options())))
+    workouts = list(
+        db.scalars(
+            select(TrainingWorkout)
+            .where(TrainingWorkout.user_id == user.id)
+            .options(*workout_options())
+        )
+    )
     totals = muscle_volume(workouts, start_date, end_date)
     return [
         MuscleVolumeRead(muscle_name=name, set_total=value)
@@ -1288,10 +1368,11 @@ def weekly_muscle_volume(
 
 
 @router.get("/workouts", response_model=list[TrainingWorkoutRead])
-def list_workouts(db: DbSession) -> list[TrainingWorkout]:
+def list_workouts(db: DbSession, user: CurrentUser) -> list[TrainingWorkout]:
     return list(
         db.scalars(
             select(TrainingWorkout)
+            .where(TrainingWorkout.user_id == user.id)
             .options(*workout_options())
             .order_by(TrainingWorkout.workout_date.desc(), TrainingWorkout.created_at.desc())
         )
@@ -1299,21 +1380,24 @@ def list_workouts(db: DbSession) -> list[TrainingWorkout]:
 
 
 @router.get("/workouts/revision", response_model=WorkoutCacheRevisionRead)
-def get_workout_cache_revision(db: DbSession) -> WorkoutCacheRevisionRead:
-    return WorkoutCacheRevisionRead(revision=workout_cache_revision(db))
+def get_workout_cache_revision(db: DbSession, user: CurrentUser) -> WorkoutCacheRevisionRead:
+    return WorkoutCacheRevisionRead(revision=workout_cache_revision(db, user.id))
 
 
 @router.get("/workouts/snapshot", response_model=WorkoutSnapshotRead)
-def get_workout_snapshot(db: DbSession) -> WorkoutSnapshotRead:
+def get_workout_snapshot(db: DbSession, user: CurrentUser) -> WorkoutSnapshotRead:
     return WorkoutSnapshotRead(
-        revision=workout_cache_revision(db),
-        workouts=list_workouts(db),
+        revision=workout_cache_revision(db, user.id),
+        workouts=list_workouts(db, user),
     )
 
 
 @router.post("/workouts", response_model=TrainingWorkoutRead, status_code=201)
-def create_workout(payload: TrainingWorkoutCreate, db: DbSession) -> TrainingWorkout:
+def create_workout(
+    payload: TrainingWorkoutCreate, db: DbSession, user: CurrentUser
+) -> TrainingWorkout:
     workout = TrainingWorkout(
+        user_id=user.id,
         name=payload.name,
         workout_date=payload.workout_date,
         category=payload.category,
@@ -1323,24 +1407,28 @@ def create_workout(payload: TrainingWorkoutCreate, db: DbSession) -> TrainingWor
         end_time=payload.end_time,
     )
     db.add(workout)
-    replace_workout_contents(db, workout, payload)
+    replace_workout_contents(db, user.id, workout, payload)
     db.flush()
     sync_workout_cardio_sessions(db, workout)
-    rebuild_personal_records(db)
-    bump_workout_cache_revision(db)
+    rebuild_personal_records(db, user.id)
+    bump_workout_cache_revision(db, user.id)
     db.commit()
-    backfill_completed_video_links(db, workout.workout_date)
-    return load_workout(db, workout.id)
+    backfill_completed_video_links(db, workout.workout_date, user_id=user.id)
+    return load_workout(db, user.id, workout.id)
 
 
 @router.get("/workouts/export.csv")
 def export_workout_csv(
-    db: DbSession, start_date: date | None = None, end_date: date | None = None
+    db: DbSession,
+    user: CurrentUser,
+    start_date: date | None = None,
+    end_date: date | None = None,
 ) -> Response:
     if start_date and end_date and start_date > end_date:
         raise HTTPException(status_code=422, detail="Start date must not be after end date.")
     statement = (
         select(TrainingWorkout)
+        .where(TrainingWorkout.user_id == user.id)
         .options(*workout_options())
         .order_by(TrainingWorkout.workout_date, TrainingWorkout.created_at)
     )
@@ -1360,7 +1448,7 @@ def export_workout_csv(
 
 @router.post("/workouts/import", response_model=CsvImportRead, status_code=201)
 async def import_workout_csv(
-    db: DbSession, file: Annotated[UploadFile, File(...)]
+    db: DbSession, user: CurrentUser, file: Annotated[UploadFile, File(...)]
 ) -> CsvImportRead:
     if file.content_type not in {
         None,
@@ -1376,77 +1464,90 @@ async def import_workout_csv(
     if len(raw) > 20 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="CSV imports are limited to 20 MB.")
     try:
-        summary = import_workouts(db, raw)
+        summary = import_workouts(db, user.id, raw)
     except CsvImportError as error:
         db.rollback()
         raise HTTPException(status_code=422, detail=str(error)) from error
-    rebuild_personal_records(db)
-    bump_workout_cache_revision(db)
+    rebuild_personal_records(db, user.id)
+    bump_workout_cache_revision(db, user.id)
     db.commit()
     return CsvImportRead(**summary.__dict__)
 
 
 @router.get("/workouts/{workout_id}", response_model=TrainingWorkoutRead)
-def get_workout(workout_id: str, db: DbSession) -> TrainingWorkout:
-    return load_workout(db, workout_id)
+def get_workout(workout_id: str, db: DbSession, user: CurrentUser) -> TrainingWorkout:
+    return load_workout(db, user.id, workout_id)
 
 
 @router.put("/workouts/{workout_id}", response_model=TrainingWorkoutRead)
 def update_workout(
-    workout_id: str, payload: TrainingWorkoutCreate, db: DbSession
+    workout_id: str, payload: TrainingWorkoutCreate, db: DbSession, user: CurrentUser
 ) -> TrainingWorkout:
-    workout = load_workout(db, workout_id)
-    replace_workout_contents(db, workout, payload)
+    workout = load_workout(db, user.id, workout_id)
+    replace_workout_contents(db, user.id, workout, payload)
     db.flush()
     sync_workout_cardio_sessions(db, workout)
-    rebuild_personal_records(db)
-    bump_workout_cache_revision(db)
+    rebuild_personal_records(db, user.id)
+    bump_workout_cache_revision(db, user.id)
     db.commit()
-    backfill_completed_video_links(db, workout.workout_date)
-    return load_workout(db, workout.id)
+    backfill_completed_video_links(db, workout.workout_date, user_id=user.id)
+    return load_workout(db, user.id, workout.id)
 
 
 @router.delete("/workouts/{workout_id}", status_code=204)
-def delete_workout(workout_id: str, db: DbSession) -> None:
-    workout = load_workout(db, workout_id)
+def delete_workout(workout_id: str, db: DbSession, user: CurrentUser) -> None:
+    workout = load_workout(db, user.id, workout_id)
     db.execute(delete(CardioSession).where(CardioSession.source_workout_id == workout.id))
     db.delete(workout)
     db.flush()
-    rebuild_personal_records(db)
-    bump_workout_cache_revision(db)
+    rebuild_personal_records(db, user.id)
+    bump_workout_cache_revision(db, user.id)
     db.commit()
 
 
 @router.delete("/sample-data", status_code=204)
-def delete_sample_data(db: DbSession) -> None:
-    samples = list(db.scalars(select(TrainingWorkout).where(TrainingWorkout.is_sample.is_(True))))
+def delete_sample_data(db: DbSession, user: CurrentUser) -> None:
+    samples = list(
+        db.scalars(
+            select(TrainingWorkout).where(
+                TrainingWorkout.user_id == user.id, TrainingWorkout.is_sample.is_(True)
+            )
+        )
+    )
     for workout in samples:
         db.delete(workout)
     for measurement in db.scalars(
-        select(BodyMeasurement).where(BodyMeasurement.is_sample.is_(True))
+        select(BodyMeasurement).where(
+            BodyMeasurement.user_id == user.id, BodyMeasurement.is_sample.is_(True)
+        )
     ):
         db.delete(measurement)
     db.flush()
-    rebuild_personal_records(db)
-    bump_workout_cache_revision(db)
+    rebuild_personal_records(db, user.id)
+    bump_workout_cache_revision(db, user.id)
     db.commit()
 
 
 @router.get("/dashboard", response_model=DashboardRead)
-def dashboard(db: DbSession) -> DashboardRead:
+def dashboard(db: DbSession, user: CurrentUser) -> DashboardRead:
     today = date.today()
     workouts = list(
         db.scalars(
             select(TrainingWorkout)
+            .where(TrainingWorkout.user_id == user.id)
             .options(*workout_options())
             .order_by(TrainingWorkout.workout_date.desc(), TrainingWorkout.created_at.desc())
         )
     )
-    preferences = training_preferences(db)
+    preferences = training_preferences(db, user.id)
     week_start = start_of_week(today, preferences.week_start)
     this_week = [workout for workout in workouts if week_start <= workout.workout_date <= today]
     measurements = list(
-        db.scalars(select(BodyMeasurement).order_by(BodyMeasurement.measurement_date))
+        db.scalars(
+            select(BodyMeasurement)
+            .where(BodyMeasurement.user_id == user.id)
+            .order_by(BodyMeasurement.measurement_date)
+        )
     )
 
     def bodyweight_on(workout_date: date) -> float | None:
@@ -1603,8 +1704,10 @@ def dashboard(db: DbSession) -> DashboardRead:
             elif workout_date < cursor:
                 break
 
-    preferences = training_preferences(db)
-    cardio_sessions = list(db.scalars(select(CardioSession)))
+    preferences = training_preferences(db, user.id)
+    cardio_sessions = list(
+        db.scalars(select(CardioSession).where(CardioSession.user_id == user.id))
+    )
     cardio_week_start = start_of_week(today, preferences.week_start)
     cardio_minutes_this_week = sum(
         session.duration_minutes
@@ -1638,8 +1741,8 @@ def dashboard(db: DbSession) -> DashboardRead:
 
 
 @router.get("/progress/{exercise_id}", response_model=ExerciseProgressRead)
-def exercise_progress(exercise_id: str, db: DbSession) -> ExerciseProgressRead:
-    exercise = db.get(Exercise, exercise_id)
+def exercise_progress(exercise_id: str, db: DbSession, user: CurrentUser) -> ExerciseProgressRead:
+    exercise = get_owned(db, Exercise, exercise_id, user.id)
     if not exercise:
         raise HTTPException(status_code=404, detail="Exercise was not found.")
     movements = list(

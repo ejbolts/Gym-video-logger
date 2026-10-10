@@ -61,7 +61,14 @@ def test_rest_timer_notification_is_scheduled_for_the_subscribed_phone(client):
     )
 
     assert response.status_code == 204
-    assert scheduled == [{"endpoint": endpoint, "timer_id": "timer-1", "delay_seconds": 150}]
+    assert scheduled == [
+        {
+            "endpoint": endpoint,
+            "timer_id": "timer-1",
+            "delay_seconds": 150,
+            "user_id": client.user["id"],
+        }
+    ]
 
 
 def test_rest_timer_notification_requires_a_saved_subscription(client):
@@ -79,6 +86,14 @@ def test_rest_timer_notification_requires_a_saved_subscription(client):
 
 
 def test_rest_timer_notification_can_be_cancelled(client):
+    client.post(
+        "/api/notifications/push/subscriptions",
+        json={
+            "endpoint": "https://push.example.test/rest-timer-phone",
+            "p256dh": "public-key",
+            "auth": "auth-key",
+        },
+    )
     cancelled = []
     client.app.state.rest_timer_notifications.cancel = lambda **payload: cancelled.append(payload)
 

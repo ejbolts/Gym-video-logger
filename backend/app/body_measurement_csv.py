@@ -109,13 +109,15 @@ def parse_body_measurement_rows(raw: bytes) -> list[ParsedBodyMeasurement]:
     return rows
 
 
-def import_body_measurements(db: Session, raw: bytes) -> BodyMeasurementImportSummary:
+def import_body_measurements(db: Session, user_id: str, raw: bytes) -> BodyMeasurementImportSummary:
     rows = parse_body_measurement_rows(raw)
     dates = [row.measurement_date for row in rows]
     existing = {
         measurement.measurement_date: measurement
         for measurement in db.scalars(
-            select(BodyMeasurement).where(BodyMeasurement.measurement_date.in_(dates))
+            select(BodyMeasurement).where(
+                BodyMeasurement.user_id == user_id, BodyMeasurement.measurement_date.in_(dates)
+            )
         )
     }
     created = 0
@@ -124,6 +126,7 @@ def import_body_measurements(db: Session, raw: bytes) -> BodyMeasurementImportSu
         measurement = existing.get(row.measurement_date)
         if measurement is None:
             measurement = BodyMeasurement(
+                user_id=user_id,
                 measurement_date=row.measurement_date,
                 weight_kg=row.weight_kg,
                 body_fat_pct=row.body_fat_pct,

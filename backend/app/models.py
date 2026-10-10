@@ -89,6 +89,71 @@ def utc_now() -> datetime:
     return datetime.now(UTC)
 
 
+def user_id_column() -> Mapped[str | None]:
+    """Owner of a row. Nullable only so pre-accounts rows can wait to be claimed."""
+    return mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    email: Mapped[str] = mapped_column(String(320), unique=True)
+    display_name: Mapped[str] = mapped_column(String(80))
+    password_hash: Mapped[str] = mapped_column(String(300))
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    # Set by an admin; a disabled account cannot sign in and has no live sessions.
+    disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Survives sign-out and session expiry, unlike the per-session last_seen_at.
+    last_active_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, server_default=func.now(), onupdate=utc_now
+    )
+
+
+class ServerSetting(Base):
+    """Deployment-wide switches an admin changes at runtime; unset keys fall back to .env."""
+
+    __tablename__ = "server_settings"
+
+    key: Mapped[str] = mapped_column(String(100), primary_key=True)
+    value: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, server_default=func.now(), onupdate=utc_now
+    )
+
+
+class UserSession(Base):
+    __tablename__ = "user_sessions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, server_default=func.now()
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, server_default=func.now()
+    )
+    user_agent: Mapped[str | None] = mapped_column(String(300), nullable=True)
+
+
+class UserSetting(Base):
+    __tablename__ = "user_settings"
+
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    key: Mapped[str] = mapped_column(String(100), primary_key=True)
+    value: Mapped[str] = mapped_column(Text)
+
+
 movement_machine_photos = Table(
     "movement_machine_photos",
     Base.metadata,
@@ -111,6 +176,7 @@ class WorkoutSession(Base):
     __tablename__ = "sessions"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    user_id: Mapped[str | None] = user_id_column()
     name: Mapped[str] = mapped_column(String(200))
     workout_date: Mapped[date] = mapped_column(Date)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -192,6 +258,7 @@ class PushSubscription(Base):
     __tablename__ = "push_subscriptions"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    user_id: Mapped[str | None] = user_id_column()
     endpoint: Mapped[str] = mapped_column(Text, unique=True)
     p256dh: Mapped[str] = mapped_column(String(200))
     auth: Mapped[str] = mapped_column(String(200))
@@ -202,6 +269,8 @@ class PushSubscription(Base):
 
 
 class AppSetting(Base):
+    """Legacy global key/value store; per-user preferences now live in ``UserSetting``."""
+
     __tablename__ = "app_settings"
 
     key: Mapped[str] = mapped_column(String(100), primary_key=True)
@@ -212,6 +281,7 @@ class ActiveWorkoutReminder(Base):
     __tablename__ = "active_workout_reminders"
 
     endpoint: Mapped[str] = mapped_column(String(2000), primary_key=True)
+    user_id: Mapped[str | None] = user_id_column()
     timer_id: Mapped[str] = mapped_column(String(100))
     due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     delivered: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -222,7 +292,8 @@ class BodyMeasurement(Base):
     __tablename__ = "body_measurements"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
-    measurement_date: Mapped[date] = mapped_column(Date, unique=True)
+    user_id: Mapped[str | None] = user_id_column()
+    measurement_date: Mapped[date] = mapped_column(Date)
     weight_kg: Mapped[float] = mapped_column(Float)
     body_fat_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -232,6 +303,7 @@ class BodyMeasurement(Base):
     )
 
     __table_args__ = (
+        UniqueConstraint("user_id", "measurement_date", name="uq_body_measurement_user_date"),
         CheckConstraint("weight_kg > 0 AND weight_kg <= 500", name="body_weight_range"),
         CheckConstraint(
             "body_fat_pct IS NULL OR (body_fat_pct >= 1 AND body_fat_pct <= 70)",
@@ -244,6 +316,7 @@ class BodyWeightGoal(Base):
     __tablename__ = "body_weight_goals"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    user_id: Mapped[str | None] = user_id_column()
     start_date: Mapped[date] = mapped_column(Date)
     target_date: Mapped[date] = mapped_column(Date)
     start_weight_kg: Mapped[float] = mapped_column(Float)
@@ -265,7 +338,8 @@ class Exercise(Base):
     __tablename__ = "exercises"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
-    name: Mapped[str] = mapped_column(String(160), unique=True)
+    user_id: Mapped[str | None] = user_id_column()
+    name: Mapped[str] = mapped_column(String(160))
     category: Mapped[WorkoutCategory] = mapped_column(Enum(WorkoutCategory, native_enum=False))
     kind: Mapped[ExerciseKind] = mapped_column(
         Enum(ExerciseKind, native_enum=False), default=ExerciseKind.STRENGTH
@@ -285,6 +359,8 @@ class Exercise(Base):
         cascade="all, delete-orphan",
         order_by="ExerciseMuscleContribution.muscle_name",
     )
+
+    __table_args__ = (UniqueConstraint("user_id", "name", name="uq_exercise_user_name"),)
 
 
 class ExerciseMuscleContribution(Base):
@@ -313,6 +389,7 @@ class MachinePhoto(Base):
     __tablename__ = "machine_photos"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    user_id: Mapped[str | None] = user_id_column()
     exercise_id: Mapped[str] = mapped_column(
         ForeignKey("exercises.id", ondelete="CASCADE"), index=True
     )
@@ -353,6 +430,7 @@ class TrainingWorkout(Base):
     __tablename__ = "training_workouts"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    user_id: Mapped[str | None] = user_id_column()
     name: Mapped[str] = mapped_column(String(200))
     workout_date: Mapped[date] = mapped_column(Date)
     category: Mapped[WorkoutCategory] = mapped_column(Enum(WorkoutCategory, native_enum=False))
@@ -524,6 +602,7 @@ class PersonalRecord(Base):
     __tablename__ = "personal_records"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    user_id: Mapped[str | None] = user_id_column()
     exercise_id: Mapped[str] = mapped_column(
         ForeignKey("exercises.id", ondelete="CASCADE"), index=True
     )
@@ -565,6 +644,7 @@ class CardioSession(Base):
     __tablename__ = "cardio_sessions"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    user_id: Mapped[str | None] = user_id_column()
     session_date: Mapped[date] = mapped_column(Date, index=True)
     activity_type: Mapped[str] = mapped_column(String(100))
     duration_minutes: Mapped[int] = mapped_column(Integer)

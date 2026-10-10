@@ -19,7 +19,6 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session, selectinload
 
 from .models import (
-    AppSetting,
     Exercise,
     ExerciseMuscleContribution,
     MuscleRole,
@@ -27,6 +26,7 @@ from .models import (
     PersonalRecordType,
     SetType,
     TrainingWorkout,
+    UserSetting,
     WorkoutMovement,
     WorkoutSet,
 )
@@ -180,21 +180,21 @@ MUSCLE_GROUP_ALIASES = {
 HIDDEN_MUSCLE_GROUPS = {"External rotators", "Brachialis"}
 
 
-def get_setting(db: Session, key: str, default: str) -> str:
-    setting = db.get(AppSetting, key)
+def get_setting(db: Session, user_id: str, key: str, default: str) -> str:
+    setting = db.get(UserSetting, (user_id, key))
     return setting.value if setting else default
 
 
-def set_setting(db: Session, key: str, value: str) -> None:
-    setting = db.get(AppSetting, key)
+def set_setting(db: Session, user_id: str, key: str, value: str) -> None:
+    setting = db.get(UserSetting, (user_id, key))
     if setting:
         setting.value = value
     else:
-        db.add(AppSetting(key=key, value=value))
+        db.add(UserSetting(user_id=user_id, key=key, value=value))
 
 
-def preferred_weight_unit(db: Session) -> str:
-    return "lb" if get_setting(db, "preferred_weight_unit", "kg") == "lb" else "kg"
+def preferred_weight_unit(db: Session, user_id: str) -> str:
+    return "lb" if get_setting(db, user_id, "preferred_weight_unit", "kg") == "lb" else "kg"
 
 
 def normalized_weight(weight_kg: float, unit: str) -> float:
@@ -255,11 +255,13 @@ def muscle_volume(workouts: list[TrainingWorkout], start: date, end: date) -> di
     return dict(totals)
 
 
-def seed_muscle_mappings(db: Session) -> None:
+def seed_muscle_mappings(db: Session, user_id: str) -> None:
     exercises = {
         item.name: item
         for item in db.scalars(
-            select(Exercise).options(selectinload(Exercise.muscle_contributions))
+            select(Exercise)
+            .where(Exercise.user_id == user_id)
+            .options(selectinload(Exercise.muscle_contributions))
         )
     }
     changed = False
@@ -273,8 +275,7 @@ def seed_muscle_mappings(db: Session) -> None:
                 exercise.muscle_contributions.remove(contribution)
                 changed = True
         existing = {
-            contribution.muscle_name: contribution
-            for contribution in exercise.muscle_contributions
+            contribution.muscle_name: contribution for contribution in exercise.muscle_contributions
         }
         for muscle, role, factor in mappings:
             contribution = existing.get(muscle)
@@ -294,22 +295,28 @@ def seed_muscle_mappings(db: Session) -> None:
         db.commit()
 
 
-def workout_query():
-    return select(TrainingWorkout).options(
-        selectinload(TrainingWorkout.movements)
-        .selectinload(WorkoutMovement.exercise)
-        .selectinload(Exercise.muscle_contributions),
-        selectinload(TrainingWorkout.movements).selectinload(WorkoutMovement.sets),
+def workout_query(user_id: str):
+    return (
+        select(TrainingWorkout)
+        .where(TrainingWorkout.user_id == user_id)
+        .options(
+            selectinload(TrainingWorkout.movements)
+            .selectinload(WorkoutMovement.exercise)
+            .selectinload(Exercise.muscle_contributions),
+            selectinload(TrainingWorkout.movements).selectinload(WorkoutMovement.sets),
+        )
     )
 
 
-def rebuild_personal_records(db: Session) -> None:
-    """Rebuild derived milestone rows transactionally after any workout mutation."""
-    db.execute(delete(PersonalRecord))
-    unit = preferred_weight_unit(db)
+def rebuild_personal_records(db: Session, user_id: str) -> None:
+    """Rebuild one user's derived milestone rows after any of their workout mutations."""
+    db.execute(delete(PersonalRecord).where(PersonalRecord.user_id == user_id))
+    unit = preferred_weight_unit(db, user_id)
     workouts = list(
         db.scalars(
-            workout_query().order_by(TrainingWorkout.workout_date, TrainingWorkout.created_at)
+            workout_query(user_id).order_by(
+                TrainingWorkout.workout_date, TrainingWorkout.created_at
+            )
         )
     )
     state: dict[str, dict[str, object]] = defaultdict(
@@ -406,6 +413,7 @@ def _pr(
     formula: str | None = None,
 ) -> PersonalRecord:
     return PersonalRecord(
+        user_id=workout.user_id,
         exercise_id=movement.exercise_id,
         workout_id=workout.id,
         set_id=item.id,

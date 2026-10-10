@@ -15,6 +15,7 @@ describe('app navigation history', () => {
     expect(appTabFromHash('#progress')).toBe('progress');
     expect(appTabFromHash('#cardio')).toBe('cardio');
     expect(appTabFromHash('#log')).toBe('log');
+    expect(appTabFromHash('#admin')).toBe('admin');
     expect(appTabFromHash('#missing')).toBe('dashboard');
   });
 

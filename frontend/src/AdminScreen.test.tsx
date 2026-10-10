@@ -1,0 +1,109 @@
+import { renderToStaticMarkup } from 'react-dom/server';
+import { describe, expect, it, vi } from 'vitest';
+import { AdminScreenView, type AdminScreenViewProps } from './AdminScreen';
+import type { AdminUser } from './types';
+
+const owner: AdminUser = {
+  id: 'owner',
+  email: 'owner@example.com',
+  display_name: 'Owner',
+  is_admin: true,
+  disabled_at: null,
+  created_at: '2026-10-01T10:00:00Z',
+  last_active_at: '2026-10-10T10:00:00Z',
+  signed_in_devices: 1,
+  workouts: 12,
+  photos: 3,
+  photo_bytes: 900 * 1024,
+  video_sessions: 2,
+};
+
+const tester: AdminUser = {
+  ...owner,
+  id: 'tester',
+  email: 'tester@example.com',
+  display_name: 'Tester',
+  is_admin: false,
+  signed_in_devices: 2,
+  workouts: 0,
+  photos: 0,
+  photo_bytes: 0,
+  video_sessions: 0,
+};
+
+function view(overrides: Partial<AdminScreenViewProps> = {}) {
+  return renderToStaticMarkup(
+    <AdminScreenView
+      currentUserId="owner"
+      users={[owner, tester]}
+      settings={{ video_uploads: 'off', allow_registration: true, invite_code_required: true }}
+      status={{
+        disk: {
+          total_bytes: 100 * 1024 ** 3,
+          used_bytes: 25 * 1024 ** 3,
+          free_bytes: 75 * 1024 ** 3,
+        },
+        database_bytes: 2 * 1024 * 1024,
+        photos: 3,
+        photo_bytes: 900 * 1024,
+        video_file_bytes: 0,
+        video_queue: { queued: 1, normalizing: 0 },
+      }}
+      loading={false}
+      error={null}
+      notice={null}
+      savingSetting={false}
+      busyUserId={null}
+      onVideoUploadsChange={vi.fn()}
+      onRegistrationChange={vi.fn()}
+      onUserDisabledChange={vi.fn()}
+      onRefresh={vi.fn()}
+      {...overrides}
+    />,
+  );
+}
+
+describe('AdminScreenView', () => {
+  it('shows the current video mode and the sign-up switch', () => {
+    const markup = view();
+
+    expect(markup).toMatch(/role="radio" aria-checked="true" class="active"[^>]*>Off</);
+    expect(markup).toMatch(/role="radio" aria-checked="false"[^>]*>Everyone</);
+    expect(markup).toContain('Keeps the server’s CPU free');
+    expect(markup).toContain('aria-label="New sign-ups" aria-checked="true"');
+    expect(markup).toContain('Anyone with the invite code can create an account');
+  });
+
+  it('summarises disk, storage, and the video queue', () => {
+    const markup = view();
+
+    expect(markup).toContain('75 GB free of 100 GB (25% used)');
+    expect(markup).toContain('aria-valuenow="25"');
+    expect(markup).toContain('3 photos · 900 KB');
+    expect(markup).toContain('1 waiting');
+  });
+
+  it('lists accounts and never offers to disable the signed-in admin', () => {
+    const markup = view();
+
+    expect(markup).toContain('2 accounts');
+    expect(markup).toContain('tester@example.com');
+    expect(markup).toContain('2 devices');
+    expect(markup).toContain('>You<');
+    expect(markup.match(/Disable account/g)).toHaveLength(1);
+  });
+
+  it('marks disabled accounts and offers to enable them', () => {
+    const markup = view({ users: [owner, { ...tester, disabled_at: '2026-10-09T09:00:00Z' }] });
+
+    expect(markup).toContain('1 disabled');
+    expect(markup).toContain('admin-user is-disabled');
+    expect(markup).toContain('Enable account');
+    expect(markup).not.toContain('Disable account');
+  });
+
+  it('shows errors and notices', () => {
+    expect(view({ error: 'Only an administrator can do that.' })).toContain('role="alert"');
+    expect(view({ notice: 'Sign-ups are closed.' })).toContain('Sign-ups are closed.');
+  });
+});

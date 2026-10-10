@@ -285,7 +285,7 @@ def test_default_muscle_mappings_are_resynchronized(client):
         hamstrings.role = MuscleRole.SECONDARY
         hamstrings.contribution_factor = 0.5
         db.commit()
-        seed_muscle_mappings(db)
+        seed_muscle_mappings(db, client.user["id"])
 
     updated = next(
         item
@@ -316,7 +316,7 @@ def test_legacy_leg_curl_is_renamed_without_changing_its_id(client):
         exercise.name = "Leg Curl"
         db.commit()
 
-        seed_default_exercises(db)
+        seed_default_exercises(db, client.user["id"])
 
         renamed = db.scalar(select(Exercise).where(Exercise.name == "Seated Leg Curl"))
         assert renamed is not None
@@ -341,7 +341,7 @@ def test_legacy_single_arm_lat_pulldown_is_renamed_without_changing_its_id(clien
         exercise.equipment = "Cable"
         db.commit()
 
-        seed_default_exercises(db)
+        seed_default_exercises(db, client.user["id"])
 
         renamed = db.scalar(
             select(Exercise).where(Exercise.name == "Single-Arm Lat Pulldown (Machine)")
@@ -619,8 +619,10 @@ def test_workout_snapshot_revision_changes_after_mutations(client):
     changed_snapshot = client.get("/api/workouts/snapshot")
 
     assert initial_revision.status_code == 200
-    assert initial_revision.json() == {"revision": "0"}
-    assert initial_snapshot.json() == {"revision": "0", "workouts": []}
+    assert initial_snapshot.json() == {
+        "revision": initial_revision.json()["revision"],
+        "workouts": [],
+    }
     assert created.status_code == 201
     assert changed_revision.status_code == 200
     assert changed_revision.json()["revision"] != initial_revision.json()["revision"]
@@ -790,11 +792,12 @@ def test_sample_seed_creates_one_week_once(client):
     from app.database import SessionLocal
     from app.tracker_seed import seed_sample_body_measurements, seed_sample_workouts
 
+    user_id = client.user["id"]
     with SessionLocal() as db:
-        assert seed_sample_workouts(db) == 5
-        assert seed_sample_workouts(db) == 0
-        assert seed_sample_body_measurements(db) == 3
-        assert seed_sample_body_measurements(db) == 0
+        assert seed_sample_workouts(db, user_id) == 5
+        assert seed_sample_workouts(db, user_id) == 0
+        assert seed_sample_body_measurements(db, user_id) == 3
+        assert seed_sample_body_measurements(db, user_id) == 0
 
     workouts = client.get("/api/workouts").json()
     assert len(workouts) == 5
@@ -815,7 +818,7 @@ def test_sample_seed_creates_one_week_once(client):
 
     assert client.delete("/api/sample-data").status_code == 204
     with SessionLocal() as db:
-        assert seed_sample_workouts(db) == 0
+        assert seed_sample_workouts(db, user_id) == 0
     assert client.get("/api/workouts").json() == []
 
 
@@ -987,7 +990,7 @@ def test_dashboard_tracks_rpe_aware_weekly_sets_by_muscle_without_targets(client
     assert all("target_sets" not in item for item in weekly_sets["muscle_groups"])
     assert "goal" not in dashboard["recommendation"]["reason"].lower()
 
-    paths = client.get("/openapi.json").json()["paths"]
+    paths = client.app.openapi()["paths"]
     assert "/api/training-mode" not in paths
     assert "/api/training-phases" not in paths
 

@@ -61,6 +61,7 @@ def send_push_notification(
     *,
     title: str,
     body: str,
+    user_id: str,
     endpoint: str | None = None,
     url: str = "/",
     tag: str | None = None,
@@ -74,7 +75,8 @@ def send_push_notification(
     key_path = settings.web_push_vapid_private_key_path
     _vapid_private_key(key_path)
     with session_factory() as db:
-        query = select(PushSubscription)
+        # Notifications always belong to exactly one account; never fan out to everyone.
+        query = select(PushSubscription).where(PushSubscription.user_id == user_id)
         if endpoint is not None:
             query = query.where(PushSubscription.endpoint == endpoint)
         subscriptions = list(db.scalars(query))
@@ -124,24 +126,31 @@ class ActiveWorkoutReminderScheduler:
             self._task.cancel()
             await asyncio.gather(self._task, return_exceptions=True)
 
-    def schedule(self, *, endpoint: str, timer_id: str, started_at: float) -> None:
+    def schedule(self, *, endpoint: str, timer_id: str, started_at: float, user_id: str) -> None:
         with self._lock, self.session_factory() as db:
             reminder = db.get(ActiveWorkoutReminder, endpoint)
-            if reminder and reminder.timer_id == timer_id:
+            if reminder and reminder.timer_id == timer_id and reminder.user_id == user_id:
                 return  # Reconnecting must not postpone or repeat the same reminder.
             if reminder is None:
                 reminder = ActiveWorkoutReminder(endpoint=endpoint)
                 db.add(reminder)
+            reminder.user_id = user_id
             reminder.timer_id = timer_id
             reminder.due_at = datetime.fromtimestamp(started_at, UTC) + timedelta(hours=2)
             reminder.delivered = False
             reminder.cancelled = False
             db.commit()
 
-    def cancel(self, *, endpoint: str, timer_id: str | None = None) -> None:
+    def cancel(
+        self, *, endpoint: str, timer_id: str | None = None, user_id: str | None = None
+    ) -> None:
         with self._lock, self.session_factory() as db:
             reminder = db.get(ActiveWorkoutReminder, endpoint)
-            if reminder and (timer_id is None or reminder.timer_id == timer_id):
+            if (
+                reminder
+                and (user_id is None or reminder.user_id == user_id)
+                and (timer_id is None or reminder.timer_id == timer_id)
+            ):
                 reminder.cancelled = True
                 db.commit()
 
@@ -158,9 +167,11 @@ class ActiveWorkoutReminderScheduler:
             )
             for reminder in reminders:
                 if (
-                    db.scalar(
+                    reminder.user_id is None
+                    or db.scalar(
                         select(PushSubscription.id).where(
-                            PushSubscription.endpoint == reminder.endpoint
+                            PushSubscription.endpoint == reminder.endpoint,
+                            PushSubscription.user_id == reminder.user_id,
                         )
                     )
                     is None
@@ -176,6 +187,7 @@ class ActiveWorkoutReminderScheduler:
                         "Your workout has been running for 2 hours. Still training? "
                         "Finish and save it when you're done."
                     ),
+                    user_id=reminder.user_id,
                     endpoint=reminder.endpoint,
                     url="/#log",
                     tag="active-workout",
@@ -202,9 +214,11 @@ class RestTimerNotificationScheduler:
         self.settings = settings
         self._tasks: dict[str, tuple[str, asyncio.Task[None]]] = {}
 
-    def schedule(self, *, endpoint: str, timer_id: str, delay_seconds: int) -> None:
+    def schedule(self, *, endpoint: str, timer_id: str, delay_seconds: int, user_id: str) -> None:
         self._cancel_endpoint(endpoint)
-        task = asyncio.create_task(self._deliver(endpoint=endpoint, delay_seconds=delay_seconds))
+        task = asyncio.create_task(
+            self._deliver(endpoint=endpoint, delay_seconds=delay_seconds, user_id=user_id)
+        )
         self._tasks[endpoint] = (timer_id, task)
         task.add_done_callback(lambda completed: self._discard(endpoint, completed))
 
@@ -234,7 +248,7 @@ class RestTimerNotificationScheduler:
         if current is not None and current[1] is completed:
             self._tasks.pop(endpoint, None)
 
-    async def _deliver(self, *, endpoint: str, delay_seconds: int) -> None:
+    async def _deliver(self, *, endpoint: str, delay_seconds: int, user_id: str) -> None:
         await asyncio.sleep(delay_seconds)
         await asyncio.to_thread(
             send_push_notification,
@@ -242,6 +256,7 @@ class RestTimerNotificationScheduler:
             self.settings,
             title="Rest complete",
             body="Time for your next set.",
+            user_id=user_id,
             endpoint=endpoint,
             url="/#log",
             tag="rest-timer",

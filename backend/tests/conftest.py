@@ -15,10 +15,15 @@ TEST_DATA_DIR = Path(__file__).parent / ".test-data" / f"pytest-{os.getpid()}"
 os.environ["GYM_DATA_DIR"] = str(TEST_DATA_DIR)
 os.environ["GYM_DATABASE_PATH"] = str(TEST_DATA_DIR / "gym-video-logger-test.db")
 os.environ["GYM_SEED_SAMPLE_DATA"] = "false"
+# Mirrors a deployed server: browser sign-up (including the first account) needs the invite code.
+TEST_INVITE_CODE = "test-invite-code"
+os.environ["GYM_REGISTRATION_INVITE_CODE"] = TEST_INVITE_CODE
+os.environ["GYM_ALLOW_REGISTRATION"] = "true"
 
 from app.config import get_settings  # noqa: E402
-from app.database import Base, engine  # noqa: E402
+from app.database import Base, SessionLocal, engine  # noqa: E402
 from app.main import create_app  # noqa: E402
+from app.models import User  # noqa: E402
 from app.storage import StoredUpload, original_filename  # noqa: E402
 
 
@@ -34,10 +39,60 @@ def reset_database():
     shutil.rmtree(photo_dir, ignore_errors=True)
 
 
+TEST_PASSWORD = "correct horse battery staple"
+
+
+def register_user(
+    test_client: TestClient,
+    email: str = "owner@example.com",
+    display_name: str = "Owner",
+    password: str = TEST_PASSWORD,
+) -> dict:
+    """Register through the API so the client's cookie jar holds a real session."""
+    response = test_client.post(
+        "/api/auth/register",
+        json={
+            "email": email,
+            "password": password,
+            "display_name": display_name,
+            "invite_code": TEST_INVITE_CODE,
+        },
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
 @pytest.fixture
-def client():
+def anonymous_client():
     with TestClient(create_app()) as test_client:
         yield test_client
+
+
+@pytest.fixture
+def client(anonymous_client):
+    """A signed-in client for the first (admin) account."""
+    anonymous_client.user = register_user(anonymous_client)
+    return anonymous_client
+
+
+@pytest.fixture
+def other_client(client):
+    """A second, independent browser signed in as a different non-admin account."""
+    second = TestClient(client.app)
+    second.user = register_user(second, "other@example.com", "Other")
+    yield second
+    second.close()
+
+
+def make_user(email: str = "direct@example.com", *, is_admin: bool = False) -> str:
+    """Insert an account row directly, for tests that exercise internals without HTTP."""
+    with SessionLocal() as db:
+        user = User(
+            email=email, display_name="Direct", password_hash="not-a-real-hash", is_admin=is_admin
+        )
+        db.add(user)
+        db.commit()
+        return user.id
 
 
 @pytest.fixture

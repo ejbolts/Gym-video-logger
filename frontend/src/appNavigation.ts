@@ -7,6 +7,8 @@ export const APP_TABS = [
   'cardio',
   'videos',
   'settings',
+  'profile',
+  'admin',
 ] as const;
 
 export type AppTab = (typeof APP_TABS)[number];

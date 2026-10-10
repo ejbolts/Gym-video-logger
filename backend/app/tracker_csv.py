@@ -220,14 +220,19 @@ def infer_exercise(name: str) -> tuple[WorkoutCategory, ExerciseKind, str, str |
     return WorkoutCategory.OTHER, ExerciseKind.STRENGTH, "Other", None
 
 
-def sync_imported_bodyweights(db: Session, bodyweights: dict[date, list[float]]) -> tuple[int, int]:
+def sync_imported_bodyweights(
+    db: Session, user_id: str, bodyweights: dict[date, list[float]]
+) -> tuple[int, int]:
     """Create graph check-ins from workout bodyweights without replacing manual entries."""
     if not bodyweights:
         return 0, 0
     existing = {
         item.measurement_date: item
         for item in db.scalars(
-            select(BodyMeasurement).where(BodyMeasurement.measurement_date.in_(bodyweights))
+            select(BodyMeasurement).where(
+                BodyMeasurement.user_id == user_id,
+                BodyMeasurement.measurement_date.in_(bodyweights),
+            )
         )
     }
     created = 0
@@ -238,6 +243,7 @@ def sync_imported_bodyweights(db: Session, bodyweights: dict[date, list[float]])
         if measurement is None:
             db.add(
                 BodyMeasurement(
+                    user_id=user_id,
                     measurement_date=measurement_date,
                     weight_kg=weight_kg,
                     body_fat_pct=None,
@@ -256,9 +262,12 @@ def sync_imported_bodyweights(db: Session, bodyweights: dict[date, list[float]])
     return created, updated
 
 
-def import_workouts(db: Session, raw: bytes) -> ImportSummary:
+def import_workouts(db: Session, user_id: str, raw: bytes) -> ImportSummary:
     rows, warnings = parse_rows(raw)
-    exercises = {item.name.casefold(): item for item in db.scalars(select(Exercise))}
+    exercises = {
+        item.name.casefold(): item
+        for item in db.scalars(select(Exercise).where(Exercise.user_id == user_id))
+    }
     exercises_created = 0
     grouped: dict[date, dict[str, list[ParsedRow]]] = defaultdict(lambda: defaultdict(list))
     bodyweights: dict[date, list[float]] = defaultdict(list)
@@ -270,6 +279,7 @@ def import_workouts(db: Session, raw: bytes) -> ImportSummary:
     for workout_date, movement_groups in sorted(grouped.items()):
         movement_categories: list[WorkoutCategory] = []
         workout = TrainingWorkout(
+            user_id=user_id,
             name=f"Imported workout · {workout_date.isoformat()}",
             workout_date=workout_date,
             category=WorkoutCategory.OTHER,
@@ -282,6 +292,7 @@ def import_workouts(db: Session, raw: bytes) -> ImportSummary:
             if not exercise:
                 category, kind, muscle_group, equipment = infer_exercise(exercise_name)
                 exercise = Exercise(
+                    user_id=user_id,
                     name=exercise_name,
                     category=category,
                     kind=kind,
@@ -309,7 +320,7 @@ def import_workouts(db: Session, raw: bytes) -> ImportSummary:
             workout.movements.append(movement)
         workout.category = infer_workout_category(movement_categories) or WorkoutCategory.OTHER
     body_measurements_created, body_measurements_updated = sync_imported_bodyweights(
-        db, bodyweights
+        db, user_id, bodyweights
     )
     db.flush()
     return ImportSummary(
