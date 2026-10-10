@@ -37,3 +37,17 @@ def test_hashed_assets_can_be_cached(frontend_client):
 
 def test_missing_old_bundle_is_not_served_as_html(frontend_client):
     assert frontend_client.get("/assets/old-design.js").status_code == 404
+
+
+def test_app_instances_serve_their_own_configured_build(tmp_path):
+    from app.config import Settings
+    from app.main import create_app
+
+    for profile in ["stable", "verification"]:
+        build = tmp_path / profile
+        build.mkdir()
+        (build / "index.html").write_text(f"{profile} build", encoding="utf-8")
+        settings = Settings(_env_file=None, frontend_dist_dir=build)
+        response = TestClient(create_app(settings)).get("/")
+        assert response.status_code == 200
+        assert response.text == f"{profile} build"

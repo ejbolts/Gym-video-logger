@@ -1,5 +1,7 @@
 .env
 .venv/
+build/
+*.egg-info/
 __pycache__/
 .pytest_cache/
 .ruff_cache/
@@ -9,6 +11,9 @@ data/
 backend/data/
 frontend/node_modules/
 frontend/dist/
+frontend/dist-stable/
+frontend/dist-verification/
+.runtime/
 artifacts/cardio-preview-build/
 frontend/coverage/
 backend/tests/.test-data/
