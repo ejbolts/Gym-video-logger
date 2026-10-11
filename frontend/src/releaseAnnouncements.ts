@@ -31,7 +31,7 @@ export async function fetchRelease(): Promise<Release | null> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10_000);
   try {
-    // Vite copies release.json into dist; the worker never precaches this file.
+    // The build emits release.json into dist; the worker never precaches this file.
     const response = await fetch('/release.json', {
       cache: 'no-store',
       signal: controller.signal,

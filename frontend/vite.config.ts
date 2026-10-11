@@ -1,7 +1,7 @@
 import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
-import releaseMetadata from './public/release.json';
+import releaseMetadata from './release.json';
 import { parseRelease } from './src/releaseMetadata';
 
 function validateReleaseNotes(): Plugin {
@@ -10,9 +10,27 @@ function validateReleaseNotes(): Plugin {
     buildStart() {
       if (!parseRelease(releaseMetadata)) {
         this.error(
-          'public/release.json needs a version, title, summary, changes and an HTTPS GitHub URL.',
+          'release.json needs a version, title, summary, changes and an HTTPS GitHub URL.',
         );
       }
+    },
+    generateBundle() {
+      this.emitFile({
+        type: 'asset',
+        fileName: 'release.json',
+        source: JSON.stringify(releaseMetadata),
+      });
+    },
+    configureServer(server) {
+      server.middlewares.use((request, response, next) => {
+        if (request.originalUrl?.split('?')[0] !== '/release.json') {
+          next();
+          return;
+        }
+        response.setHeader('Content-Type', 'application/json; charset=utf-8');
+        response.setHeader('Cache-Control', 'no-store');
+        response.end(JSON.stringify(releaseMetadata));
+      });
     },
   };
 }

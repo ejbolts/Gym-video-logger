@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import metadata from '../public/release.json';
+import metadata from '../release.json';
 import {
   canShowReleaseAnnouncement,
   fetchRelease,

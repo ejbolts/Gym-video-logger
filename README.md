@@ -176,7 +176,7 @@ Use restrictive Tailscale grants or ACLs that permit only your phone identity/de
 
 To run the app on an always-on Oracle Cloud VM with a public HTTPS address instead of the home PC, follow [docs/DEPLOY-ORACLE-CLOUD.md](docs/DEPLOY-ORACLE-CLOUD.md). The `deploy/` folder contains the VM setup, update, and backup scripts, the systemd unit, the Caddy reverse-proxy configuration, and a production `.env` template.
 
-The **What's new** pop-up announces the deployed version after sign-in, returning to the app or reconnecting. Each account/browser remembers dismissed versions. Open **Settings → What's new → View changes** to preview it locally or read it again. Set the next version, summary and GitHub link in `frontend/public/release.json` before building and deploying. See [release notes and publishing instructions](docs/RELEASE-NOTES.md).
+The **What's new** pop-up announces the deployed version after sign-in, returning to the app or reconnecting. Each account/browser remembers dismissed versions. Open **Settings → What's new → View changes** to preview it locally or read it again. Set the next version, summary and GitHub link in `frontend/release.json` before building and deploying. See [release notes and publishing instructions](docs/RELEASE-NOTES.md).
 
 ## Switching to real YouTube uploads
 

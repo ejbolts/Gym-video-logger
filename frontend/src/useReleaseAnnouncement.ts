@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import releaseMetadata from '../public/release.json';
+import releaseMetadata from '../release.json';
 import { hasSeenRelease, rememberRelease, watchReleases } from './releaseAnnouncements';
 import { parseRelease } from './releaseMetadata';
 

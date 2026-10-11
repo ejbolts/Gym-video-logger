@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import metadata from '../public/release.json';
+import metadata from '../release.json';
 import { ReleaseAnnouncement } from './ReleaseAnnouncement';
 
 vi.mock('react-dom', async (importOriginal) => ({
