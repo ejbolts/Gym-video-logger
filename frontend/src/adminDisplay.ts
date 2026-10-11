@@ -98,7 +98,7 @@ export const LIMIT_GROUPS: {
   },
   {
     title: 'Photos',
-    detail: 'The largest photo anyone can upload.',
+    detail: 'The largest photo anyone can upload. People are told this one.',
     fields: [{ name: 'photo_upload_megabytes', label: 'Upload size', unit: 'MB' }],
   },
 ];

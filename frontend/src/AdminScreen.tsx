@@ -145,8 +145,8 @@ function LimitsPanel({
         </div>
       </header>
       <p>
-        People are never told these exist: anything over a limit just fails to save. Workouts saved
-        before a limit was lowered can still be edited.
+        People are never told these exist, except the photo size: anything over a limit just fails
+        to save. Workouts saved before a limit was lowered can still be edited.
       </p>
       <form
         className="admin-limits"

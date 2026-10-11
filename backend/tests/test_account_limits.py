@@ -155,7 +155,12 @@ def test_photo_count_and_upload_size_limits(client, other_client):
         data={"caption": "Big"},
         files={"file": ("big.jpg", b"\xff" * (1024 * 1024 + 1), "image/jpeg")},
     )
-    assert_refused_quietly(oversized, PHOTO_NOT_UPLOADED, status=413)
+    # The upload size is the one limit people are told about.
+    assert oversized.status_code == 413
+    assert oversized.json()["error"] == {
+        "code": "photo_too_large",
+        "message": "Photos can be up to 1 MB.",
+    }
 
 
 def test_cardio_session_limit(client, other_client):

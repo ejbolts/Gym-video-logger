@@ -3,9 +3,10 @@
 Real training stays far below every limit (a six-year log peaks at 55 sets and 9 exercises in one
 workout), so only scripted or abusive use reaches them. Users are never told a limit exists: a
 refused request gets the same plain message as any failed save, and the server log records which
-limit was hit. Admins adjust the limits in the admin console; values are stored in
-``server_settings`` and apply immediately. Per-account totals and the save rate do not apply to
-admins.
+limit was hit. The one exception is the photo upload size, which people are told so they can pick
+a smaller photo (the app also shrinks photos before uploading). Admins adjust the limits in the
+admin console; values are stored in ``server_settings`` and apply immediately. Per-account totals
+and the save rate do not apply to admins.
 """
 
 from __future__ import annotations

@@ -136,7 +136,7 @@ python -m app.manage import-legacy-backup --email you@example.com --source <back
 
 ## Hidden account limits
 
-Limits stop one account from bloating the server. They sit far above real use (a six-year log peaks at 55 sets and 9 exercises in one workout), and people are never told they exist: anything over a limit gets a plain "couldn't be saved" message, and the server log records which limit was hit. Adjust them under **Settings → Admin console → Account limits**; changes apply immediately.
+Limits stop one account from bloating the server. They sit far above real use (a six-year log peaks at 55 sets and 9 exercises in one workout), and people are never told they exist: anything over a limit gets a plain "couldn't be saved" message, and the server log records which limit was hit. The exception is the photo upload size, which people are told ("Photos can be up to 5 MB."). The app also shrinks photos before uploading them (to 1,800 px on the long side, as JPEG), so phone photos fit easily. Adjust them under **Settings → Admin console → Account limits**; changes apply immediately.
 
 | Limit | Default | Applies to |
 |---|---|---|
@@ -146,7 +146,7 @@ Limits stop one account from bloating the server. They sit far above real use (a
 | Changes per minute | 60 | each account, except admins |
 | Exercises / sets in one workout | 20 / 100 | everyone |
 | Workout / exercise / set note | 2,000 / 1,000 / 500 characters | everyone |
-| Photo upload size | 5 MB | everyone |
+| Photo upload size | 5 MB (shown to people) | everyone |
 
 CSV imports follow the same limits and save nothing if any is exceeded. A workout saved before a limit was lowered can still be edited, but not grown.
 

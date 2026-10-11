@@ -59,7 +59,7 @@ async def store_machine_photo(
 ) -> StoredMachinePhoto:
     """Decode an uploaded image, correct orientation, and atomically store WebP variants.
 
-    ``max_bytes`` is the admin's upload limit; going over it gets a message that names no size.
+    ``max_bytes`` is the admin's upload limit, the one limit people are told about.
     """
     token = uuid.uuid4().hex
     upload_partial = settings.machine_photos_dir / f"{token}.upload.partial"
@@ -76,7 +76,9 @@ async def store_machine_photo(
                 total += len(chunk)
                 if total > max_bytes:
                     raise PhotoValidationError(
-                        "not_saved", "This photo couldn't be uploaded.", status_code=413
+                        "photo_too_large",
+                        f"Photos can be up to {max(1, max_bytes // (1024 * 1024))} MB.",
+                        status_code=413,
                     )
                 target.write(chunk)
         if total == 0:
