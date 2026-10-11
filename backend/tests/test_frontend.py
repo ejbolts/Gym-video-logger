@@ -8,7 +8,13 @@ from app.frontend import FrontendFiles
 @pytest.fixture
 def frontend_client(tmp_path):
     (tmp_path / "assets").mkdir()
-    for name in ["index.html", "sw.js", "manifest.webmanifest", "push-notifications.js"]:
+    for name in [
+        "index.html",
+        "sw.js",
+        "manifest.webmanifest",
+        "push-notifications.js",
+        "release.json",
+    ]:
         (tmp_path / name).write_text("current app", encoding="utf-8")
     (tmp_path / "assets" / "index-abc123.js").write_text("current bundle", encoding="utf-8")
     app = FastAPI()
@@ -18,7 +24,15 @@ def frontend_client(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "path", ["/", "/index.html", "/sw.js", "/manifest.webmanifest", "/push-notifications.js"]
+    "path",
+    [
+        "/",
+        "/index.html",
+        "/sw.js",
+        "/manifest.webmanifest",
+        "/push-notifications.js",
+        "/release.json",
+    ],
 )
 def test_app_shell_and_worker_revalidate(frontend_client, path):
     response = frontend_client.get(path)

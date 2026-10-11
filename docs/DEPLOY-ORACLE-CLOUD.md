@@ -326,6 +326,8 @@ This takes a backup first, pulls the latest commit of the branch that is checked
 
 After an update, the phone app may need a reload to pick up the new version. The app updates itself in the background, so reopening it is usually enough.
 
+**Release announcements:** before deploying a release, update `frontend/release.json` with a new version, the short changes and an HTTPS GitHub notes link. Keep detailed notes in [RELEASE-NOTES.md](RELEASE-NOTES.md), or link to a GitHub release. The frontend build includes this file in `dist`; a bare `git pull` is not enough to publish it. If you use `SKIP_FRONTEND_BUILD=1`, copy the complete new `dist`, including `release.json`. Signed-in users see **What's new** when they return or reconnect, once per version in each browser. It waits until they leave the workout/video screen. **Settings → What's new → View changes** reopens the same dialog on local and production builds.
+
 **Backups**
 
 ```bash

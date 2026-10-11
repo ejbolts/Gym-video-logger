@@ -1,6 +1,41 @@
 import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
+import releaseMetadata from './release.json';
+import { parseRelease } from './src/releaseMetadata';
+
+export function releaseNotesPlugin(): Plugin {
+  return {
+    name: 'validate-release-notes',
+    buildStart() {
+      if (!parseRelease(releaseMetadata)) {
+        this.error(
+          'release.json needs a version, title, summary, changes and an HTTPS GitHub URL.',
+        );
+      }
+    },
+    generateBundle() {
+      this.emitFile({
+        type: 'asset',
+        fileName: 'release.json',
+        source: JSON.stringify(releaseMetadata),
+      });
+    },
+    configureServer(server) {
+      server.middlewares.use((request, response, next) => {
+        // Vite uses /release.json?import for the bundled fallback; let its JSON
+        // transformer handle module requests rather than answering them with raw JSON.
+        if (request.originalUrl !== '/release.json') {
+          next();
+          return;
+        }
+        response.setHeader('Content-Type', 'application/json; charset=utf-8');
+        response.setHeader('Cache-Control', 'no-store');
+        response.end(JSON.stringify(releaseMetadata));
+      });
+    },
+  };
+}
 
 const developmentServiceWorker = `
 importScripts('/push-notifications.js');
@@ -40,6 +75,7 @@ function resetProductionWorkerDuringDevelopment(): Plugin {
 export default defineConfig({
   plugins: [
     react(),
+    releaseNotesPlugin(),
     resetProductionWorkerDuringDevelopment(),
     VitePWA({
       // Registration is managed in appUpdates.ts without interrupting open forms.

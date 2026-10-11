@@ -7,6 +7,7 @@ import { applyReduceMotion, reduceMotionPreference } from './motion';
 import './styles.css';
 import './pulse.css';
 import './auth.css';
+import './releaseAnnouncement.css';
 
 registerAppUpdates();
 // Apply before the first paint so the opening screen respects the setting.
