@@ -13,6 +13,12 @@ from pydantic import BaseModel
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
+from .account_limits import (
+    AccountLimits,
+    AccountLimitsRead,
+    account_limits_read,
+    save_account_limits,
+)
 from .accounts import no_store
 from .auth import AdminUser, AppSettings, as_utc, require_admin, utc_now
 from .config import Settings
@@ -235,6 +241,20 @@ def update_server_settings(
         )
     db.commit()
     return _settings_read(db, settings)
+
+
+@admin_router.get("/limits", response_model=AccountLimitsRead)
+def get_account_limits(db: DbDependency, settings: AppSettings) -> AccountLimitsRead:
+    return account_limits_read(db, settings)
+
+
+@admin_router.put("/limits", response_model=AccountLimitsRead)
+def update_account_limits(
+    payload: AccountLimits, db: DbDependency, settings: AppSettings
+) -> AccountLimitsRead:
+    save_account_limits(db, payload)
+    db.commit()
+    return account_limits_read(db, settings)
 
 
 @admin_router.get("/status", response_model=ServerStatusRead)

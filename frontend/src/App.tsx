@@ -70,6 +70,7 @@ import { fatEnergyEquivalent } from './cardioEnergy';
 import { cardioSetUpdateFromScan } from './cardioScreenshot';
 import { useBackdropDismiss } from './backdropDismiss';
 import { CachedTabPanel } from './CachedTabPanel';
+import { optimisePhoto } from './photoOptimise';
 import { ConfettiBurst } from './ConfettiBurst';
 import { EdgeSwipeBack } from './EdgeSwipeBack';
 import { ProgressExerciseSearch } from './ProgressExerciseSearch';
@@ -4395,7 +4396,8 @@ function MachinePhotoChooser({
     setUploading(true);
     setError(null);
     try {
-      const photo = await api.uploadMachinePhoto(exercise.id, pending.file, caption.trim());
+      const upload = await optimisePhoto(pending.file);
+      const photo = await api.uploadMachinePhoto(exercise.id, upload, caption.trim());
       setPhotos((current) => [photo, ...current]);
       onChange(choosingReplacement ? [photo.id] : [...new Set([...selectedIds, photo.id])]);
       setChoosingReplacement(false);

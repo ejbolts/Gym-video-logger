@@ -507,6 +507,29 @@ export interface ServerSettings {
   invite_code_required: boolean;
 }
 
+/** Hidden limits an admin can adjust; users are never told they exist. */
+export interface AccountLimits {
+  workouts_per_account: number;
+  cardio_sessions_per_account: number;
+  custom_exercises_per_account: number;
+  photos_per_account: number;
+  saves_per_minute: number;
+  exercises_per_workout: number;
+  sets_per_workout: number;
+  workout_note_characters: number;
+  exercise_note_characters: number;
+  set_note_characters: number;
+  photo_upload_megabytes: number;
+}
+
+export type AccountLimitName = keyof AccountLimits;
+
+export interface AccountLimitsSettings {
+  values: AccountLimits;
+  defaults: AccountLimits;
+  bounds: Record<AccountLimitName, { minimum: number; maximum: number }>;
+}
+
 export interface ServerSettingsUpdate {
   video_uploads?: VideoUploadMode;
   allow_registration?: boolean;

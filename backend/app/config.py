@@ -19,7 +19,8 @@ class Settings(BaseSettings):
     database_path: Path = Field(default=Path("data/gym-video-logger.db"))
     max_file_size_bytes: int = Field(default=20 * 1024 * 1024 * 1024, gt=0)
     max_session_size_bytes: int = Field(default=100 * 1024 * 1024 * 1024, gt=0)
-    max_photo_size_bytes: int = Field(default=15 * 1024 * 1024, gt=0)
+    # Starting value for the admin console's photo upload limit; the console overrides it.
+    max_photo_size_bytes: int = Field(default=5 * 1024 * 1024, gt=0)
     upload_concurrency: int = Field(default=2, ge=1, le=8)
     ffmpeg_path: str = "ffmpeg"
     ffprobe_path: str = "ffprobe"

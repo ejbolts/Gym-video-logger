@@ -12,6 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
+from .account_limits import SaveRateLimiter
 from .accounts import auth_router, profile_router
 from .admin import admin_router
 from .auth import (
@@ -147,6 +148,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.settings = settings
     app.state.login_throttle = LoginThrottle()
+    app.state.save_rate_limiter = SaveRateLimiter()
     app.add_middleware(CsrfOriginMiddleware)
 
     @app.exception_handler(HTTPException)

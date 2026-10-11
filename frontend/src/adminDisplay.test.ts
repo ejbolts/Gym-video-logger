@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { formatBytes, formatLastActive, plural, videoQueueSummary } from './adminDisplay';
+import {
+  LIMIT_GROUPS,
+  formatBytes,
+  formatLastActive,
+  limitDraft,
+  parseLimitDraft,
+  plural,
+  validLimit,
+  videoQueueSummary,
+} from './adminDisplay';
+import type { AccountLimits, AccountLimitsSettings } from './types';
 
 describe('formatBytes', () => {
   it.each([
@@ -47,5 +57,43 @@ describe('plural', () => {
     expect(plural(1, 'device')).toBe('1 device');
     expect(plural(0, 'device')).toBe('0 devices');
     expect(plural(3, 'device')).toBe('3 devices');
+  });
+});
+
+const limits: AccountLimits = {
+  workouts_per_account: 5000,
+  cardio_sessions_per_account: 5000,
+  custom_exercises_per_account: 100,
+  photos_per_account: 25,
+  saves_per_minute: 60,
+  exercises_per_workout: 20,
+  sets_per_workout: 100,
+  workout_note_characters: 2000,
+  exercise_note_characters: 1000,
+  set_note_characters: 500,
+  photo_upload_megabytes: 5,
+};
+const bounds = Object.fromEntries(
+  Object.keys(limits).map((name) => [name, { minimum: 1, maximum: 10_000 }]),
+) as AccountLimitsSettings['bounds'];
+
+describe('account limit drafts', () => {
+  it('shows every limit in exactly one group', () => {
+    const shown = LIMIT_GROUPS.flatMap((group) => group.fields.map((field) => field.name));
+    expect(shown.sort()).toEqual(Object.keys(limits).sort());
+  });
+
+  it('accepts whole numbers within bounds', () => {
+    expect(validLimit('25', { minimum: 1, maximum: 100 })).toBe(true);
+    expect(validLimit(' 100 ', { minimum: 1, maximum: 100 })).toBe(true);
+    for (const text of ['', '0', '101', '2.5', '-3', 'ten']) {
+      expect(validLimit(text, { minimum: 1, maximum: 100 })).toBe(false);
+    }
+  });
+
+  it('turns a draft back into numbers, or nothing while one is invalid', () => {
+    const draft = { ...limitDraft(limits), photos_per_account: '30' };
+    expect(parseLimitDraft(draft, bounds)).toEqual({ ...limits, photos_per_account: 30 });
+    expect(parseLimitDraft({ ...draft, sets_per_workout: '' }, bounds)).toBeNull();
   });
 });

@@ -7,16 +7,30 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, Response
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
+from .account_limits import (
+    CARDIO_NOT_SAVED,
+    EXERCISE_NOT_CREATED,
+    IMPORT_NOT_SAVED,
+    PHOTO_NOT_UPLOADED,
+    WORKOUT_NOT_SAVED,
+    AccountLimits,
+    check_account_total,
+    check_workout_size,
+    limit_save_rate,
+    load_account_limits,
+    refuse,
+)
 from .auth import CurrentUser, get_current_user
 from .body_measurement_csv import export_body_measurements, import_body_measurements
 from .cardio_energy import cardio_energy_periods
 from .cardio_ocr import CardioScreenshotError, scan_cardio_screenshot
 from .config import Settings, get_settings
 from .database import get_db
+from .errors import api_error
 from .exercise_aliases import canonical_exercise_name
 from .models import (
     BodyMeasurement,
@@ -28,6 +42,7 @@ from .models import (
     PersonalRecord,
     SupersetGroup,
     TrainingWorkout,
+    User,
     WorkoutCategory,
     WorkoutMovement,
     WorkoutSet,
@@ -96,7 +111,9 @@ from .training_metrics import (
 )
 
 router = APIRouter(
-    prefix="/api", tags=["workout tracking"], dependencies=[Depends(get_current_user)]
+    prefix="/api",
+    tags=["workout tracking"],
+    dependencies=[Depends(get_current_user), Depends(limit_save_rate)],
 )
 DbSession = Annotated[Session, Depends(get_db)]
 SettingsDependency = Annotated[Settings, Depends(get_settings)]
@@ -742,7 +759,18 @@ def delete_body_measurement(measurement_id: str, db: DbSession, user: CurrentUse
 
 
 @router.post("/exercises", response_model=ExerciseRead, status_code=201)
-def create_exercise(payload: ExerciseCreate, db: DbSession, user: CurrentUser) -> Exercise:
+def create_exercise(
+    payload: ExerciseCreate, db: DbSession, user: CurrentUser, settings: SettingsDependency
+) -> Exercise:
+    check_account_total(
+        db,
+        user,
+        Exercise,
+        load_account_limits(db, settings).custom_exercises_per_account,
+        "custom_exercises_per_account",
+        EXERCISE_NOT_CREATED,
+        Exercise.is_custom.is_(True),
+    )
     exercise_data = payload.model_dump()
     exercise_data["name"] = canonical_exercise_name(payload.name)
     exercise = Exercise(user_id=user.id, **exercise_data, is_custom=True)
@@ -841,10 +869,18 @@ async def upload_machine_photo(
     cleaned_caption = caption.strip()
     if not cleaned_caption:
         raise HTTPException(status_code=422, detail="Enter a machine name.")
+    limits = load_account_limits(db, settings)
+    check_account_total(
+        db, user, MachinePhoto, limits.photos_per_account, "photos_per_account", PHOTO_NOT_UPLOADED
+    )
     try:
-        stored = await store_machine_photo(upload=file, settings=settings)
+        stored = await store_machine_photo(
+            upload=file,
+            settings=settings,
+            max_bytes=limits.photo_upload_megabytes * 1024 * 1024,
+        )
     except PhotoValidationError as error:
-        raise HTTPException(status_code=error.status_code, detail=error.message) from error
+        raise api_error(error.status_code, error.code, error.message) from error
 
     photo = MachinePhoto(
         user_id=user.id,
@@ -1052,9 +1088,26 @@ async def scan_cardio_workout_screenshot(
 
 @router.post("/cardio", response_model=CardioSessionRead, status_code=201)
 def create_cardio_session(
-    payload: CardioSessionCreate, db: DbSession, user: CurrentUser
+    payload: CardioSessionCreate, db: DbSession, user: CurrentUser, settings: SettingsDependency
 ) -> CardioSession:
+    limits = load_account_limits(db, settings)
+    check_account_total(
+        db,
+        user,
+        CardioSession,
+        limits.cardio_sessions_per_account,
+        "cardio_sessions_per_account",
+        CARDIO_NOT_SAVED,
+    )
     if payload.exercise_id:
+        check_account_total(
+            db,
+            user,
+            TrainingWorkout,
+            limits.workouts_per_account,
+            "workouts_per_account",
+            CARDIO_NOT_SAVED,
+        )
         exercise = get_owned(db, Exercise, payload.exercise_id, user.id)
         if not exercise or exercise.kind != ExerciseKind.CARDIO:
             raise HTTPException(status_code=422, detail="Choose a cardio exercise.")
@@ -1394,8 +1447,18 @@ def get_workout_snapshot(db: DbSession, user: CurrentUser) -> WorkoutSnapshotRea
 
 @router.post("/workouts", response_model=TrainingWorkoutRead, status_code=201)
 def create_workout(
-    payload: TrainingWorkoutCreate, db: DbSession, user: CurrentUser
+    payload: TrainingWorkoutCreate, db: DbSession, user: CurrentUser, settings: SettingsDependency
 ) -> TrainingWorkout:
+    limits = load_account_limits(db, settings)
+    check_workout_size(payload, limits, user)
+    check_account_total(
+        db,
+        user,
+        TrainingWorkout,
+        limits.workouts_per_account,
+        "workouts_per_account",
+        WORKOUT_NOT_SAVED,
+    )
     workout = TrainingWorkout(
         user_id=user.id,
         name=payload.name,
@@ -1446,9 +1509,49 @@ def export_workout_csv(
     )
 
 
+def check_imported_workouts(
+    db: Session, user: User, limits: AccountLimits, existing_ids: set[str]
+) -> None:
+    """Hold an import to the same limits as saving workouts one by one."""
+    if not user.is_admin:
+        workouts = db.scalar(
+            select(func.count(TrainingWorkout.id)).where(TrainingWorkout.user_id == user.id)
+        )
+        if workouts > limits.workouts_per_account:
+            raise refuse(user, "workouts_per_account", IMPORT_NOT_SAVED)
+        custom = db.scalar(
+            select(func.count(Exercise.id)).where(
+                Exercise.user_id == user.id, Exercise.is_custom.is_(True)
+            )
+        )
+        if custom > limits.custom_exercises_per_account:
+            raise refuse(user, "custom_exercises_per_account", IMPORT_NOT_SAVED)
+    sizes = db.execute(
+        select(
+            TrainingWorkout.id,
+            func.count(func.distinct(WorkoutMovement.id)),
+            func.count(WorkoutSet.id),
+        )
+        .join(WorkoutMovement, WorkoutMovement.workout_id == TrainingWorkout.id)
+        .join(WorkoutSet, WorkoutSet.movement_id == WorkoutMovement.id)
+        .where(TrainingWorkout.user_id == user.id)
+        .group_by(TrainingWorkout.id)
+    )
+    for workout_id, exercises, sets in sizes:
+        if workout_id in existing_ids:
+            continue
+        if exercises > limits.exercises_per_workout:
+            raise refuse(user, "exercises_per_workout", IMPORT_NOT_SAVED)
+        if sets > limits.sets_per_workout:
+            raise refuse(user, "sets_per_workout", IMPORT_NOT_SAVED)
+
+
 @router.post("/workouts/import", response_model=CsvImportRead, status_code=201)
 async def import_workout_csv(
-    db: DbSession, user: CurrentUser, file: Annotated[UploadFile, File(...)]
+    db: DbSession,
+    user: CurrentUser,
+    settings: SettingsDependency,
+    file: Annotated[UploadFile, File(...)],
 ) -> CsvImportRead:
     if file.content_type not in {
         None,
@@ -1463,11 +1566,19 @@ async def import_workout_csv(
     await file.close()
     if len(raw) > 20 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="CSV imports are limited to 20 MB.")
+    existing_ids = set(
+        db.scalars(select(TrainingWorkout.id).where(TrainingWorkout.user_id == user.id))
+    )
     try:
         summary = import_workouts(db, user.id, raw)
     except CsvImportError as error:
         db.rollback()
         raise HTTPException(status_code=422, detail=str(error)) from error
+    try:
+        check_imported_workouts(db, user, load_account_limits(db, settings), existing_ids)
+    except HTTPException:
+        db.rollback()
+        raise
     rebuild_personal_records(db, user.id)
     bump_workout_cache_revision(db, user.id)
     db.commit()
@@ -1481,9 +1592,14 @@ def get_workout(workout_id: str, db: DbSession, user: CurrentUser) -> TrainingWo
 
 @router.put("/workouts/{workout_id}", response_model=TrainingWorkoutRead)
 def update_workout(
-    workout_id: str, payload: TrainingWorkoutCreate, db: DbSession, user: CurrentUser
+    workout_id: str,
+    payload: TrainingWorkoutCreate,
+    db: DbSession,
+    user: CurrentUser,
+    settings: SettingsDependency,
 ) -> TrainingWorkout:
     workout = load_workout(db, user.id, workout_id)
+    check_workout_size(payload, load_account_limits(db, settings), user, existing=workout)
     replace_workout_contents(db, user.id, workout, payload)
     db.flush()
     sync_workout_cardio_sessions(db, workout)

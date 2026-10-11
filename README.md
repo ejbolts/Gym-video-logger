@@ -134,6 +134,22 @@ python -m app.manage import-legacy-backup --email you@example.com --source <back
 
 `import-legacy-backup` files a backup taken before accounts existed, such as one made before upgrading to migration `0027`, under the account that claimed that data: the first account. It copies the databases, photos and video files, leaves server secrets, keys and logs behind, and refuses a backup that already contains accounts or one that has already been imported. Deleting an account deletes its backups.
 
+## Hidden account limits
+
+Limits stop one account from bloating the server. They sit far above real use (a six-year log peaks at 55 sets and 9 exercises in one workout), and people are never told they exist: anything over a limit gets a plain "couldn't be saved" message, and the server log records which limit was hit. The exception is the photo upload size, which people are told ("Photos can be up to 5 MB."). The app also shrinks photos before uploading them (to 1,800 px on the long side, as JPEG), so phone photos fit easily. Adjust them under **Settings → Admin console → Account limits**; changes apply immediately.
+
+| Limit | Default | Applies to |
+|---|---|---|
+| Workouts, cardio sessions | 5,000 each | each account, except admins |
+| Custom exercises | 100 | each account, except admins |
+| Machine photos | 25 | each account, except admins |
+| Changes per minute | 60 | each account, except admins |
+| Exercises / sets in one workout | 20 / 100 | everyone |
+| Workout / exercise / set note | 2,000 / 1,000 / 500 characters | everyone |
+| Photo upload size | 5 MB (shown to people) | everyone |
+
+CSV imports follow the same limits and save nothing if any is exceeded. A workout saved before a limit was lowered can still be edited, but not grown.
+
 ## Checks
 
 Run these from the repository root after activating the virtual environment:
@@ -200,7 +216,7 @@ Google currently restricts uploads from unaudited API projects created after Jul
 See `.env.example` for all supported variables:
 
 - storage/database paths and upload limits
-- 15 MB machine-photo limit (`GYM_MAX_PHOTO_SIZE_BYTES`)
+- starting machine-photo upload limit, 5 MB (`GYM_MAX_PHOTO_SIZE_BYTES`); the admin console overrides it
 - frontend upload-concurrency hint
 - ffmpeg/ffprobe executable paths
 - YouTube OAuth paths, privacy, mock mode, title/description templates
