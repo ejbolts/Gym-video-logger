@@ -19,12 +19,31 @@ describe('release popup', () => {
     expect(markup).toContain('<dialog');
     expect(markup).toContain('aria-modal="true"');
     expect(markup).toContain(`>Version ${metadata.version}</h2>`);
-    expect(markup).toContain(metadata.title);
+    expect(markup).toContain(renderToStaticMarkup(<h3>{metadata.title}</h3>));
     expect(markup).toContain(metadata.summary);
     expect(markup.match(/<li>/g)).toHaveLength(metadata.changes.length);
     expect(markup).toContain(`href="${metadata.url}"`);
     expect(markup).toContain('target="_blank" rel="noopener noreferrer"');
     expect(markup).toContain(`aria-label="Close Version ${metadata.version}"`);
+    expect(markup).toContain('>Got it</button>');
+  });
+
+  it('shows an accessible screenshot linking to the original image without sending a referrer', () => {
+    const markup = renderToStaticMarkup(
+      <ReleaseAnnouncement release={metadata} onClose={vi.fn()} />,
+    );
+    expect(markup).toContain(`src="${metadata.image.url}"`);
+    expect(markup).toContain(`alt="${metadata.image.alt}"`);
+    expect(markup).toContain(`href="${metadata.image.url}"`);
+    expect(markup).toContain('referrerPolicy="no-referrer"');
+  });
+
+  it('keeps text-only releases usable', () => {
+    const markup = renderToStaticMarkup(
+      <ReleaseAnnouncement release={{ ...metadata, image: undefined }} onClose={vi.fn()} />,
+    );
+    expect(markup).not.toContain('<img');
+    expect(markup).toContain(metadata.summary);
     expect(markup).toContain('>Got it</button>');
   });
 

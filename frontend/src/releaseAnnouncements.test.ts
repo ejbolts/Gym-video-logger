@@ -28,9 +28,31 @@ describe('release announcements', () => {
       { ...metadata, url: 'https://github.com.example.com/' },
       { ...metadata, url: 'http://github.com/' },
       { ...metadata, url: 'https://user@github.com/' },
+      { ...metadata, image: null },
+      { ...metadata, image: {} },
+      { ...metadata, image: { ...metadata.image, alt: ' ' } },
+      { ...metadata, image: { ...metadata.image, url: 'javascript:alert(1)' } },
+      { ...metadata, image: { ...metadata.image, url: 'http://raw.githubusercontent.com/a.png' } },
+      {
+        ...metadata,
+        image: { ...metadata.image, url: 'https://raw.githubusercontent.com.evil/a.png' },
+      },
+      {
+        ...metadata,
+        image: { ...metadata.image, url: 'https://user@raw.githubusercontent.com/a.png' },
+      },
+      {
+        ...metadata,
+        image: { ...metadata.image, url: 'https://github.com/owner/repo/blob/main/a.png' },
+      },
     ]) {
       expect(parseRelease(invalid)).toBeNull();
     }
+  });
+
+  it('accepts older releases without an image', () => {
+    const textOnly = { ...metadata, image: undefined };
+    expect(parseRelease(textOnly)).toEqual(textOnly);
   });
 
   it('remembers dismissal per account and version, including on another browser session', () => {

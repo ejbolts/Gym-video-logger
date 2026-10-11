@@ -1,11 +1,15 @@
 {
-  "version": "0.3.0",
-  "title": "Sign in with a username",
-  "summary": "Gym Logger accounts now use a username and password, with no email address required.",
+  "version": "0.3.1",
+  "title": "See what's changed",
+  "summary": "Release announcements now include screenshots of visible changes, such as the recent username-based signup screen.",
   "changes": [
-    "Choose a unique username when you create an account. Invite codes still control access.",
-    "View or change your username and display name in Profile.",
-    "Existing accounts keep their passwords and history; usernames are assigned from their old email names."
+    "See a screenshot alongside the update notes when one is available.",
+    "Select the screenshot to view it full size.",
+    "Read illustrated release notes on GitHub."
   ],
-  "url": "https://github.com/ejbolts/Gym-video-logger/blob/master/docs/RELEASE-NOTES.md#030"
+  "url": "https://github.com/ejbolts/Gym-video-logger/blob/master/docs/RELEASE-NOTES.md#031",
+  "image": {
+    "url": "https://raw.githubusercontent.com/ejbolts/Gym-video-logger/735bdf2124331a84c5427ef41f5035f0232c4152/docs/screenshots/releases/0.3.0-username-signup.png",
+    "alt": "Username-based signup, with no email field."
+  }
 }

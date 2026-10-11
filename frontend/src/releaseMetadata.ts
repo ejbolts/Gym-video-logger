@@ -4,6 +4,10 @@ export interface Release {
   summary: string;
   changes: string[];
   url: string;
+  image?: {
+    url: string;
+    alt: string;
+  };
 }
 
 function text(value: unknown): value is string {
@@ -27,6 +31,15 @@ export function parseRelease(value: unknown): Release | null {
     return null;
   }
   if (!/^https:\/\/github\.com\/[^\s\\]+$/.test(release.url)) {
+    return null;
+  }
+  if (
+    release.image !== undefined &&
+    (!release.image ||
+      !text(release.image.alt) ||
+      !text(release.image.url) ||
+      !/^https:\/\/raw\.githubusercontent\.com\/[^\s\\]+$/.test(release.image.url))
+  ) {
     return null;
   }
   return release as Release;
