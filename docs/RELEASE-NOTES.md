@@ -1,5 +1,11 @@
 # Gym Logger release notes
 
+## 0.4.0
+
+- New accounts see a one-time **Add to Home Screen** guide after closing the **What's new** pop-up. It shows illustrated Safari steps: tap the menu button on the left of the address bar, then **Share**, **View More**, **Add to Home Screen** and **Add**. Android users get the equivalent Chrome menu steps.
+- The guide waits behind the same interruptions as **What's new** (loading, the workout and video screens, and other dialogs). Dismissal is remembered for each account and browser, so it appears only once.
+- The guide is skipped when Gym Logger is already open from the Home Screen. Open **Settings → Add to Home Screen → Show steps** to see it again in the browser.
+
 ## 0.3.0
 
 - Create accounts and sign in with a **username and password**. Account emails are no longer collected or stored in the active users table.

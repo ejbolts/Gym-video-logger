@@ -1,11 +1,11 @@
 {
-  "version": "0.3.0",
-  "title": "Sign in with a username",
-  "summary": "Gym Logger accounts now use a username and password, with no email address required.",
+  "version": "0.4.0",
+  "title": "Add Gym Logger to your Home Screen",
+  "summary": "New accounts now get a short guide to opening Gym Logger like an app on their phone.",
   "changes": [
-    "Choose a unique username when you create an account. Invite codes still control access.",
-    "View or change your username and display name in Profile.",
-    "Existing accounts keep their passwords and history; usernames are assigned from their old email names."
+    "After creating an account and closing What's new, see illustrated steps for adding Gym Logger to your iPhone Home Screen.",
+    "Open Settings and tap Show steps under Add to Home Screen to see the guide again.",
+    "The guide is skipped when Gym Logger is already open from your Home Screen."
   ],
-  "url": "https://github.com/ejbolts/Gym-video-logger/blob/master/docs/RELEASE-NOTES.md#030"
+  "url": "https://github.com/ejbolts/Gym-video-logger/blob/master/docs/RELEASE-NOTES.md#040"
 }
