@@ -37,6 +37,7 @@ def reset_database():
     yield
     Base.metadata.drop_all(engine)
     shutil.rmtree(photo_dir, ignore_errors=True)
+    shutil.rmtree(get_settings().account_backups_dir, ignore_errors=True)
 
 
 TEST_PASSWORD = "correct horse battery staple"

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hmac
 import re
+import shutil
 import threading
 from datetime import datetime
 from typing import Annotated
@@ -41,6 +42,7 @@ from .config import Settings
 from .database import get_db
 from .errors import api_error
 from .models import (
+    AccountBackup,
     ActiveWorkoutReminder,
     AppSetting,
     BodyMeasurement,
@@ -288,6 +290,7 @@ def delete_account(db: Session, settings: Settings, user: User, app_state=None) 
         delete(PushSubscription).where(PushSubscription.user_id == user_id),
         delete(UserSetting).where(UserSetting.user_id == user_id),
         delete(UserSession).where(UserSession.user_id == user_id),
+        delete(AccountBackup).where(AccountBackup.user_id == user_id),
         delete(User).where(User.id == user_id),
     )
     for statement in statements:
@@ -298,6 +301,7 @@ def delete_account(db: Session, settings: Settings, user: User, app_state=None) 
         delete_machine_photo_files(settings, full_filename, thumbnail_filename)
     for session_id in session_ids:
         remove_session_files(session_id, settings)
+    shutil.rmtree(settings.account_backups_dir / user_id, ignore_errors=True)
     rest_timers = getattr(app_state, "rest_timer_notifications", None)
     if rest_timers is not None:
         for endpoint in endpoints:

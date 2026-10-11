@@ -120,6 +120,20 @@ With Phone alerts enabled, an active workout also schedules one reminder at two 
 
 Mixed portrait and landscape clips are normalized to a shared 1920x1080, 30 FPS MP4 canvas before stitching. Each clip retains its original aspect ratio: portrait clips are pillarboxed and wide clips are letterboxed where necessary. This avoids distortion and makes the concat step reliable; a single YouTube video cannot safely change its encoded frame dimensions mid-playback.
 
+## Per-account backups
+
+Every backup belongs to one account (`account_backups.user_id`) and holds only that account's data. Backups live in `data/account-backups/<account id>/<backup id>/`, each with a `manifest.json` that lists every file with its size and SHA-256. Run these from the folder that holds the app's `.env`:
+
+```powershell
+python -m app.manage backup-account --email you@example.com [--label "Before trip"]
+python -m app.manage list-backups [--email you@example.com]
+python -m app.manage import-legacy-backup --email you@example.com --source <backup folder>
+```
+
+`backup-account` writes a standalone SQLite database containing only that account's rows (with its password hash blanked and no sign-ins, push registrations or server settings), plus its machine photos. Video uploads are not included.
+
+`import-legacy-backup` files a backup taken before accounts existed, such as one made before upgrading to migration `0027`, under the account that claimed that data: the first account. It copies the databases, photos and video files, leaves server secrets, keys and logs behind, and refuses a backup that already contains accounts or one that has already been imported. Deleting an account deletes its backups.
+
 ## Checks
 
 Run these from the repository root after activating the virtual environment:

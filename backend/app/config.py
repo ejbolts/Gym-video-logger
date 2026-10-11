@@ -90,6 +90,10 @@ class Settings(BaseSettings):
     def machine_photos_dir(self) -> Path:
         return self.data_dir / "machine-photos"
 
+    @property
+    def account_backups_dir(self) -> Path:
+        return self.data_dir / "account-backups"
+
     def ensure_directories(self) -> None:
         for directory in (
             self.data_dir,
