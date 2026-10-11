@@ -6,6 +6,10 @@
 - Screenshots include descriptive text and scale to fit mobile screens. If an image cannot load, the notes, GitHub link and dismissal controls remain available.
 - Release screenshots are stored with the GitHub notes; the announcement uses a direct image URL pinned to the screenshot's commit. Releases without a screenshot continue to work.
 
+<img src="screenshots/releases/0.3.1-release-announcement.png" alt="Version 0.3.1 release announcement showing notes, a signup screenshot, a GitHub link and the Got it button." width="390">
+
+The illustrated announcement in the isolated mobile verification environment, using the [username signup screenshot](screenshots/releases/0.3.0-username-signup.png) as an example.
+
 ## 0.3.0
 
 - Create accounts and sign in with a **username and password**. Account emails are no longer collected or stored in the active users table.
