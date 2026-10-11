@@ -2,6 +2,7 @@ import { useId, useState, type FormEvent, type ReactNode } from 'react';
 import {
   DEFAULT_AUTH_CONFIG,
   MIN_PASSWORD_LENGTH,
+  USERNAME_HINT,
   submitAuthForm,
   type AuthFieldErrors,
   type AuthMode,
@@ -72,7 +73,7 @@ export function AuthScreen({ config, onAuthenticated, initialMode = 'sign-in' }:
   const [requestedMode, setMode] = useState<AuthMode>(initialMode);
   const mode: AuthMode = registrationOpen ? requestedMode : 'sign-in';
   const [displayName, setDisplayName] = useState('');
-  const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [inviteCode, setInviteCode] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -85,7 +86,7 @@ export function AuthScreen({ config, onAuthenticated, initialMode = 'sign-in' }:
   const showInviteCode = creating && (effectiveConfig.invite_code_required || inviteRevealed);
   const ids = {
     name: `${idPrefix}-name`,
-    email: `${idPrefix}-email`,
+    username: `${idPrefix}-username`,
     password: `${idPrefix}-password`,
     invite: `${idPrefix}-invite`,
   };
@@ -105,7 +106,7 @@ export function AuthScreen({ config, onAuthenticated, initialMode = 'sign-in' }:
     setFieldErrors({});
     const result = await submitAuthForm(
       mode,
-      { displayName, email, password, inviteCode },
+      { displayName, username, password, inviteCode },
       effectiveConfig,
     );
     if (result.ok) {
@@ -120,15 +121,15 @@ export function AuthScreen({ config, onAuthenticated, initialMode = 'sign-in' }:
     setError(result.message);
     setFieldErrors(result.fieldErrors);
     if (result.needsInviteCode) setInviteRevealed(true);
-    const firstInvalid = (['displayName', 'email', 'password', 'inviteCode'] as const).find(
+    const firstInvalid = (['displayName', 'username', 'password', 'inviteCode'] as const).find(
       (field) => result.fieldErrors[field],
     );
     const target = {
       displayName: ids.name,
-      email: ids.email,
+      username: ids.username,
       password: ids.password,
       inviteCode: ids.invite,
-    }[firstInvalid ?? 'email'];
+    }[firstInvalid ?? 'username'];
     if (firstInvalid) window.requestAnimationFrame(() => document.getElementById(target)?.focus());
   }
 
@@ -195,21 +196,31 @@ export function AuthScreen({ config, onAuthenticated, initialMode = 'sign-in' }:
               </AuthField>
             )}
 
-            <AuthField id={ids.email} label="Email" error={fieldErrors.email}>
+            <AuthField
+              id={ids.username}
+              label="Username"
+              error={fieldErrors.username}
+              hint={creating ? USERNAME_HINT : undefined}
+            >
               <input
-                id={ids.email}
-                name="email"
-                type="email"
-                inputMode="email"
-                autoComplete={creating ? 'email' : 'username'}
+                id={ids.username}
+                name="username"
+                type="text"
+                inputMode="text"
+                autoComplete="username"
                 autoCapitalize="none"
                 autoCorrect="off"
                 spellCheck={false}
                 required
-                value={email}
-                aria-invalid={Boolean(fieldErrors.email)}
-                aria-describedby={describedBy(ids.email, fieldErrors.email)}
-                onChange={(event) => setEmail(event.target.value)}
+                maxLength={32}
+                value={username}
+                aria-invalid={Boolean(fieldErrors.username)}
+                aria-describedby={describedBy(
+                  ids.username,
+                  fieldErrors.username,
+                  creating ? 'hint' : undefined,
+                )}
+                onChange={(event) => setUsername(event.target.value)}
               />
             </AuthField>
 

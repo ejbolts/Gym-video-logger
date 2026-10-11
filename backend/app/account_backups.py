@@ -139,7 +139,7 @@ def import_legacy_backup(
         raise BackupError(f"No {LEGACY_DATABASE} in {data}.")
     owner = legacy_data_owner(db)
     if owner is None or owner.id != user.id:
-        claimed_by = f" ({owner.email})" if owner else ""
+        claimed_by = f" ({owner.username})" if owner else ""
         raise BackupError(
             "A backup from before accounts holds the data the first account claimed, so it can "
             f"only be filed under that account{claimed_by}."
@@ -158,7 +158,9 @@ def import_legacy_backup(
         )
     )
     if already_imported:
-        raise BackupError(f"This backup is already filed under {user.email} ({already_imported}).")
+        raise BackupError(
+            f"This backup is already filed under {user.username} ({already_imported})."
+        )
 
     created_at = utc_now()
     label = clean_label(label or f"Before accounts: {source.resolve().name}")
@@ -284,11 +286,11 @@ def finish_backup(
         for path in sorted(path for path in staging.rglob("*") if path.is_file())
     ]
     manifest = {
-        "format": 1,
+        "format": 2,
         "id": backup_id,
         "kind": kind.value,
         "label": label,
-        "owner": {"id": user.id, "email": user.email},
+        "owner": {"id": user.id, "username": user.username},
         "created_at": created_at.isoformat(),
         "schema_revision": schema_revision,
         **details,

@@ -1,11 +1,11 @@
 {
-  "version": "0.2.0",
-  "title": "Stay up to date",
-  "summary": "Gym Logger now lets you know when a new version is ready.",
+  "version": "0.3.0",
+  "title": "Sign in with a username",
+  "summary": "Gym Logger accounts now use a username and password, with no email address required.",
   "changes": [
-    "See a summary of new features when you return to the app after an update.",
-    "Open What's new in Settings to read the latest changes again.",
-    "Follow the GitHub release notes for more detail."
+    "Choose a unique username when you create an account. Invite codes still control access.",
+    "View or change your username and display name in Profile.",
+    "Existing accounts keep their passwords and history; usernames are assigned from their old email names."
   ],
-  "url": "https://github.com/ejbolts/Gym-video-logger/blob/master/docs/RELEASE-NOTES.md#020"
+  "url": "https://github.com/ejbolts/Gym-video-logger/blob/master/docs/RELEASE-NOTES.md#030"
 }

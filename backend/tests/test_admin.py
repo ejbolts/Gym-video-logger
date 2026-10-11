@@ -24,8 +24,8 @@ ADMIN_ROUTES = (
 )
 
 
-def login(test_client: TestClient, email: str, password: str = TEST_PASSWORD):
-    return test_client.post("/api/auth/login", json={"email": email, "password": password})
+def login(test_client: TestClient, username: str, password: str = TEST_PASSWORD):
+    return test_client.post("/api/auth/login", json={"username": username, "password": password})
 
 
 def set_disabled(test_client: TestClient, user_id: str, disabled: bool):
@@ -62,11 +62,11 @@ def test_user_list_reports_activity_and_usage(client, other_client):
     (photo_dir / "photo-full.webp").write_bytes(b"x" * 300)
     (photo_dir / "photo-thumbnail.webp").write_bytes(b"x" * 20)
     second_device = TestClient(client.app)
-    assert login(second_device, "other@example.com").status_code == 200
+    assert login(second_device, "other").status_code == 200
 
     users = client.get("/api/admin/users").json()
 
-    assert [user["email"] for user in users] == ["owner@example.com", "other@example.com"]
+    assert [user["username"] for user in users] == ["owner", "other"]
     owner, other = users
     assert owner["is_admin"] is True and other["is_admin"] is False
     assert other["disabled_at"] is None
@@ -87,16 +87,16 @@ def test_disabling_an_account_signs_it_out_and_blocks_sign_in(client, other_clie
     assert response.json()["signed_in_devices"] == 0
     assert other_client.get("/api/auth/me").status_code == 401
     fresh = TestClient(client.app)
-    blocked = login(fresh, "other@example.com")
+    blocked = login(fresh, "other")
     assert blocked.status_code == 403
     assert blocked.json()["error"]["code"] == "account_disabled"
     # A wrong password gets the usual answer, so the disabled state is not revealed to guessers.
-    assert login(fresh, "other@example.com", "wrong password!").json()["error"]["code"] == (
+    assert login(fresh, "other", "wrong password!").json()["error"]["code"] == (
         "invalid_credentials"
     )
 
     assert set_disabled(client, other_id, False).json()["disabled_at"] is None
-    assert login(fresh, "other@example.com").status_code == 200
+    assert login(fresh, "other").status_code == 200
     assert fresh.get("/api/auth/me").status_code == 200
 
 
@@ -134,7 +134,7 @@ def test_switches_override_env_and_survive_a_restart(client):
 
     settings = get_settings().model_copy(update={"video_uploads": "everyone"})
     with TestClient(create_app(settings)) as restarted:
-        assert login(restarted, "owner@example.com").status_code == 200
+        assert login(restarted, "owner").status_code == 200
         assert restarted.get("/api/admin/settings").json() == {
             "video_uploads": "off",
             "allow_registration": False,
@@ -149,7 +149,7 @@ def test_registration_switch_closes_and_reopens_sign_up(client, anonymous_client
     closed = newcomer.post(
         "/api/auth/register",
         json={
-            "email": "late@example.com",
+            "username": "late",
             "password": TEST_PASSWORD,
             "display_name": "Late",
             "invite_code": TEST_INVITE_CODE,
@@ -160,7 +160,7 @@ def test_registration_switch_closes_and_reopens_sign_up(client, anonymous_client
 
     client.patch("/api/admin/settings", json={"allow_registration": True})
     assert newcomer.get("/api/auth/config").json()["registration_open"] is True
-    register_user(newcomer, "late@example.com", "Late")
+    register_user(newcomer, "late", "Late")
 
 
 def test_settings_reject_unknown_video_modes(client):

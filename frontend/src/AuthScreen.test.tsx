@@ -21,12 +21,13 @@ describe('AuthScreen', () => {
     expect(markup).toContain('role="tablist"');
     expect(markup).toContain('autocomplete="current-password"');
     expect(markup).toContain('autocomplete="username"');
-    expect(markup).toContain('inputmode="email"');
+    expect(markup).toContain('inputmode="text"');
+    expect(markup).not.toContain('type="email"');
     expect(markup).toContain('type="password"');
     expect(markup).toContain('aria-live="polite"');
     expect(markup).not.toContain('autocomplete="name"');
     expect(markup).not.toContain('invite code');
-    expect(markup).toMatch(/<label for="[^"]+">email<\/label>/);
+    expect(markup).toMatch(/<label for="[^"]+">username<\/label>/);
     expect(markup).toContain('>sign in</span>');
   });
 
@@ -37,6 +38,8 @@ describe('AuthScreen', () => {
     expect(markup).toContain('autocomplete="new-password"');
     expect(markup).toContain('at least 10 characters.');
     expect(markup).toContain('minlength="10"');
+    expect(markup).toContain('maxlength="32"');
+    expect(markup).toContain('3–32 letters');
     expect(markup).toContain('>create account</span>');
   });
 

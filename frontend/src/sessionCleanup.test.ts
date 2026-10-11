@@ -29,7 +29,7 @@ const REMINDER_KEY = 'gym-video-logger.active-workout-reminder';
 function user(id: string): User {
   return {
     id,
-    email: `${id}@example.com`,
+    username: `${id}`,
     display_name: id,
     is_admin: false,
     can_upload_videos: true,

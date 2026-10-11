@@ -120,7 +120,6 @@
 }
 
 .auth-field input[type='text'],
-.auth-field input[type='email'],
 .auth-field input[type='password'] {
   width: 100%;
   min-height: 2.9rem;

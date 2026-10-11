@@ -5,7 +5,7 @@ import type { AccountLimits, AccountLimitsSettings, AdminUser } from './types';
 
 const owner: AdminUser = {
   id: 'owner',
-  email: 'owner@example.com',
+  username: 'owner',
   display_name: 'Owner',
   is_admin: true,
   disabled_at: null,
@@ -21,7 +21,7 @@ const owner: AdminUser = {
 const tester: AdminUser = {
   ...owner,
   id: 'tester',
-  email: 'tester@example.com',
+  username: 'tester',
   display_name: 'Tester',
   is_admin: false,
   signed_in_devices: 2,
@@ -112,7 +112,7 @@ describe('AdminScreenView', () => {
     const markup = view();
 
     expect(markup).toContain('2 accounts');
-    expect(markup).toContain('tester@example.com');
+    expect(markup).toContain('tester');
     expect(markup).toContain('2 devices');
     expect(markup).toContain('>You<');
     expect(markup.match(/Disable account/g)).toHaveLength(1);

@@ -1,7 +1,7 @@
 import type { User } from './types';
 
-export function profileInitial(user: Pick<User, 'display_name' | 'email'>): string {
-  const source = user.display_name.trim() || user.email.trim();
+export function profileInitial(user: Pick<User, 'display_name' | 'username'>): string {
+  const source = user.display_name.trim() || user.username.trim();
   return (source[0] ?? '?').toUpperCase();
 }
 

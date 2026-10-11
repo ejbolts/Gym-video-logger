@@ -122,7 +122,7 @@ def account_limits_read(db: Session, settings: Settings) -> AccountLimitsRead:
 
 
 def refuse(user: User, limit: str, message: str, status_code: int = 422) -> HTTPException:
-    logger.warning("Refused a change for %s: the %s limit was reached.", user.email, limit)
+    logger.warning("Refused a change for %s: the %s limit was reached.", user.username, limit)
     return api_error(status_code, "not_saved", message)
 
 

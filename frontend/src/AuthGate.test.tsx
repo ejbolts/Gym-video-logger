@@ -12,7 +12,7 @@ afterEach(() => {
 
 const user: User = {
   id: 'user-1',
-  email: 'lifter@example.com',
+  username: 'lifter',
   display_name: 'Lifter',
   is_admin: false,
   can_upload_videos: true,
@@ -114,7 +114,7 @@ describe('api session handling', () => {
     const { expired } = stubFetch(401, unauthenticated);
 
     await expect(api.auth.me()).rejects.toMatchObject({ status: 401 });
-    await expect(api.auth.login({ email: 'a@b.co', password: 'x' })).rejects.toMatchObject({
+    await expect(api.auth.login({ username: 'aaa', password: 'x' })).rejects.toMatchObject({
       status: 401,
     });
 
@@ -124,7 +124,7 @@ describe('api session handling', () => {
   it('sends the session cookie to the same origin and never omits credentials', async () => {
     const { fetchMock } = stubFetch(200, user);
 
-    await api.auth.login({ email: 'a@b.co', password: 'correct horse' });
+    await api.auth.login({ username: 'aaa', password: 'correct horse' });
 
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/auth/login',

@@ -30,7 +30,7 @@ function stubWindow(hash: string) {
 
 const account: User = {
   id: 'user-1',
-  email: 'lifter@example.com',
+  username: 'lifter',
   display_name: 'Lifter',
   is_admin: true,
   can_upload_videos: true,
@@ -209,11 +209,11 @@ describe('App startup', () => {
     },
   );
 
-  it('shows the Profile screen with the account name, email and admin badge', () => {
+  it('shows the Profile screen with the account name, username and admin badge', () => {
     const markup = renderSignedIn('#profile', account);
 
     expect(markup).toContain('<strong>Profile</strong>');
-    expect(markup).toContain('lifter@example.com');
+    expect(markup).toContain('lifter');
     expect(markup).toContain('Admin');
     expect(markup).toContain('Change password');
     expect(markup).toContain('Sign out');

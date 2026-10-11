@@ -29,14 +29,23 @@ from app.storage import StoredUpload, original_filename  # noqa: E402
 
 @pytest.fixture(autouse=True)
 def reset_database():
-    photo_dir = get_settings().machine_photos_dir
-    shutil.rmtree(photo_dir, ignore_errors=True)
-    photo_dir.mkdir(parents=True, exist_ok=True)
+    settings = get_settings()
+    # Disk totals and processors must not see uploads left behind by another test.
+    for folder in (
+        settings.machine_photos_dir,
+        settings.uploads_dir,
+        settings.normalized_dir,
+        settings.output_dir,
+        settings.account_backups_dir,
+    ):
+        assert folder.resolve().is_relative_to(TEST_DATA_DIR.resolve())
+        shutil.rmtree(folder, ignore_errors=True)
+        folder.mkdir(parents=True, exist_ok=True)
     Base.metadata.drop_all(engine)
     Base.metadata.create_all(engine)
     yield
     Base.metadata.drop_all(engine)
-    shutil.rmtree(photo_dir, ignore_errors=True)
+    shutil.rmtree(settings.machine_photos_dir, ignore_errors=True)
     shutil.rmtree(get_settings().account_backups_dir, ignore_errors=True)
 
 
@@ -45,7 +54,7 @@ TEST_PASSWORD = "correct horse battery staple"
 
 def register_user(
     test_client: TestClient,
-    email: str = "owner@example.com",
+    username: str = "owner",
     display_name: str = "Owner",
     password: str = TEST_PASSWORD,
 ) -> dict:
@@ -53,7 +62,7 @@ def register_user(
     response = test_client.post(
         "/api/auth/register",
         json={
-            "email": email,
+            "username": username,
             "password": password,
             "display_name": display_name,
             "invite_code": TEST_INVITE_CODE,
@@ -80,16 +89,19 @@ def client(anonymous_client):
 def other_client(client):
     """A second, independent browser signed in as a different non-admin account."""
     second = TestClient(client.app)
-    second.user = register_user(second, "other@example.com", "Other")
+    second.user = register_user(second, "other", "Other")
     yield second
     second.close()
 
 
-def make_user(email: str = "direct@example.com", *, is_admin: bool = False) -> str:
+def make_user(username: str = "direct", *, is_admin: bool = False) -> str:
     """Insert an account row directly, for tests that exercise internals without HTTP."""
     with SessionLocal() as db:
         user = User(
-            email=email, display_name="Direct", password_hash="not-a-real-hash", is_admin=is_admin
+            username=username,
+            display_name="Direct",
+            password_hash="not-a-real-hash",
+            is_admin=is_admin,
         )
         db.add(user)
         db.commit()
