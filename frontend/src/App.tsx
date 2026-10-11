@@ -59,6 +59,9 @@ import { monthCountFromOldestWorkout } from './calendarRange';
 import { InlineConfirmButton } from './InlineConfirmButton';
 import { NotificationDialog } from './NotificationDialog';
 import { PopupDialog } from './PopupDialog';
+import { ReleaseAnnouncement } from './ReleaseAnnouncement';
+import { useReleaseAnnouncement } from './useReleaseAnnouncement';
+import { canShowReleaseAnnouncement } from './releaseAnnouncements';
 import { CreateExerciseDialog } from './CreateExerciseDialog';
 import { BackgroundActivityBar } from './BackgroundActivityBar';
 import { CardioEnergyCard } from './CardioEnergyCard';
@@ -441,6 +444,7 @@ function WorkoutCompletionDialog({
 
 export function App() {
   const { user } = useUserSession();
+  const announcement = useReleaseAnnouncement(user?.id ?? null);
   const videosAllowed = canUploadVideos(user);
   const isAdmin = user?.is_admin === true;
   const initialHistoryState = isAppHistoryState(window.history.state) ? window.history.state : null;
@@ -922,6 +926,12 @@ export function App() {
 
   return (
     <div className={`tracker-app ${showTabBar ? 'has-tab-bar' : ''}`}>
+      {announcement.open &&
+        canShowReleaseAnnouncement({
+          loading,
+          tab,
+          hasOtherDialog: message !== null || completionRecords.length > 0,
+        }) && <ReleaseAnnouncement release={announcement.release} onClose={announcement.dismiss} />}
       <EdgeSwipeBack onBack={navigateBack} enabled={canNavigateBack} />
       <BackgroundActivityBar label={backgroundActivityLabel} />
       {message && (
@@ -1111,6 +1121,8 @@ export function App() {
               account={user}
               onOpenProfile={() => setTab('profile')}
               onOpenAdmin={isAdmin ? () => setTab('admin') : undefined}
+              releaseVersion={announcement.release.version}
+              onOpenReleaseNotes={announcement.show}
             />
           </CachedTabPanel>
         )}
@@ -5548,7 +5560,11 @@ function SettingsScreen({
   account,
   onOpenProfile,
   onOpenAdmin,
+  releaseVersion,
+  onOpenReleaseNotes,
 }: {
+  releaseVersion: string;
+  onOpenReleaseNotes: () => void;
   account: User | null;
   onOpenProfile: () => void;
   /** Present only for administrators. */
@@ -5766,6 +5782,22 @@ function SettingsScreen({
 
   return (
     <section className="settings-screen content-page">
+      <section className="settings-panel panel" aria-labelledby="release-settings-title">
+        <header>
+          <div>
+            <p className="section-kicker">VERSION {releaseVersion}</p>
+            <h2 id="release-settings-title">What's new</h2>
+          </div>
+          <button
+            type="button"
+            className="profile-secondary release-settings-action"
+            onClick={onOpenReleaseNotes}
+          >
+            View changes
+          </button>
+        </header>
+        <p>Read the latest release notes and see what's changed in Gym Logger.</p>
+      </section>
       {account && (
         <section className="settings-panel panel" aria-labelledby="account-settings-title">
           <header>

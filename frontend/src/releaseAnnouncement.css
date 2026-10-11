@@ -1,0 +1,61 @@
+.release-announcement {
+  width: min(32rem, calc(100% - 2rem));
+}
+
+.release-announcement-body {
+  padding: 1.25rem;
+}
+
+.release-announcement-body h3 {
+  margin: 0 0 0.5rem;
+  font-size: 1.125rem;
+  color: var(--p-ink);
+}
+
+.release-announcement-body p,
+.release-announcement-body li {
+  color: var(--p-ink-2);
+  font-size: 0.9375rem;
+  line-height: 1.6;
+}
+
+.release-announcement-body p {
+  margin: 0;
+}
+
+.release-announcement-body ul {
+  margin: 1.25rem 0;
+  padding-left: 1.25rem;
+}
+
+.release-announcement-body li + li {
+  margin-top: 0.75rem;
+}
+
+.release-announcement-body li::marker {
+  color: var(--p-accent);
+}
+
+.release-announcement-body a {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2.75rem;
+  color: var(--p-accent-text);
+  font-weight: 650;
+  text-underline-offset: 0.2em;
+}
+
+.release-announcement .popup-dialog-actions {
+  display: flex;
+  padding: 1rem 1.25rem;
+}
+
+.release-announcement .popup-primary-action {
+  width: 100%;
+}
+
+.release-settings-action {
+  width: auto;
+  flex-shrink: 0;
+}

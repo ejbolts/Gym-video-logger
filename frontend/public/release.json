@@ -1,0 +1,11 @@
+{
+  "version": "0.2.0",
+  "title": "Stay up to date",
+  "summary": "Gym Logger now lets you know when a new version is ready.",
+  "changes": [
+    "See a summary of new features when you return to the app after an update.",
+    "Open What's new in Settings to read the latest changes again.",
+    "Follow the GitHub release notes for more detail."
+  ],
+  "url": "https://github.com/ejbolts/Gym-video-logger/blob/master/docs/RELEASE-NOTES.md#020"
+}
