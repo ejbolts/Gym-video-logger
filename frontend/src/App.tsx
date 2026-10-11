@@ -5808,7 +5808,7 @@ function SettingsScreen({
               <h2 id="account-settings-title">{account.display_name}</h2>
             </div>
           </header>
-          <p>{account.email}</p>
+          <p>{account.username}</p>
           <button type="button" className="profile-secondary" onClick={onOpenProfile}>
             Manage profile
           </button>

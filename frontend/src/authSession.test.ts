@@ -19,7 +19,7 @@ class MemoryStorage implements CleanupStorage {
 
 const user: User = {
   id: 'user-1',
-  email: 'lifter@example.com',
+  username: 'lifter',
   display_name: 'Lifter',
   is_admin: false,
   can_upload_videos: true,

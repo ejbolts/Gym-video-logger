@@ -476,7 +476,7 @@ export interface CsvImportResult {
 
 export interface User {
   id: string;
-  email: string;
+  username: string;
   display_name: string;
   is_admin: boolean;
   can_upload_videos: boolean;
@@ -488,7 +488,7 @@ export type VideoUploadMode = 'off' | 'admin' | 'everyone';
 
 export interface AdminUser {
   id: string;
-  email: string;
+  username: string;
   display_name: string;
   is_admin: boolean;
   disabled_at: string | null;
@@ -550,12 +550,12 @@ export interface AuthConfig {
 }
 
 export interface LoginInput {
-  email: string;
+  username: string;
   password: string;
 }
 
 export interface RegisterInput {
-  email: string;
+  username: string;
   password: string;
   display_name: string;
   invite_code: string | null;
@@ -563,5 +563,5 @@ export interface RegisterInput {
 
 export interface ProfileUpdateInput {
   display_name?: string;
-  email?: string;
+  username?: string;
 }

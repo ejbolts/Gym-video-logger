@@ -45,7 +45,7 @@ TEST_PASSWORD = "correct horse battery staple"
 
 def register_user(
     test_client: TestClient,
-    email: str = "owner@example.com",
+    username: str = "owner",
     display_name: str = "Owner",
     password: str = TEST_PASSWORD,
 ) -> dict:
@@ -53,7 +53,7 @@ def register_user(
     response = test_client.post(
         "/api/auth/register",
         json={
-            "email": email,
+            "username": username,
             "password": password,
             "display_name": display_name,
             "invite_code": TEST_INVITE_CODE,
@@ -80,16 +80,16 @@ def client(anonymous_client):
 def other_client(client):
     """A second, independent browser signed in as a different non-admin account."""
     second = TestClient(client.app)
-    second.user = register_user(second, "other@example.com", "Other")
+    second.user = register_user(second, "other", "Other")
     yield second
     second.close()
 
 
-def make_user(email: str = "direct@example.com", *, is_admin: bool = False) -> str:
+def make_user(username: str = "direct", *, is_admin: bool = False) -> str:
     """Insert an account row directly, for tests that exercise internals without HTTP."""
     with SessionLocal() as db:
         user = User(
-            email=email, display_name="Direct", password_hash="not-a-real-hash", is_admin=is_admin
+            username=username, display_name="Direct", password_hash="not-a-real-hash", is_admin=is_admin
         )
         db.add(user)
         db.commit()

@@ -56,7 +56,7 @@ VIDEO_QUEUE_STATUSES = (
 
 class AdminUserRead(BaseModel):
     id: str
-    email: str
+    username: str
     display_name: str
     is_admin: bool
     disabled_at: datetime | None
@@ -161,7 +161,7 @@ def _admin_user_reads(
     return [
         AdminUserRead(
             id=user.id,
-            email=user.email,
+            username=user.username,
             display_name=user.display_name,
             is_admin=user.is_admin,
             disabled_at=as_utc(user.disabled_at) if user.disabled_at else None,
@@ -188,7 +188,7 @@ def _settings_read(db: Session, settings: Settings) -> ServerSettingsRead:
 
 @admin_router.get("/users", response_model=list[AdminUserRead])
 def list_users(db: DbDependency, settings: AppSettings) -> list[AdminUserRead]:
-    users = db.scalars(select(User).order_by(User.created_at, User.email))
+    users = db.scalars(select(User).order_by(User.created_at, User.username))
     return _admin_user_reads(db, settings, list(users))
 
 

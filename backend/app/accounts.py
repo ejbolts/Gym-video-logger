@@ -78,7 +78,7 @@ from .training_metrics import rebuild_personal_records
 
 DbDependency = Annotated[Session, Depends(get_db)]
 Throttle = Annotated[LoginThrottle, Depends(get_login_throttle)]
-EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]{2,}$")
+USERNAME_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{2,31}")
 REGISTRATION_LOCK = threading.Lock()
 
 # Every table that carries its own user_id. Rows with a NULL user_id predate accounts and are
@@ -97,15 +97,18 @@ LEGACY_OWNED_MODELS = (
 )
 
 
-class EmailTakenError(Exception):
+class UsernameTakenError(Exception):
     pass
 
 
-def normalize_email(value: str) -> str:
-    email = value.strip().casefold()
-    if len(email) > 254 or not EMAIL_PATTERN.match(email):
-        raise ValueError("Enter a valid email address.")
-    return email
+def normalize_username(value: str) -> str:
+    username = value.strip()
+    if not USERNAME_PATTERN.fullmatch(username):
+        raise ValueError(
+            "Use 3-32 letters, numbers, dots, underscores or hyphens, "
+            "starting with a letter or number."
+        )
+    return username.lower()
 
 
 def _clean_display_name(value: object) -> object:
@@ -113,15 +116,15 @@ def _clean_display_name(value: object) -> object:
 
 
 class RegisterRequest(BaseModel):
-    email: str
+    username: str
     password: str = Field(min_length=MIN_PASSWORD_LENGTH, max_length=MAX_PASSWORD_LENGTH)
     display_name: str = Field(min_length=1, max_length=80)
     invite_code: str | None = Field(default=None, max_length=200)
 
-    @field_validator("email")
+    @field_validator("username")
     @classmethod
-    def validate_email(cls, value: str) -> str:
-        return normalize_email(value)
+    def validate_username(cls, value: str) -> str:
+        return normalize_username(value)
 
     @field_validator("display_name", mode="before")
     @classmethod
@@ -130,18 +133,18 @@ class RegisterRequest(BaseModel):
 
 
 class LoginRequest(BaseModel):
-    email: str = Field(max_length=320)
+    username: str = Field(max_length=320)
     password: str = Field(min_length=1, max_length=MAX_PASSWORD_LENGTH)
 
 
 class ProfileUpdate(BaseModel):
     display_name: str | None = Field(default=None, min_length=1, max_length=80)
-    email: str | None = None
+    username: str | None = None
 
-    @field_validator("email")
+    @field_validator("username")
     @classmethod
-    def validate_email(cls, value: str | None) -> str | None:
-        return None if value is None else normalize_email(value)
+    def validate_username(cls, value: str | None) -> str | None:
+        return None if value is None else normalize_username(value)
 
     @field_validator("display_name", mode="before")
     @classmethod
@@ -165,7 +168,7 @@ class AuthConfigRead(BaseModel):
 
 class UserRead(BaseModel):
     id: str
-    email: str
+    username: str
     display_name: str
     is_admin: bool
     can_upload_videos: bool
@@ -176,7 +179,7 @@ def user_to_read(db: Session, user: User, settings: Settings) -> UserRead:
     video_uploads = load_runtime_settings(db, settings).video_uploads
     return UserRead(
         id=user.id,
-        email=user.email,
+        username=user.username,
         display_name=user.display_name,
         is_admin=user.is_admin,
         can_upload_videos=can_upload_videos(user, video_uploads),
@@ -209,20 +212,20 @@ def create_user(
     db: Session,
     settings: Settings,
     *,
-    email: str,
+    username: str,
     display_name: str,
     password: str,
     force_admin: bool = False,
 ) -> User:
     """Create an account. The first account becomes admin and claims all legacy data."""
-    email = normalize_email(email)
+    username = normalize_username(username)
     password_hash = hash_password(password)
     with REGISTRATION_LOCK:
         first_user = db.scalar(select(func.count(User.id))) == 0
-        if db.scalar(select(User.id).where(User.email == email)) is not None:
-            raise EmailTakenError
+        if db.scalar(select(User.id).where(User.username == username)) is not None:
+            raise UsernameTakenError
         user = User(
-            email=email,
+            username=username,
             display_name=display_name,
             password_hash=password_hash,
             is_admin=first_user or force_admin,
@@ -238,7 +241,7 @@ def create_user(
             db.commit()
         except IntegrityError as error:
             db.rollback()
-            raise EmailTakenError from error
+            raise UsernameTakenError from error
     seed_new_account(db, settings, user)
     return user
 
@@ -375,12 +378,14 @@ def register(
         user = create_user(
             db,
             settings,
-            email=payload.email,
+            username=payload.username,
             display_name=payload.display_name,
             password=payload.password,
         )
-    except EmailTakenError as error:
-        raise api_error(409, "email_taken", "An account with that email already exists.") from error
+    except UsernameTakenError as error:
+        raise api_error(
+            409, "username_taken", "An account with that username already exists."
+        ) from error
     token = create_user_session(db, user, settings, request.headers.get("user-agent"))
     set_session_cookie(response, token, settings)
     return user_to_read(db, user, settings)
@@ -395,22 +400,22 @@ def login(
     settings: AppSettings,
     throttle: Throttle,
 ) -> UserRead:
-    email = payload.email.strip().casefold()
-    ip_key, email_key = f"ip:{client_ip(request)}", f"email:{email}"
+    username = payload.username.strip().lower()
+    ip_key, username_key = f"ip:{client_ip(request)}", f"username:{username}"
     if throttle.is_blocked(ip_key) or throttle.is_blocked(
-        email_key, max_failures=ACCOUNT_LOGIN_MAX_FAILURES
+        username_key, max_failures=ACCOUNT_LOGIN_MAX_FAILURES
     ):
         raise too_many_attempts()
-    user = db.scalar(select(User).where(User.email == email))
+    user = db.scalar(select(User).where(User.username == username))
     if user is None:
-        burn_password_check(payload.password)  # Equalize timing so unknown emails look alike.
+        burn_password_check(payload.password)  # Equalize timing so unknown usernames look alike.
         valid = False
     else:
         valid = verify_password(payload.password, user.password_hash)
     if not valid or user is None:
-        throttle.record_failure(ip_key, email_key)
-        raise api_error(401, "invalid_credentials", "Incorrect email or password.")
-    throttle.reset(email_key)
+        throttle.record_failure(ip_key, username_key)
+        raise api_error(401, "invalid_credentials", "Incorrect username or password.")
+    throttle.reset(username_key)
     if user.disabled_at is not None:
         # Only reported after a correct password, so it reveals nothing to a guesser.
         raise api_error(
@@ -441,16 +446,20 @@ def update_profile(
 ) -> UserRead:
     if payload.display_name is not None:
         user.display_name = payload.display_name
-    if payload.email is not None and payload.email != user.email:
-        taken = db.scalar(select(User.id).where(User.email == payload.email, User.id != user.id))
+    if payload.username is not None and payload.username != user.username:
+        taken = db.scalar(
+            select(User.id).where(User.username == payload.username, User.id != user.id)
+        )
         if taken is not None:
-            raise api_error(409, "email_taken", "An account with that email already exists.")
-        user.email = payload.email
+            raise api_error(409, "username_taken", "An account with that username already exists.")
+        user.username = payload.username
     try:
         db.commit()
     except IntegrityError as error:
         db.rollback()
-        raise api_error(409, "email_taken", "An account with that email already exists.") from error
+        raise api_error(
+            409, "username_taken", "An account with that username already exists."
+        ) from error
     db.refresh(user)
     return user_to_read(db, user, settings)
 

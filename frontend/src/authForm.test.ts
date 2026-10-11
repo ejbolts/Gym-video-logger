@@ -4,6 +4,8 @@ import {
   authErrorMessage,
   submitAuthForm,
   validateAuthForm,
+  validateUsername,
+  USERNAME_HINT,
   type AuthApi,
   type AuthFormValues,
 } from './authForm';
@@ -11,7 +13,7 @@ import type { AuthConfig, User } from './types';
 
 const user: User = {
   id: 'user-1',
-  email: 'lifter@example.com',
+  username: 'lifter',
   display_name: 'Lifter',
   is_admin: false,
   can_upload_videos: true,
@@ -21,7 +23,7 @@ const open: AuthConfig = { registration_open: true, invite_code_required: false 
 const invited: AuthConfig = { registration_open: true, invite_code_required: true };
 const values: AuthFormValues = {
   displayName: '  Lifter ',
-  email: ' lifter@example.com ',
+  username: ' lifter ',
   password: 'correct horse battery',
   inviteCode: '',
 };
@@ -38,7 +40,7 @@ describe('authErrorMessage', () => {
   it.each([
     ['invalid_credentials', 401, 'do not match'],
     ['too_many_attempts', 429, 'Too many attempts'],
-    ['email_taken', 409, 'already exists'],
+    ['username_taken', 409, 'already exists'],
     ['registration_closed', 403, 'not being accepted'],
     ['setup_required', 403, 'not set up yet'],
     ['invalid_invite_code', 403, 'invite code is not valid'],
@@ -62,10 +64,12 @@ describe('authErrorMessage', () => {
 });
 
 describe('validateAuthForm', () => {
-  it('only requires an email and password to sign in', () => {
+  it('only requires a username and password to sign in', () => {
     expect(validateAuthForm('sign-in', { ...values, password: 'short' }, open)).toEqual({});
-    expect(validateAuthForm('sign-in', { ...values, email: 'nope', password: '' }, open)).toEqual({
-      email: 'Enter a valid email address.',
+    expect(
+      validateAuthForm('sign-in', { ...values, username: 'bad name', password: '' }, open),
+    ).toEqual({
+      username: USERNAME_HINT,
       password: 'Enter your password.',
     });
   });
@@ -74,7 +78,7 @@ describe('validateAuthForm', () => {
     expect(
       validateAuthForm(
         'create-account',
-        { displayName: ' ', email: 'a@b.co', password: '123456789', inviteCode: '' },
+        { displayName: ' ', username: 'aaa', password: '123456789', inviteCode: '' },
         invited,
       ),
     ).toEqual({
@@ -86,15 +90,28 @@ describe('validateAuthForm', () => {
   });
 });
 
+describe('validateUsername', () => {
+  it.each(['abc', '123', '  Lift.er_01-2  ', 'a'.repeat(32)])('accepts %s', (username) => {
+    expect(validateUsername(username)).toBeNull();
+  });
+
+  it.each(['', 'ab', 'a'.repeat(33), '.lifter', 'lift er', 'lifter@example.com', 'lífter', 'ßab'])(
+    'rejects %s',
+    (username) => {
+      expect(validateUsername(username)).toBe(USERNAME_HINT);
+    },
+  );
+});
+
 describe('submitAuthForm', () => {
-  it('signs in with the trimmed email and returns the user', async () => {
+  it('signs in with the trimmed username and returns the user', async () => {
     const api = endpoints();
 
     const result = await submitAuthForm('sign-in', values, open, api);
 
     expect(result).toEqual({ ok: true, user });
     expect(api.login).toHaveBeenCalledWith({
-      email: 'lifter@example.com',
+      username: 'lifter',
       password: 'correct horse battery',
     });
     expect(api.register).not.toHaveBeenCalled();
@@ -107,7 +124,7 @@ describe('submitAuthForm', () => {
     await submitAuthForm('create-account', { ...values, inviteCode: ' abc ' }, invited, api);
 
     expect(api.register).toHaveBeenNthCalledWith(1, {
-      email: 'lifter@example.com',
+      username: 'lifter',
       password: 'correct horse battery',
       display_name: 'Lifter',
       invite_code: null,
@@ -116,6 +133,20 @@ describe('submitAuthForm', () => {
       2,
       expect.objectContaining({ invite_code: 'abc' }),
     );
+  });
+
+  it('normalizes case and sends usernames without an email field', async () => {
+    const api = endpoints();
+    const mixed = { ...values, username: '  Lift.er_01-2  ' };
+    await submitAuthForm('sign-in', mixed, open, api);
+    await submitAuthForm('create-account', mixed, open, api);
+    expect(api.login).toHaveBeenCalledWith({ username: 'lift.er_01-2', password: values.password });
+    expect(api.register).toHaveBeenCalledWith({
+      username: 'lift.er_01-2',
+      password: values.password,
+      display_name: 'Lifter',
+      invite_code: null,
+    });
   });
 
   it('does not call the server when validation fails', async () => {
@@ -150,9 +181,9 @@ describe('submitAuthForm', () => {
     });
   });
 
-  it('flags the email when taken and asks for an invite code when it is rejected', async () => {
+  it('flags the username when taken and asks for an invite code when it is rejected', async () => {
     const taken = endpoints({
-      register: vi.fn().mockRejectedValue(new ApiError('x', 'email_taken', 409)),
+      register: vi.fn().mockRejectedValue(new ApiError('x', 'username_taken', 409)),
     });
     const rejected = endpoints({
       register: vi.fn().mockRejectedValue(new ApiError('x', 'invalid_invite_code', 403)),
@@ -160,7 +191,7 @@ describe('submitAuthForm', () => {
 
     expect(await submitAuthForm('create-account', values, open, taken)).toMatchObject({
       ok: false,
-      fieldErrors: { email: expect.any(String) },
+      fieldErrors: { username: expect.any(String) },
     });
     expect(await submitAuthForm('create-account', values, open, rejected)).toMatchObject({
       ok: false,

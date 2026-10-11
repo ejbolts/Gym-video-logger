@@ -73,9 +73,9 @@ def app_client(**settings_overrides):
         yield test_client
 
 
-def login(test_client: TestClient, email: str, password: str = TEST_PASSWORD, **kwargs):
+def login(test_client: TestClient, username: str, password: str = TEST_PASSWORD, **kwargs):
     return test_client.post(
-        "/api/auth/login", json={"email": email, "password": password}, **kwargs
+        "/api/auth/login", json={"username": username, "password": password}, **kwargs
     )
 
 
@@ -138,7 +138,7 @@ def test_login_upgrades_a_hash_made_with_older_cost_settings(client):
         db.commit()
     assert password_needs_rehash(user.password_hash)
 
-    assert login(TestClient(client.app), "owner@example.com").status_code == 200
+    assert login(TestClient(client.app), "owner").status_code == 200
 
     with SessionLocal() as db:
         upgraded = db.scalar(select(User)).password_hash
@@ -153,7 +153,7 @@ def test_register_signs_in_and_me_returns_the_user(anonymous_client):
     response = anonymous_client.post(
         "/api/auth/register",
         json={
-            "email": "  Lifter@Example.COM ",
+            "username": "  Lifter ",
             "password": TEST_PASSWORD,
             "display_name": "  Lee   Lifter ",
             "invite_code": TEST_INVITE_CODE,
@@ -164,13 +164,13 @@ def test_register_signs_in_and_me_returns_the_user(anonymous_client):
     body = response.json()
     assert set(body) == {
         "id",
-        "email",
+        "username",
         "display_name",
         "is_admin",
         "can_upload_videos",
         "created_at",
     }
-    assert body["email"] == "lifter@example.com"
+    assert body["username"] == "lifter"
     assert body["display_name"] == "Lee Lifter"
     assert body["is_admin"] is True
     assert body["can_upload_videos"] is True
@@ -195,7 +195,7 @@ def test_secure_cookie_flag_follows_setting():
         response = secure_client.post(
             "/api/auth/register",
             json={
-                "email": "a@example.com",
+                "username": "aaa",
                 "password": TEST_PASSWORD,
                 "display_name": "A",
                 "invite_code": TEST_INVITE_CODE,
@@ -204,9 +204,9 @@ def test_secure_cookie_flag_follows_setting():
         assert "secure" in response.headers["set-cookie"].lower()
 
 
-def test_register_validation_and_duplicate_email(client):
+def test_register_validation_and_duplicate_username(client):
     base = {
-        "email": "new@example.com",
+        "username": "new",
         "password": TEST_PASSWORD,
         "display_name": "New",
         "invite_code": TEST_INVITE_CODE,
@@ -217,17 +217,34 @@ def test_register_validation_and_duplicate_email(client):
     assert (
         client.post("/api/auth/register", json={**base, "password": "x" * 257}).status_code == 422
     )
-    assert client.post("/api/auth/register", json={**base, "email": "nope"}).status_code == 422
+    for username in ("ab", "x" * 33, ".lifter", "lift er", "lifter@example.com", "lífter", "ßab"):
+        invalid = client.post("/api/auth/register", json={**base, "username": username})
+        assert invalid.status_code == 422, username
     assert client.post("/api/auth/register", json={**base, "display_name": " "}).status_code == 422
     assert (
         client.post("/api/auth/register", json={**base, "display_name": "x" * 81}).status_code
         == 422
     )
     duplicate = client.post(
-        "/api/auth/register", json={**base, "email": client.user["email"].upper()}
+        "/api/auth/register", json={**base, "username": client.user["username"].upper()}
     )
     assert duplicate.status_code == 409
-    assert duplicate.json()["error"]["code"] == "email_taken"
+    assert duplicate.json()["error"]["code"] == "username_taken"
+
+
+def test_registration_accepts_username_boundaries_and_punctuation(anonymous_client):
+    for username in ("123", "a" * 32, "Lift.er_01-2"):
+        browser = TestClient(anonymous_client.app)
+        user = register_user(browser, f"  {username}  ")
+        assert user["username"] == username.lower()
+        assert login(TestClient(anonymous_client.app), username.upper()).status_code == 200
+        assert "email" not in user
+
+
+def test_email_only_requests_cannot_register_or_sign_in(anonymous_client):
+    body = {"email": "owner@example.com", "password": TEST_PASSWORD, "display_name": "Owner"}
+    assert anonymous_client.post("/api/auth/register", json=body).status_code == 422
+    assert anonymous_client.post("/api/auth/login", json=body).status_code == 422
 
 
 def test_login_logout_and_me(client):
@@ -236,7 +253,7 @@ def test_login_logout_and_me(client):
     assert browser.get("/api/auth/me").status_code == 401
     assert browser.get("/api/auth/me").json()["error"]["code"] == "not_authenticated"
 
-    response = login(browser, "OWNER@example.com")
+    response = login(browser, "OWNER")
     assert response.status_code == 200
     assert response.json()["id"] == client.user["id"]
     assert browser.get("/api/auth/me").status_code == 200
@@ -258,11 +275,11 @@ def test_logout_revokes_the_server_side_session_even_if_the_cookie_is_replayed(c
     assert replay.get("/api/auth/me").status_code == 401
 
 
-def test_wrong_password_and_unknown_email_are_indistinguishable(anonymous_client):
+def test_wrong_password_and_unknown_username_are_indistinguishable(anonymous_client):
     register_user(anonymous_client)
     browser = TestClient(anonymous_client.app)
-    wrong = login(browser, "owner@example.com", "not the password")
-    unknown = login(browser, "nobody@example.com", "not the password")
+    wrong = login(browser, "owner", "not the password")
+    unknown = login(browser, "nobody", "not the password")
     assert wrong.status_code == unknown.status_code == 401
     assert wrong.json() == unknown.json()
     assert wrong.json()["error"]["code"] == "invalid_credentials"
@@ -273,48 +290,48 @@ def test_login_is_throttled_after_repeated_failures(anonymous_client):
     register_user(anonymous_client)
     browser = TestClient(anonymous_client.app)
     for _ in range(10):
-        assert login(browser, "owner@example.com", "wrong password!").status_code == 401
-    blocked = login(browser, "owner@example.com", TEST_PASSWORD)
+        assert login(browser, "owner", "wrong password!").status_code == 401
+    blocked = login(browser, "owner", TEST_PASSWORD)
     assert blocked.status_code == 429
     assert blocked.json()["error"]["code"] == "too_many_attempts"
-    # The client address is limited too, whichever email is tried.
-    assert login(browser, "someone-else@example.com", "wrong password!").status_code == 429
+    # The client address is limited too, whichever username is tried.
+    assert login(browser, "someone-else", "wrong password!").status_code == 429
 
 
-def test_login_throttle_window_expires_and_success_resets_email_counter():
+def test_login_throttle_window_expires_and_success_resets_username_counter():
     now = [0.0]
     throttle = LoginThrottle(max_failures=3, window_seconds=60, clock=lambda: now[0])
     for _ in range(3):
-        throttle.record_failure("email:a", "ip:1")
-    assert throttle.is_blocked("email:a")
+        throttle.record_failure("username:a", "ip:1")
+    assert throttle.is_blocked("username:a")
     assert throttle.is_blocked("ip:1")
-    assert not throttle.is_blocked("email:b")
+    assert not throttle.is_blocked("username:b")
     now[0] = 61
-    assert not throttle.is_blocked("email:a", "ip:1")
+    assert not throttle.is_blocked("username:a", "ip:1")
     for _ in range(3):
-        throttle.record_failure("email:a")
-    throttle.reset("email:a")
-    assert not throttle.is_blocked("email:a")
+        throttle.record_failure("username:a")
+    throttle.reset("username:a")
+    assert not throttle.is_blocked("username:a")
 
 
 def test_failures_from_other_addresses_cannot_cheaply_lock_an_account(anonymous_client):
     register_user(anonymous_client)
     throttle = anonymous_client.app.state.login_throttle
-    # Nine attackers' addresses each burn their own allowance against the owner's email.
+    # Nine attackers' addresses each burn their own allowance against the owner's username.
     for attacker in range(9):
         for _ in range(10):
-            throttle.record_failure(f"ip:203.0.113.{attacker}", "email:owner@example.com")
+            throttle.record_failure(f"ip:203.0.113.{attacker}", "username:owner")
     browser = TestClient(anonymous_client.app)
-    assert login(browser, "owner@example.com").status_code == 200  # Also resets the count.
+    assert login(browser, "owner").status_code == 200  # Also resets the count.
 
     # Only a sustained attack from many addresses reaches the per-account ceiling.
     for attacker in range(10):
         for _ in range(10):
-            throttle.record_failure(f"ip:198.51.100.{attacker}", "email:owner@example.com")
-    blocked = login(TestClient(anonymous_client.app), "owner@example.com")
+            throttle.record_failure(f"ip:198.51.100.{attacker}", "username:owner")
+    blocked = login(TestClient(anonymous_client.app), "owner")
     assert blocked.status_code == 429
-    register_user(browser, "fresh@example.com", "Fresh")
-    assert login(browser, "fresh@example.com").status_code == 200
+    register_user(browser, "fresh", "Fresh")
+    assert login(browser, "fresh").status_code == 200
 
 
 # --- registration policy ---
@@ -356,7 +373,7 @@ def test_first_account_cannot_be_claimed_from_the_browser_without_an_invite_code
         }
         response = open_client.post(
             "/api/auth/register",
-            json={"email": "first@example.com", "password": TEST_PASSWORD, "display_name": "Me"},
+            json={"username": "first", "password": TEST_PASSWORD, "display_name": "Me"},
         )
         assert response.status_code == 403
         assert response.json()["error"]["code"] == "setup_required"
@@ -366,12 +383,12 @@ def test_first_account_cannot_be_claimed_from_the_browser_without_an_invite_code
         assert db.scalar(select(CardioSession.user_id)) is None  # Legacy data is still unclaimed.
 
     # Once the owner exists (for example via the CLI), open registration works without a code.
-    make_user("owner@example.com", is_admin=True)
+    make_user("owner", is_admin=True)
     with app_client(registration_invite_code=None, allow_registration=True) as open_client:
         assert open_client.get("/api/auth/config").json()["registration_open"] is True
         joined = open_client.post(
             "/api/auth/register",
-            json={"email": "friend@example.com", "password": TEST_PASSWORD, "display_name": "F"},
+            json={"username": "friend", "password": TEST_PASSWORD, "display_name": "F"},
         )
         assert joined.status_code == 201
         assert joined.json()["is_admin"] is False
@@ -383,7 +400,7 @@ def test_invite_code_is_required_when_configured():
             "registration_open": True,
             "invite_code_required": True,
         }
-        body = {"email": "a@example.com", "password": TEST_PASSWORD, "display_name": "A"}
+        body = {"username": "aaa", "password": TEST_PASSWORD, "display_name": "A"}
         for code in (None, "", "wrong", "open-sesame "):
             response = invite_client.post("/api/auth/register", json={**body, "invite_code": code})
             assert response.status_code == 403
@@ -398,7 +415,7 @@ def test_invite_code_is_required_when_configured():
 
 def test_invite_code_guessing_is_throttled():
     with app_client(registration_invite_code="open-sesame") as invite_client:
-        body = {"email": "a@example.com", "password": TEST_PASSWORD, "display_name": "A"}
+        body = {"username": "aaa", "password": TEST_PASSWORD, "display_name": "A"}
         for _ in range(10):
             invite_client.post("/api/auth/register", json={**body, "invite_code": "guess"})
         response = invite_client.post(
@@ -417,12 +434,12 @@ def test_closed_registration_still_allows_the_first_account():
         other = TestClient(closed_client.app)
         response = other.post(
             "/api/auth/register",
-            json={"email": "late@example.com", "password": TEST_PASSWORD, "display_name": "Late"},
+            json={"username": "late", "password": TEST_PASSWORD, "display_name": "Late"},
         )
         assert response.status_code == 403
         assert response.json()["error"]["code"] == "registration_closed"
         # Existing users can still sign in.
-        assert login(other, "owner@example.com").status_code == 200
+        assert login(other, "owner").status_code == 200
 
 
 def test_only_the_first_account_is_admin_and_video_access_follows_policy(client, other_client):
@@ -431,9 +448,9 @@ def test_only_the_first_account_is_admin_and_video_access_follows_policy(client,
     assert other_client.user["can_upload_videos"] is False
     assert other_client.get("/api/auth/me").json()["can_upload_videos"] is False
     with app_client(video_uploads="everyone") as open_client:
-        member = register_user(open_client, "first@example.com")
+        member = register_user(open_client, "first")
         assert member["can_upload_videos"] is True
-        second = register_user(TestClient(open_client.app), "second@example.com")
+        second = register_user(TestClient(open_client.app), "second")
         assert second["is_admin"] is False
         assert second["can_upload_videos"] is True
 
@@ -515,7 +532,7 @@ def test_first_user_claims_legacy_rows_without_duplicating_the_catalog(anonymous
 
     # The next account starts clean: nothing legacy leaks to it.
     newcomer = TestClient(anonymous_client.app)
-    register_user(newcomer, "new@example.com", "New")
+    register_user(newcomer, "new", "New")
     assert newcomer.get("/api/workouts").json() == []
     assert newcomer.get("/api/body-measurements").json() == []
     assert newcomer.get("/api/training-preferences").json()["week_start"] == "monday"
@@ -525,9 +542,9 @@ def test_first_user_claims_legacy_rows_without_duplicating_the_catalog(anonymous
 
 def test_sample_data_is_seeded_per_new_account_and_removed_per_account():
     with app_client(seed_sample_data=True) as sample_client:
-        first = register_user(sample_client, "one@example.com")
+        first = register_user(sample_client, "one")
         second_browser = TestClient(sample_client.app)
-        register_user(second_browser, "two@example.com")
+        register_user(second_browser, "two")
         assert len(sample_client.get("/api/workouts").json()) == 5
         assert len(second_browser.get("/api/workouts").json()) == 5
         assert len(second_browser.get("/api/body-measurements").json()) == 3
@@ -559,30 +576,28 @@ def test_first_user_with_legacy_workouts_does_not_receive_sample_data():
 
 
 def test_profile_update(client, other_client):
-    updated = client.patch(
-        "/api/profile", json={"display_name": " New  Name ", "email": "New@Example.com"}
-    )
+    updated = client.patch("/api/profile", json={"display_name": " New  Name ", "username": "New"})
     assert updated.status_code == 200
     assert updated.json()["display_name"] == "New Name"
-    assert updated.json()["email"] == "new@example.com"
-    assert client.get("/api/auth/me").json()["email"] == "new@example.com"
-    assert login(TestClient(client.app), "new@example.com").status_code == 200
+    assert updated.json()["username"] == "new"
+    assert client.get("/api/auth/me").json()["username"] == "new"
+    assert login(TestClient(client.app), "new").status_code == 200
 
     only_name = client.patch("/api/profile", json={"display_name": "Solo"})
-    assert only_name.json()["email"] == "new@example.com"
-    assert client.patch("/api/profile", json={"email": "same@x"}).status_code == 422
+    assert only_name.json()["username"] == "new"
+    assert client.patch("/api/profile", json={"username": "same@x"}).status_code == 422
     assert client.patch("/api/profile", json={"display_name": ""}).status_code == 422
 
-    taken = client.patch("/api/profile", json={"email": other_client.user["email"]})
+    taken = client.patch("/api/profile", json={"username": other_client.user["username"]})
     assert taken.status_code == 409
-    assert taken.json()["error"]["code"] == "email_taken"
-    # Re-submitting your own email is not a conflict.
-    assert client.patch("/api/profile", json={"email": "new@example.com"}).status_code == 200
+    assert taken.json()["error"]["code"] == "username_taken"
+    # Re-submitting your own username is not a conflict.
+    assert client.patch("/api/profile", json={"username": "new"}).status_code == 200
 
 
 def test_password_change_revokes_other_sessions_only(client):
     phone = TestClient(client.app)
-    assert login(phone, "owner@example.com").status_code == 200
+    assert login(phone, "owner").status_code == 200
 
     wrong = client.put(
         "/api/profile/password",
@@ -606,8 +621,8 @@ def test_password_change_revokes_other_sessions_only(client):
     assert client.get("/api/auth/me").status_code == 200
     assert phone.get("/api/auth/me").status_code == 401
     fresh = TestClient(client.app)
-    assert login(fresh, "owner@example.com").status_code == 401
-    assert login(fresh, "owner@example.com", "brand new password 1").status_code == 200
+    assert login(fresh, "owner").status_code == 401
+    assert login(fresh, "owner", "brand new password 1").status_code == 200
 
 
 # --- account deletion ---
@@ -766,7 +781,7 @@ def test_account_deletion_removes_everything_the_user_owns(client, other_client,
     assert not own_upload_dir.exists()
     # Only the other account's photo (full + thumbnail) is left on disk.
     assert len(list(settings.machine_photos_dir.iterdir())) == 2
-    assert login(TestClient(client.app), "owner@example.com").status_code == 401
+    assert login(TestClient(client.app), "owner").status_code == 401
 
     # The other account is untouched.
     assert other_client.get("/api/auth/me").status_code == 200
@@ -820,7 +835,7 @@ def test_cross_origin_unsafe_requests_are_rejected(client):
         rejected = client.request(method, "/api/exercises/x/favorite", headers=evil, json={})
         assert rejected.status_code == 403
     assert client.post("/api/auth/logout", headers=evil).status_code == 403
-    assert login(TestClient(client.app), "owner@example.com", headers=evil).status_code == 403
+    assert login(TestClient(client.app), "owner", headers=evil).status_code == 403
     assert client.post("/api/auth/logout", headers={"Origin": "null"}).status_code == 403
     # Reads are not state-changing, so they are not origin-checked.
     assert client.get("/api/exercises", headers=evil).status_code == 200
@@ -900,13 +915,13 @@ def test_expired_sessions_are_pruned_when_someone_signs_in(client):
             )
         )
         db.commit()
-    assert login(TestClient(client.app), "owner@example.com").status_code == 200
+    assert login(TestClient(client.app), "owner").status_code == 200
     with SessionLocal() as db:
         assert db.scalar(select(func.count(UserSession.id))) == 2
 
 
 def test_sign_in_lasts_ninety_days_by_default(client):
-    response = login(TestClient(client.app), "owner@example.com")
+    response = login(TestClient(client.app), "owner")
     assert f"max-age={90 * 24 * 60 * 60}" in response.headers["set-cookie"].lower()
     with SessionLocal() as db:
         expires = db.scalar(select(UserSession.expires_at)).replace(tzinfo=UTC)
@@ -1214,7 +1229,7 @@ def test_notifications_only_reach_the_owning_users_subscriptions(monkeypatch, tm
 
     from app.notifications import send_push_notification
 
-    alice, bob = make_user("alice@example.com"), make_user("bob@example.com")
+    alice, bob = make_user("alice"), make_user("bob")
     with SessionLocal() as db:
         db.add_all(
             [
@@ -1262,8 +1277,8 @@ def test_youtube_completion_alert_goes_only_to_the_session_owner(monkeypatch):
         def processing_status(self, _video_id: str) -> str:
             return "succeeded"
 
-    owner = make_user("video-owner@example.com", is_admin=True)
-    make_user("bystander@example.com")
+    owner = make_user("video-owner", is_admin=True)
+    make_user("bystander")
     with SessionLocal() as db:
         session = WorkoutSession(
             user_id=owner,
@@ -1290,7 +1305,7 @@ def test_video_links_only_touch_the_session_owners_workouts():
     from app.models import ClipUploadStatus, SessionStatus
     from app.processing import link_session_videos_to_workout
 
-    owner, bystander = make_user("a@example.com"), make_user("b@example.com")
+    owner, bystander = make_user("aaa"), make_user("bbb")
     with SessionLocal() as db:
         movements = {}
         for label, user_id in (("owner", owner), ("bystander", bystander)):

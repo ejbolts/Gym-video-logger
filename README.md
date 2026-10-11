@@ -12,6 +12,10 @@ On a fresh workout database, the app seeds five sample sessions across one week 
 
 The first working path is YouTube mock mode. It accepts a batch, processes it with local ffmpeg, and returns a deterministic mock YouTube URL without any Google credentials.
 
+Accounts use a username and password; no account email is collected. Usernames are case-insensitive, 3–32 ASCII letters, numbers, dots, underscores or hyphens, and start with a letter or number. The separate Name field is how you appear in the app. You can change both in Profile. An admin can reset a forgotten password with `python -m app.manage reset-password --username yourname`.
+
+When upgrading an email-based account database, migration `0030_username_accounts` derives usernames from the old address's part before `@`, replaces unsupported characters with hyphens, and adds numeric suffixes for duplicates. Short or unusable names become `user`. Account IDs, passwords, sessions, preferences and workout ownership are preserved. Run `python -m app.manage list-users` after migration to see the assigned usernames. The account email column is removed; rolling back requires the pre-upgrade database backup and previous app version. Existing backup archives stay unchanged; new account snapshots use manifest format 2 with an owner username.
+
 ## Architecture
 
 ```text
@@ -94,7 +98,7 @@ alembic upgrade head
 uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000
 ```
 
-Open `http://127.0.0.1:8000`. To create the first (admin) account, either set `GYM_REGISTRATION_INVITE_CODE` in `.env` and sign up in the browser with that code, or run `python -m app.manage create-user --email you@example.com --display-name "Your Name"` from the repository root. That first account takes ownership of any existing workout data. Other people can sign up only when `GYM_ALLOW_REGISTRATION=true`; `GYM_ALLOW_REGISTRATION` and `GYM_VIDEO_UPLOADS` are starting values that the admin console overrides once changed. For frontend hot reload during development, run `npm run dev` from `frontend/`; Vite proxies `/api` to the local FastAPI server.
+Open `http://127.0.0.1:8000`. To create the first (admin) account, either set `GYM_REGISTRATION_INVITE_CODE` in `.env` and sign up in the browser with that code, or run `python -m app.manage create-user --username yourname --display-name "Your Name"` from the repository root. That first account takes ownership of any existing workout data. Other people can sign up only when `GYM_ALLOW_REGISTRATION=true`; `GYM_ALLOW_REGISTRATION` and `GYM_VIDEO_UPLOADS` are starting values that the admin console overrides once changed. For frontend hot reload during development, run `npm run dev` from `frontend/`; Vite proxies `/api` to the local FastAPI server.
 
 On Windows, `./start-app.ps1` builds the current frontend before starting the server and opens that same production build on port 8000. `./start-app.ps1 -Dev` also refreshes that phone build before starting Vite on port 5173, so development cannot leave the phone endpoint on an older bundle. Phone access should proxy port 8000; this installation uses `https://mainpc.tail494810.ts.net:8446`.
 
@@ -125,9 +129,9 @@ Mixed portrait and landscape clips are normalized to a shared 1920x1080, 30 FPS 
 Every backup belongs to one account (`account_backups.user_id`) and holds only that account's data. Backups live in `data/account-backups/<account id>/<backup id>/`, each with a `manifest.json` that lists every file with its size and SHA-256. Run these from the folder that holds the app's `.env`:
 
 ```powershell
-python -m app.manage backup-account --email you@example.com [--label "Before trip"]
-python -m app.manage list-backups [--email you@example.com]
-python -m app.manage import-legacy-backup --email you@example.com --source <backup folder>
+python -m app.manage backup-account --username yourname [--label "Before trip"]
+python -m app.manage list-backups [--username yourname]
+python -m app.manage import-legacy-backup --username yourname --source <backup folder>
 ```
 
 `backup-account` writes a standalone SQLite database containing only that account's rows (with its password hash blanked and no sign-ins, push registrations or server settings), plus its machine photos. Video uploads are not included.

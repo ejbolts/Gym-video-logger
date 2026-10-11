@@ -2,12 +2,14 @@ import { api, ApiError } from './api';
 import type { AuthConfig, User } from './types';
 
 export const MIN_PASSWORD_LENGTH = 10;
+export const USERNAME_HINT =
+  '3–32 letters, numbers, dots, underscores or hyphens. Start with a letter or number.';
 
 export type AuthMode = 'sign-in' | 'create-account';
 
 export interface AuthFormValues {
   displayName: string;
-  email: string;
+  username: string;
   password: string;
   inviteCode: string;
 }
@@ -19,7 +21,7 @@ export const DEFAULT_AUTH_CONFIG: AuthConfig = {
   invite_code_required: false,
 };
 
-const EMAIL_PATTERN = /^\S+@\S+\.\S+$/;
+const USERNAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{2,31}$/;
 
 export function isNetworkFailure(reason: unknown): boolean {
   if (reason instanceof ApiError) return reason.status === 0 && reason.code === 'request_failed';
@@ -34,11 +36,11 @@ export function authErrorMessage(reason: unknown): string {
   if (reason instanceof ApiError) {
     switch (reason.code) {
       case 'invalid_credentials':
-        return 'That email and password do not match. Check them and try again.';
+        return 'That username and password do not match. Check them and try again.';
       case 'too_many_attempts':
         return 'Too many attempts. Wait a few minutes before trying again.';
-      case 'email_taken':
-        return 'An account with that email already exists. Try signing in instead.';
+      case 'username_taken':
+        return 'An account with that username already exists. Try signing in instead.';
       case 'registration_closed':
         return 'New accounts are not being accepted right now.';
       case 'setup_required':
@@ -60,8 +62,8 @@ export function authErrorMessage(reason: unknown): string {
   return reason instanceof Error ? reason.message : 'Something went wrong. Try again.';
 }
 
-export function validateEmail(email: string): string | null {
-  return EMAIL_PATTERN.test(email.trim()) ? null : 'Enter a valid email address.';
+export function validateUsername(username: string): string | null {
+  return USERNAME_PATTERN.test(username.trim()) ? null : USERNAME_HINT;
 }
 
 export function validateNewPassword(password: string): string | null {
@@ -76,8 +78,8 @@ export function validateAuthForm(
   config: AuthConfig,
 ): AuthFieldErrors {
   const errors: AuthFieldErrors = {};
-  const emailError = validateEmail(values.email);
-  if (emailError) errors.email = emailError;
+  const usernameError = validateUsername(values.username);
+  if (usernameError) errors.username = usernameError;
   if (mode === 'sign-in') {
     if (!values.password) errors.password = 'Enter your password.';
     return errors;
@@ -123,12 +125,12 @@ export async function submitAuthForm(
     };
   }
   try {
-    const email = values.email.trim();
+    const username = values.username.trim().toLowerCase();
     const user =
       mode === 'sign-in'
-        ? await endpoints.login({ email, password: values.password })
+        ? await endpoints.login({ username, password: values.password })
         : await endpoints.register({
-            email,
+            username,
             password: values.password,
             display_name: values.displayName.trim(),
             invite_code: values.inviteCode.trim() || null,
@@ -140,8 +142,8 @@ export async function submitAuthForm(
       ok: false,
       message: authErrorMessage(reason),
       fieldErrors:
-        code === 'email_taken'
-          ? { email: 'This email is already registered.' }
+        code === 'username_taken'
+          ? { username: 'This username is already registered.' }
           : code === 'invalid_invite_code'
             ? { inviteCode: 'This invite code was not accepted.' }
             : {},

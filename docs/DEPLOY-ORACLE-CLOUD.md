@@ -245,10 +245,14 @@ Your PC copy is still a good fallback: it is unchanged, at its old schema. Do no
 
 **7a. Create your account.** On your phone or PC, open `https://gym.yourdomain.com`. Choose sign-up and enter:
 
-- your email address and a password,
+- your display name, a unique username and a password,
 - the invite code from `GYM_REGISTRATION_INVITE_CODE`.
 
 The first account becomes the **admin** and claims the workout history you copied in step 6. Any account created later is a regular user with its own private data. Browser sign-up always needs the invite code, including for this first account, so nobody can claim the server before you do. If no invite code is set, the sign-up screen says the server is not set up yet; create the first account with the admin CLI below instead.
+
+Usernames ignore letter case and use 3–32 ASCII letters, numbers, dots, underscores or hyphens, starting with a letter or number. No account email is required. The Web Push contact mailbox in `.env` is a separate server setting.
+
+If the copied database already contains email-based accounts, startup migration `0030_username_accounts` assigns usernames from their old email names, sanitizing unsupported characters and resolving collisions with numeric suffixes. Passwords, account IDs, sessions and workout history are preserved. Run the `list-users` command below to see assigned usernames. Keep the pre-update backup: the old email column is removed, so rollback needs that backup and the previous app version.
 
 **7a-2. The admin console.** Signed in as the admin, open **Settings → Admin console**. It has three parts:
 
@@ -272,8 +276,8 @@ The values in `.env` (`GYM_VIDEO_UPLOADS`, `GYM_ALLOW_REGISTRATION`) are only st
 ```bash
 cd /opt/gym-logger
 sudo -u gymlogger .venv/bin/python -m app.manage list-users
-sudo -u gymlogger .venv/bin/python -m app.manage create-user --email you@example.com --display-name "Your Name" --admin
-sudo -u gymlogger .venv/bin/python -m app.manage reset-password --email you@example.com
+sudo -u gymlogger .venv/bin/python -m app.manage create-user --username yourname --display-name "Your Name" --admin
+sudo -u gymlogger .venv/bin/python -m app.manage reset-password --username yourname
 ```
 
 Two rules follow from how the app loads its settings:
@@ -380,7 +384,7 @@ Reboot in a quiet period with `sudo reboot`. The app and Caddy start automatical
 | `Permission denied` reading `.env` | Wrong ownership or mode | `sudo chown root:gymlogger /opt/gym-logger/.env && sudo chmod 640 /opt/gym-logger/.env` |
 | Sign-in works but you are logged out at once, or the cookie never sticks | `GYM_COOKIE_SECURE=true` only sends cookies over HTTPS; you are on `http://` or the IP address | Use `https://gym.yourdomain.com`. Make sure Caddy is running. Do not change the cookie setting just to make it work over plain HTTP |
 | Sign-up asks for an invite code and rejects yours | Typo, or `GYM_REGISTRATION_INVITE_CODE` was changed after the service started | Compare the value in `.env`, then `sudo systemctl restart gym-logger` |
-| You created an account before copying the data | Copying the database replaces the users table, so that account is removed | Sign up again after step 6, using the same email if you want to keep your name |
+| You created an account before copying the data | Copying the database replaces the users table, so that account is removed | Sign up again after step 6, using the same username if you want |
 | Video upload fails at the start or with a 413-style error | The request is larger than Caddy's `request_body` limit, which is 25 GB per file | Check the file size. The per-file cap is `GYM_MAX_FILE_SIZE_BYTES` (20 GiB in the template). Keep Caddy's limit above that |
 | Upload fails midway on mobile | Connection drops (uploads are not resumable), or the phone sleeps | Retry the failed file only. Keep the app in the foreground during uploads |
 | Upload stalls or fails with a disk error | The boot volume is full | `df -h /opt` and `sudo du -sh /opt/gym-logger/data/*`. Clear completed uploads. If you need more space, enlarge the boot volume in the console, then extend the partition on the VM (Oracle's documentation covers the `growpart` and `resize2fs` steps for Ubuntu) |

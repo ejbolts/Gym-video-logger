@@ -3,7 +3,8 @@ import { api, ApiError } from './api';
 import {
   authErrorMessage,
   MIN_PASSWORD_LENGTH,
-  validateEmail,
+  USERNAME_HINT,
+  validateUsername,
   validateNewPassword,
 } from './authForm';
 import { formatMemberSince, profileInitial } from './profileDisplay';
@@ -54,11 +55,11 @@ function FormFeedback({ status, error }: { status: string | null; error: string 
 function DetailsForm({ user, onSaved }: { user: User; onSaved: (user: User) => void }) {
   const id = useId();
   const [displayName, setDisplayName] = useState(user.display_name);
-  const [email, setEmail] = useState(user.email);
+  const [username, setUsername] = useState(user.username);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const dirty = displayName.trim() !== user.display_name || email.trim() !== user.email;
+  const dirty = displayName.trim() !== user.display_name || username.trim() !== user.username;
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -69,20 +70,20 @@ function DetailsForm({ user, onSaved }: { user: User; onSaved: (user: User) => v
       setError('Enter a name to show in the app.');
       return;
     }
-    const emailError = validateEmail(email);
-    if (emailError) {
-      setError(emailError);
+    const usernameError = validateUsername(username);
+    if (usernameError) {
+      setError(usernameError);
       return;
     }
     setSaving(true);
     try {
       const updated = await api.updateProfile({
         ...(displayName.trim() !== user.display_name ? { display_name: displayName.trim() } : {}),
-        ...(email.trim() !== user.email ? { email: email.trim() } : {}),
+        ...(username.trim() !== user.username ? { username: username.trim() } : {}),
       });
       onSaved(updated);
       setDisplayName(updated.display_name);
-      setEmail(updated.email);
+      setUsername(updated.username);
       setStatus('Profile saved.');
     } catch (reason) {
       setError(authErrorMessage(reason));
@@ -96,7 +97,7 @@ function DetailsForm({ user, onSaved }: { user: User; onSaved: (user: User) => v
       <header>
         <div>
           <p className="section-kicker">DETAILS</p>
-          <h2 id={`${id}-title`}>Name &amp; email</h2>
+          <h2 id={`${id}-title`}>Name &amp; username</h2>
         </div>
       </header>
       <form className="profile-form" noValidate onSubmit={(event) => void save(event)}>
@@ -114,19 +115,20 @@ function DetailsForm({ user, onSaved }: { user: User; onSaved: (user: User) => v
             }}
           />
         </Field>
-        <Field id={`${id}-email`} label="Email">
+        <Field id={`${id}-username`} label="Username" hint={USERNAME_HINT}>
           <input
-            id={`${id}-email`}
-            type="email"
-            inputMode="email"
-            autoComplete="email"
+            id={`${id}-username`}
+            type="text"
+            inputMode="text"
+            autoComplete="username"
             autoCapitalize="none"
             autoCorrect="off"
             spellCheck={false}
             required
-            value={email}
+            maxLength={32}
+            value={username}
             onChange={(event) => {
-              setEmail(event.target.value);
+              setUsername(event.target.value);
               setStatus(null);
             }}
           />
@@ -396,7 +398,7 @@ export function ProfileScreen() {
             {user.display_name}
             {user.is_admin && <span className="profile-badge">Admin</span>}
           </strong>
-          <span>{user.email}</span>
+          <span>{user.username}</span>
           {memberSince && <small>Member since {memberSince}</small>}
         </div>
       </section>

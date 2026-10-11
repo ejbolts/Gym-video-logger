@@ -98,7 +98,7 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
-    email: Mapped[str] = mapped_column(String(320), unique=True)
+    username: Mapped[str] = mapped_column(String(32, collation="NOCASE"), unique=True)
     display_name: Mapped[str] = mapped_column(String(80))
     password_hash: Mapped[str] = mapped_column(String(300))
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")

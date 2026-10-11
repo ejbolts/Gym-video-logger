@@ -286,7 +286,7 @@ function UserRow({
           {isSelf && <span className="admin-tag">You</span>}
           {disabled && <span className="admin-tag is-danger">Disabled</span>}
         </strong>
-        <span>{user.email}</span>
+        <span>{user.username}</span>
       </div>
       <dl className="admin-user-stats">
         <div>

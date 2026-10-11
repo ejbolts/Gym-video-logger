@@ -59,9 +59,9 @@ def add_photo(user_id: str, name: str) -> None:
     (photos / f"{name}-thumbnail.webp").write_bytes(b"thumb")
 
 
-def snapshot(email: str) -> AccountBackup:
+def snapshot(username: str) -> AccountBackup:
     with SessionLocal() as db:
-        user = db.scalar(select(User).where(User.email == email))
+        user = db.scalar(select(User).where(User.username == username))
         return create_account_snapshot(db, get_settings(), user)
 
 
@@ -81,7 +81,7 @@ def test_snapshot_holds_only_its_owners_data(client, other_client):
     add_photo(owner_id, "owner-photo")
     add_photo(other_id, "other-photo")
 
-    backup = snapshot("owner@example.com")
+    backup = snapshot("owner")
 
     folder = backup_folder(get_settings(), owner_id, backup.id)
     database = folder / BACKUP_DATABASE
@@ -96,7 +96,9 @@ def test_snapshot_holds_only_its_owners_data(client, other_client):
     assert photos == ["owner-photo-full.webp", "owner-photo-thumbnail.webp"]
 
     manifest = json.loads((folder / MANIFEST).read_text(encoding="utf-8"))
-    assert manifest["owner"] == {"id": owner_id, "email": "owner@example.com"}
+    assert manifest["owner"] == {"id": owner_id, "username": "owner"}
+    assert manifest["format"] == 2
+    assert "email" not in {column[1] for column in rows(database, "PRAGMA table_info(users)")}
     assert manifest["tables"]["training_workouts"] == 1
     assert manifest["missing_files"] == []
     assert {item["path"] for item in manifest["files"]} == {
@@ -106,7 +108,7 @@ def test_snapshot_holds_only_its_owners_data(client, other_client):
     }
     assert backup.file_count == 3
 
-    other_backup = snapshot("other@example.com")
+    other_backup = snapshot("other")
     other_database = backup_folder(get_settings(), other_id, other_backup.id) / BACKUP_DATABASE
     assert rows(other_database, "SELECT id FROM training_workouts") == [(other_workout,)]
 
@@ -116,7 +118,7 @@ def test_snapshot_refuses_a_table_it_does_not_know_and_leaves_nothing_behind(cli
         connection.execute(text("CREATE TABLE mystery (id INTEGER PRIMARY KEY)"))
 
     with pytest.raises(BackupError, match="mystery"):
-        snapshot("owner@example.com")
+        snapshot("owner")
 
     with SessionLocal() as db:
         assert db.scalar(select(AccountBackup.id)) is None
@@ -178,7 +180,7 @@ def test_legacy_backup_is_filed_under_the_first_account_without_server_secrets(
     ]
     manifest = json.loads((folder / MANIFEST).read_text(encoding="utf-8"))
     assert manifest["kind"] == "legacy_import"
-    assert manifest["owner"]["email"] == "owner@example.com"
+    assert manifest["owner"]["username"] == "owner"
     assert manifest["tables"]["training_workouts"] == 2
     assert manifest["skipped"] == [".env", "secrets", "uvicorn.log", "web-push-vapid-private.pem"]
     assert backup.user_id == client.user["id"]
@@ -196,7 +198,7 @@ def test_legacy_backup_cannot_be_filed_twice_or_under_another_account(
 
         with pytest.raises(BackupError, match="already filed"):
             import_legacy_backup(db, get_settings(), owner, legacy_backup)
-        with pytest.raises(BackupError, match="first account claimed.*owner@example.com"):
+        with pytest.raises(BackupError, match="first account claimed.*owner"):
             import_legacy_backup(db, get_settings(), other, legacy_backup)
         assert db.scalar(select(AccountBackup.user_id).distinct()) == owner.id
 
@@ -211,27 +213,27 @@ def test_a_backup_that_already_has_accounts_is_not_a_legacy_backup(client, legac
 def test_backup_commands(client, other_client, legacy_backup, capsys):
     add_workout(client)
 
-    manage.main(["backup-account", "--email", "Owner@Example.com", "--label", "Before trip"])
+    manage.main(["backup-account", "--username", "Owner", "--label", "Before trip"])
     manage.main(
-        ["import-legacy-backup", "--email", "owner@example.com", "--source", str(legacy_backup)]
+        ["import-legacy-backup", "--username", "owner", "--source", str(legacy_backup)]
     )
     output = capsys.readouterr().out
-    assert "Backed up owner@example.com: Before trip" in output
-    assert "Filed under owner@example.com: Before accounts: stable-20261011" in output
+    assert "Backed up owner: Before trip" in output
+    assert "Filed under owner: Before accounts: stable-20261011" in output
 
     manage.main(["list-backups"])
     listing = capsys.readouterr().out.splitlines()
     assert len(listing) == 2
-    assert all(line.startswith("owner@example.com\t") for line in listing)
-    manage.main(["list-backups", "--email", "other@example.com"])
+    assert all(line.startswith("owner\t") for line in listing)
+    manage.main(["list-backups", "--username", "other"])
     assert capsys.readouterr().out.strip() == "No backups yet."
 
     with pytest.raises(SystemExit, match="first account"):
         manage.main(
-            ["import-legacy-backup", "--email", "other@example.com", "--source", str(legacy_backup)]
+            ["import-legacy-backup", "--username", "other", "--source", str(legacy_backup)]
         )
     with pytest.raises(SystemExit, match="No account for"):
-        manage.main(["backup-account", "--email", "nobody@example.com"])
+        manage.main(["backup-account", "--username", "nobody"])
 
 
 def load_migration():
@@ -263,8 +265,8 @@ def test_migration_adds_an_owner_for_every_backup_and_downgrades():
 
 
 def test_deleting_an_account_deletes_its_backups_and_nobody_elses(client, other_client):
-    owner_backup = snapshot("owner@example.com")
-    other_backup = snapshot("other@example.com")
+    owner_backup = snapshot("owner")
+    other_backup = snapshot("other")
     settings = get_settings()
     other_id = other_client.user["id"]
 
