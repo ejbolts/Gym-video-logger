@@ -18,7 +18,7 @@
 
 ## Publishing the next announcement
 
-1. Edit `frontend/release.json`. Use a new semantic version, for example `0.3.0`, and update `title`, `summary`, `changes` and `url`. `url` must be an HTTPS GitHub link to your release, changelog or pull request. The build validates the metadata.
+1. Edit `frontend/release.json`. Choose the version manually following [the agent release policy](../AGENTS.md#release-versions-and-announcements): new capabilities or workflows use a minor bump (for example, `0.3.0` to `0.4.0`); UI-only layout, styling, wording or polish and bug fixes use a patch bump (`0.3.0` to `0.3.1`). A feature introduced through the UI still uses a minor bump; a release containing both uses the minor bump. Never reuse a deployed version. Update `title`, `summary`, `changes` and `url`. `url` must be an HTTPS GitHub link to your release, changelog or pull request. The build validates the metadata but does not increment versions automatically.
 2. Add the detailed notes here (keep previous versions), or publish a GitHub release and link to it instead. If this repository is private, readers need GitHub access to open that link; the short notes remain visible inside the app.
 3. Test the feature and announcement locally. Dismissal is remembered for each version; **View changes** always reopens the dialog without clearing browser data.
 4. Commit and push the code and metadata, merge to the VM's deployment branch, then run the existing VM update procedure. It pulls, builds the frontend and restarts the backend. A bare `git pull` does not rebuild `frontend/dist`.

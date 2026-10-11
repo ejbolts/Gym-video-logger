@@ -7,6 +7,9 @@ Follow this repository's README and checks, together with the user's shared veri
 For every application feature, fix, or other user-visible change, update `frontend/release.json` in the same change or pull request before considering the task complete. Its `version` controls whether users see the release announcement again.
 
 - Advance the semantic version for each new release; never reuse a version that has already been deployed. Changes within the same pending release can share its version.
+- **Features use a minor version bump** (for example, `0.3.0` to `0.4.0`, resetting the patch number to zero). A feature adds a capability or workflow, including one introduced through the UI, such as a new import option or sign-in method.
+- **UI-only updates and bug fixes use a patch version bump** (for example, `0.3.0` to `0.3.1`). UI-only updates change layout, styling, wording or visual polish without adding a capability or workflow. A visual redesign alone is a patch; a new capability with a new interface is a feature.
+- For a release containing both features and UI updates or fixes, use the minor bump. Choose the version manually in `frontend/release.json`; the build validates and publishes this metadata but does not increment versions automatically.
 - Update the title, summary and changes to describe the release accurately. Keep the GitHub URL pointing to the matching release notes, and update `docs/RELEASE-NOTES.md` with those notes.
 - Documentation, tests and internal tooling changes that do not affect application behavior do not require a version bump.
 - A bare `git pull` does not rebuild the frontend. Follow `deploy/update.sh` and the deployment guide when an application deployment is authorized; updating release metadata does not authorize restarting or updating the stable app.
