@@ -214,9 +214,7 @@ def test_backup_commands(client, other_client, legacy_backup, capsys):
     add_workout(client)
 
     manage.main(["backup-account", "--username", "Owner", "--label", "Before trip"])
-    manage.main(
-        ["import-legacy-backup", "--username", "owner", "--source", str(legacy_backup)]
-    )
+    manage.main(["import-legacy-backup", "--username", "owner", "--source", str(legacy_backup)])
     output = capsys.readouterr().out
     assert "Backed up owner: Before trip" in output
     assert "Filed under owner: Before accounts: stable-20261011" in output
@@ -229,9 +227,7 @@ def test_backup_commands(client, other_client, legacy_backup, capsys):
     assert capsys.readouterr().out.strip() == "No backups yet."
 
     with pytest.raises(SystemExit, match="first account"):
-        manage.main(
-            ["import-legacy-backup", "--username", "other", "--source", str(legacy_backup)]
-        )
+        manage.main(["import-legacy-backup", "--username", "other", "--source", str(legacy_backup)])
     with pytest.raises(SystemExit, match="No account for"):
         manage.main(["backup-account", "--username", "nobody"])
 

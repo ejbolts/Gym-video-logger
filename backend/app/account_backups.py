@@ -158,7 +158,9 @@ def import_legacy_backup(
         )
     )
     if already_imported:
-        raise BackupError(f"This backup is already filed under {user.username} ({already_imported}).")
+        raise BackupError(
+            f"This backup is already filed under {user.username} ({already_imported})."
+        )
 
     created_at = utc_now()
     label = clean_label(label or f"Before accounts: {source.resolve().name}")

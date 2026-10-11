@@ -133,6 +133,7 @@ def test_migration_preserves_accounts_and_children_and_assigns_unique_usernames(
                     id=f"p{i}",
                     user_id=f"u{i}",
                     exercise_id=f"e{i}",
+                    caption="Synthetic machine photo",
                     original_filename="machine.jpg",
                     full_filename=f"{i}.webp",
                     thumbnail_filename=f"{i}-thumb.webp",

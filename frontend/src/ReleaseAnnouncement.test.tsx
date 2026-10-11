@@ -18,7 +18,7 @@ describe('release popup', () => {
     );
     expect(markup).toContain('<dialog');
     expect(markup).toContain('aria-modal="true"');
-    expect(markup).toContain('>Version 0.2.0</h2>');
+    expect(markup).toContain(`>Version ${metadata.version}</h2>`);
     expect(markup).toContain(metadata.title);
     expect(markup).toContain(metadata.summary);
     expect(markup.match(/<li>/g)).toHaveLength(metadata.changes.length);

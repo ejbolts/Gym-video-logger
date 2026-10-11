@@ -49,10 +49,8 @@ def upgrade() -> None:
             {"id": user_id, "username": username},
         )
 
-    with op.batch_alter_table(
-        "users", naming_convention={"uq": "uq_%(table_name)s_%(column_0_name)s"}
-    ) as batch:
-        batch.drop_constraint("uq_users_email", type_="unique")
+    # Batch rebuilding removes constraints for the dropped column, regardless of their name.
+    with op.batch_alter_table("users") as batch:
         batch.drop_column("email")
         batch.alter_column(
             "username", existing_type=sa.String(32, collation="NOCASE"), nullable=False
