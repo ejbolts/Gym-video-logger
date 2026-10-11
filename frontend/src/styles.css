@@ -802,6 +802,9 @@ button.metric-card:focus-visible {
   border-radius: 14px;
   background: color-mix(in srgb, var(--card) 84%, var(--page));
   scroll-snap-align: start;
+  /* A long history has dozens of months; only the ones near the screen are laid out. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 1px;
 }
 
 .calendar-month h3 {

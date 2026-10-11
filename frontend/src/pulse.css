@@ -3661,18 +3661,19 @@ html {
   animation: fade-in 220ms ease backwards;
 }
 
-.history-screen > .progress-screen,
-.history-screen > .cardio-screen,
-.history-screen > .history-calendar-panel,
-.history-screen > .history-week {
+/* Each History section sits in its own cached panel, which re-runs these when it is revealed. */
+.history-screen > .cached-tab-panel > .progress-screen,
+.history-screen > .cached-tab-panel > .cardio-screen,
+.history-screen > .cached-tab-panel > .history-calendar-panel,
+.history-screen > .cached-tab-panel > .history-week {
   animation: rise-in 320ms var(--ease-out) backwards;
 }
 
-.history-screen > .history-week:nth-of-type(2) {
+.history-screen > .cached-tab-panel > .history-week:nth-of-type(2) {
   animation-delay: 40ms;
 }
 
-.history-screen > .history-week:nth-of-type(n + 3) {
+.history-screen > .cached-tab-panel > .history-week:nth-of-type(n + 3) {
   animation-delay: 80ms;
 }
 
