@@ -16,11 +16,17 @@ from pathlib import Path
 from sqlalchemy import delete, select
 from sqlalchemy.exc import OperationalError
 
+from .account_backups import (
+    BackupError,
+    backup_folder,
+    create_account_snapshot,
+    import_legacy_backup,
+)
 from .accounts import EmailTakenError, create_user, normalize_email
 from .auth import MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH, hash_password
 from .config import get_settings
 from .database import SessionLocal
-from .models import User, UserSession
+from .models import AccountBackup, User, UserSession
 
 
 def prompt_new_password() -> str:
@@ -88,6 +94,66 @@ def command_list_users(_: argparse.Namespace) -> None:
         print(f"{user.email}\t{user.display_name}\t{role}\t{status}\t{user.created_at:%Y-%m-%d}")
 
 
+def find_user(db, email: str) -> User:
+    email = clean_email(email)
+    user = db.scalar(select(User).where(User.email == email))
+    if user is None:
+        raise SystemExit(f"No account for {email}.")
+    return user
+
+
+def describe_backup(backup: AccountBackup) -> str:
+    size = backup.size_bytes / (1024 * 1024)
+    return f"{backup.label} ({backup.file_count} files, {size:.1f} MB)"
+
+
+def command_backup_account(args: argparse.Namespace) -> None:
+    settings = get_settings()
+    with SessionLocal() as db:
+        user = find_user(db, args.email)
+        try:
+            backup = create_account_snapshot(db, settings, user, args.label)
+        except BackupError as error:
+            raise SystemExit(str(error)) from None
+        print(f"Backed up {user.email}: {describe_backup(backup)}")
+        print(f"  {backup_folder(settings, user.id, backup.id)}")
+
+
+def command_import_legacy_backup(args: argparse.Namespace) -> None:
+    settings = get_settings()
+    source = Path(args.source)
+    if not source.is_dir():
+        raise SystemExit(f"No folder at {source}.")
+    with SessionLocal() as db:
+        user = find_user(db, args.email)
+        try:
+            backup = import_legacy_backup(db, settings, user, source, args.label)
+        except BackupError as error:
+            raise SystemExit(str(error)) from None
+        print(f"Filed under {user.email}: {describe_backup(backup)}")
+        print(f"  {backup_folder(settings, user.id, backup.id)}")
+
+
+def command_list_backups(args: argparse.Namespace) -> None:
+    with SessionLocal() as db:
+        query = (
+            select(AccountBackup, User.email)
+            .join(User, User.id == AccountBackup.user_id)
+            .order_by(User.email, AccountBackup.created_at)
+        )
+        if args.email:
+            query = query.where(AccountBackup.user_id == find_user(db, args.email).id)
+        rows = db.execute(query).all()
+    if not rows:
+        print("No backups yet.")
+        return
+    for backup, email in rows:
+        print(
+            f"{email}	{backup.created_at:%Y-%m-%d %H:%M}	{backup.kind}	"
+            f"{describe_backup(backup)}	{backup.id}"
+        )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m app.manage", description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -104,6 +170,26 @@ def build_parser() -> argparse.ArgumentParser:
 
     listing = commands.add_parser("list-users", help="List all accounts.")
     listing.set_defaults(handler=command_list_users)
+
+    backup = commands.add_parser(
+        "backup-account", help="Back up one account's data, and nobody else's."
+    )
+    backup.add_argument("--email", required=True)
+    backup.add_argument("--label")
+    backup.set_defaults(handler=command_backup_account)
+
+    legacy = commands.add_parser(
+        "import-legacy-backup",
+        help="File a backup from before accounts under the account that claimed that data.",
+    )
+    legacy.add_argument("--email", required=True)
+    legacy.add_argument("--source", required=True, help="The backup folder or its data folder.")
+    legacy.add_argument("--label")
+    legacy.set_defaults(handler=command_import_legacy_backup)
+
+    backups = commands.add_parser("list-backups", help="List backups and the account each is for.")
+    backups.add_argument("--email", help="Only this account's backups.")
+    backups.set_defaults(handler=command_list_backups)
     return parser
 
 

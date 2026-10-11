@@ -154,6 +154,35 @@ class UserSetting(Base):
     value: Mapped[str] = mapped_column(Text)
 
 
+class AccountBackupKind(enum.StrEnum):
+    SNAPSHOT = "snapshot"
+    LEGACY_IMPORT = "legacy_import"
+
+
+class AccountBackup(Base):
+    """A backup owned by one account. Its files live under ``account_backups_dir/<user_id>``."""
+
+    __tablename__ = "account_backups"
+    __table_args__ = (
+        UniqueConstraint("user_id", "source_fingerprint", name="uq_account_backup_user_source"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    kind: Mapped[str] = mapped_column(String(20))
+    label: Mapped[str] = mapped_column(String(200))
+    schema_revision: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    file_count: Mapped[int] = mapped_column(Integer)
+    size_bytes: Mapped[int] = mapped_column(Integer)
+    # SHA-256 of an imported database, so the same legacy backup cannot be imported twice.
+    source_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, server_default=func.now()
+    )
+
+
 movement_machine_photos = Table(
     "movement_machine_photos",
     Base.metadata,
