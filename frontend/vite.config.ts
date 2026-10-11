@@ -4,7 +4,7 @@ import { VitePWA } from 'vite-plugin-pwa';
 import releaseMetadata from './release.json';
 import { parseRelease } from './src/releaseMetadata';
 
-function validateReleaseNotes(): Plugin {
+export function releaseNotesPlugin(): Plugin {
   return {
     name: 'validate-release-notes',
     buildStart() {
@@ -23,7 +23,9 @@ function validateReleaseNotes(): Plugin {
     },
     configureServer(server) {
       server.middlewares.use((request, response, next) => {
-        if (request.originalUrl?.split('?')[0] !== '/release.json') {
+        // Vite uses /release.json?import for the bundled fallback; let its JSON
+        // transformer handle module requests rather than answering them with raw JSON.
+        if (request.originalUrl !== '/release.json') {
           next();
           return;
         }
@@ -73,7 +75,7 @@ function resetProductionWorkerDuringDevelopment(): Plugin {
 export default defineConfig({
   plugins: [
     react(),
-    validateReleaseNotes(),
+    releaseNotesPlugin(),
     resetProductionWorkerDuringDevelopment(),
     VitePWA({
       // Registration is managed in appUpdates.ts without interrupting open forms.
