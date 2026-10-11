@@ -54,8 +54,13 @@ def machine_photo_paths(
     )
 
 
-async def store_machine_photo(*, upload: UploadFile, settings: Settings) -> StoredMachinePhoto:
-    """Decode an uploaded image, correct orientation, and atomically store WebP variants."""
+async def store_machine_photo(
+    *, upload: UploadFile, settings: Settings, max_bytes: int
+) -> StoredMachinePhoto:
+    """Decode an uploaded image, correct orientation, and atomically store WebP variants.
+
+    ``max_bytes`` is the admin's upload limit; going over it gets a message that names no size.
+    """
     token = uuid.uuid4().hex
     upload_partial = settings.machine_photos_dir / f"{token}.upload.partial"
     full_filename = f"{token}-full.webp"
@@ -69,11 +74,9 @@ async def store_machine_photo(*, upload: UploadFile, settings: Settings) -> Stor
         with upload_partial.open("xb") as target:
             while chunk := await upload.read(CHUNK_SIZE):
                 total += len(chunk)
-                if total > settings.max_photo_size_bytes:
+                if total > max_bytes:
                     raise PhotoValidationError(
-                        "photo_too_large",
-                        "Machine photos are limited to 15 MB.",
-                        status_code=413,
+                        "not_saved", "This photo couldn't be uploaded.", status_code=413
                     )
                 target.write(chunk)
         if total == 0:

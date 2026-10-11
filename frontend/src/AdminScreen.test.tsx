@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { AdminScreenView, type AdminScreenViewProps } from './AdminScreen';
-import type { AdminUser } from './types';
+import type { AccountLimits, AccountLimitsSettings, AdminUser } from './types';
 
 const owner: AdminUser = {
   id: 'owner',
@@ -31,6 +31,28 @@ const tester: AdminUser = {
   video_sessions: 0,
 };
 
+const defaults: AccountLimits = {
+  workouts_per_account: 5000,
+  cardio_sessions_per_account: 5000,
+  custom_exercises_per_account: 100,
+  photos_per_account: 25,
+  saves_per_minute: 60,
+  exercises_per_workout: 20,
+  sets_per_workout: 100,
+  workout_note_characters: 2000,
+  exercise_note_characters: 1000,
+  set_note_characters: 500,
+  photo_upload_megabytes: 5,
+};
+
+const limits: AccountLimitsSettings = {
+  values: { ...defaults, photos_per_account: 40 },
+  defaults,
+  bounds: Object.fromEntries(
+    Object.keys(defaults).map((name) => [name, { minimum: 1, maximum: 100_000 }]),
+  ) as AccountLimitsSettings['bounds'],
+};
+
 function view(overrides: Partial<AdminScreenViewProps> = {}) {
   return renderToStaticMarkup(
     <AdminScreenView
@@ -49,12 +71,15 @@ function view(overrides: Partial<AdminScreenViewProps> = {}) {
         video_file_bytes: 0,
         video_queue: { queued: 1, normalizing: 0 },
       }}
+      limits={null}
       loading={false}
       error={null}
       notice={null}
       savingSetting={false}
+      savingLimits={false}
       busyUserId={null}
       onVideoUploadsChange={vi.fn()}
+      onSaveLimits={vi.fn()}
       onRegistrationChange={vi.fn()}
       onUserDisabledChange={vi.fn()}
       onRefresh={vi.fn()}
@@ -100,6 +125,23 @@ describe('AdminScreenView', () => {
     expect(markup).toContain('admin-user is-disabled');
     expect(markup).toContain('Enable account');
     expect(markup).not.toContain('Disable account');
+  });
+
+  it('shows the hidden limits with their defaults, ready to edit', () => {
+    const markup = view({ limits });
+
+    expect(markup).toContain('Account limits');
+    expect(markup).toContain('Admins aren’t held to these.');
+    expect(markup).toMatch(/Machine photos<\/strong><small>Default 25<\/small>/);
+    expect(markup).toMatch(/Upload size<\/strong><small>Default 5 MB<\/small>/);
+    expect(markup).toContain('value="40"');
+    expect(markup.match(/type="number"/g)).toHaveLength(Object.keys(defaults).length);
+    // Nothing to save until a value changes.
+    expect(markup).toMatch(/type="submit" class="profile-primary" disabled="">Save limits/);
+  });
+
+  it('hides the limits until they have loaded', () => {
+    expect(view()).not.toContain('Account limits');
   });
 
   it('shows errors and notices', () => {

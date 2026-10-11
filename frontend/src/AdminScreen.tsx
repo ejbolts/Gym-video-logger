@@ -1,16 +1,27 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from './api';
 import {
+  LIMIT_GROUPS,
   VIDEO_UPLOAD_OPTIONS,
   formatBytes,
   formatJoined,
   formatLastActive,
+  limitDraft,
+  parseLimitDraft,
   plural,
+  validLimit,
   videoQueueSummary,
 } from './adminDisplay';
 import { authErrorMessage } from './authForm';
 import { InlineConfirmButton } from './InlineConfirmButton';
-import type { AdminUser, ServerSettings, ServerStatus, VideoUploadMode } from './types';
+import type {
+  AccountLimits,
+  AccountLimitsSettings,
+  AdminUser,
+  ServerSettings,
+  ServerStatus,
+  VideoUploadMode,
+} from './types';
 import { useUserSession } from './userContext';
 
 export interface AdminScreenViewProps {
@@ -18,12 +29,15 @@ export interface AdminScreenViewProps {
   users: AdminUser[] | null;
   settings: ServerSettings | null;
   status: ServerStatus | null;
+  limits: AccountLimitsSettings | null;
   loading: boolean;
   error: string | null;
   notice: string | null;
   savingSetting: boolean;
+  savingLimits: boolean;
   busyUserId: string | null;
   onVideoUploadsChange: (mode: VideoUploadMode) => void;
+  onSaveLimits: (values: AccountLimits) => void;
   onRegistrationChange: (open: boolean) => void;
   onUserDisabledChange: (user: AdminUser, disabled: boolean) => Promise<void>;
   onRefresh: () => void;
@@ -102,6 +116,103 @@ function SwitchesPanel({
           {settings.allow_registration ? 'On' : 'Off'}
         </button>
       </div>
+    </section>
+  );
+}
+
+function LimitsPanel({
+  limits,
+  saving,
+  onSave,
+}: {
+  limits: AccountLimitsSettings;
+  saving: boolean;
+  onSave: (values: AccountLimits) => void;
+}) {
+  const [draft, setDraft] = useState(() => limitDraft(limits.values));
+  const parsed = parseLimitDraft(draft, limits.bounds);
+  const names = Object.keys(limits.values) as (keyof AccountLimits)[];
+  const changed = parsed !== null && names.some((name) => parsed[name] !== limits.values[name]);
+  const defaultsDraft = limitDraft(limits.defaults);
+  const showingDefaults = names.every((name) => draft[name] === defaultsDraft[name]);
+
+  return (
+    <section className="settings-panel panel" aria-labelledby="admin-limits-title">
+      <header>
+        <div>
+          <p className="section-kicker">HIDDEN LIMITS</p>
+          <h2 id="admin-limits-title">Account limits</h2>
+        </div>
+      </header>
+      <p>
+        People are never told these exist: anything over a limit just fails to save. Workouts saved
+        before a limit was lowered can still be edited.
+      </p>
+      <form
+        className="admin-limits"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (parsed && changed) onSave(parsed);
+        }}
+      >
+        {LIMIT_GROUPS.map((group) => {
+          const headingId = `admin-limits-${group.fields[0].name}`;
+          return (
+            <div
+              className="admin-limit-group"
+              role="group"
+              aria-labelledby={headingId}
+              key={group.title}
+            >
+              <div className="admin-limit-group-heading">
+                <h3 id={headingId}>{group.title}</h3>
+                <small>{group.detail}</small>
+              </div>
+              {group.fields.map((field) => {
+                const bound = limits.bounds[field.name];
+                const unit = field.unit ? ` ${field.unit}` : '';
+                return (
+                  <label className="admin-limit" key={field.name}>
+                    <span>
+                      <strong>{field.label}</strong>
+                      <small>
+                        Default {limits.defaults[field.name].toLocaleString()}
+                        {unit}
+                      </small>
+                    </span>
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      min={bound.minimum}
+                      max={bound.maximum}
+                      step={1}
+                      value={draft[field.name]}
+                      aria-invalid={validLimit(draft[field.name], bound) ? undefined : true}
+                      disabled={saving}
+                      onChange={(event) =>
+                        setDraft((current) => ({ ...current, [field.name]: event.target.value }))
+                      }
+                    />
+                  </label>
+                );
+              })}
+            </div>
+          );
+        })}
+        <div className="admin-limit-actions">
+          <button
+            type="button"
+            className="profile-secondary"
+            disabled={saving || showingDefaults}
+            onClick={() => setDraft(defaultsDraft)}
+          >
+            Use defaults
+          </button>
+          <button type="submit" className="profile-primary" disabled={saving || !changed}>
+            {saving ? 'Saving…' : 'Save limits'}
+          </button>
+        </div>
+      </form>
     </section>
   );
 }
@@ -234,13 +345,16 @@ export function AdminScreenView({
   users,
   settings,
   status,
+  limits,
   loading,
   error,
   notice,
   savingSetting,
+  savingLimits,
   busyUserId,
   onVideoUploadsChange,
   onRegistrationChange,
+  onSaveLimits,
   onUserDisabledChange,
   onRefresh,
 }: AdminScreenViewProps) {
@@ -265,6 +379,15 @@ export function AdminScreenView({
           saving={savingSetting}
           onVideoUploadsChange={onVideoUploadsChange}
           onRegistrationChange={onRegistrationChange}
+        />
+      )}
+      {limits && (
+        // Keyed by the saved values, so the form restarts from what the server holds.
+        <LimitsPanel
+          key={JSON.stringify(limits.values)}
+          limits={limits}
+          saving={savingLimits}
+          onSave={onSaveLimits}
         />
       )}
       {status && <StatusPanel status={status} />}
@@ -308,6 +431,8 @@ export function AdminScreen({ active }: { active: boolean }) {
   const [users, setUsers] = useState<AdminUser[] | null>(null);
   const [settings, setSettings] = useState<ServerSettings | null>(null);
   const [status, setStatus] = useState<ServerStatus | null>(null);
+  const [limits, setLimits] = useState<AccountLimitsSettings | null>(null);
+  const [savingLimits, setSavingLimits] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -318,14 +443,16 @@ export function AdminScreen({ active }: { active: boolean }) {
     setLoading(true);
     setError(null);
     try {
-      const [nextUsers, nextSettings, nextStatus] = await Promise.all([
+      const [nextUsers, nextSettings, nextStatus, nextLimits] = await Promise.all([
         api.admin.users(),
         api.admin.settings(),
         api.admin.status(),
+        api.admin.limits(),
       ]);
       setUsers(nextUsers);
       setSettings(nextSettings);
       setStatus(nextStatus);
+      setLimits(nextLimits);
     } catch (reason) {
       setError(authErrorMessage(reason));
     } finally {
@@ -365,6 +492,21 @@ export function AdminScreen({ active }: { active: boolean }) {
     }
   }
 
+  async function saveLimits(values: AccountLimits) {
+    if (savingLimits) return;
+    setSavingLimits(true);
+    setError(null);
+    setNotice(null);
+    try {
+      setLimits(await api.admin.updateLimits(values));
+      setNotice('Limits saved.');
+    } catch (reason) {
+      setError(authErrorMessage(reason));
+    } finally {
+      setSavingLimits(false);
+    }
+  }
+
   async function changeUserDisabled(target: AdminUser, disabled: boolean) {
     setBusyUserId(target.id);
     setError(null);
@@ -394,12 +536,15 @@ export function AdminScreen({ active }: { active: boolean }) {
       users={users}
       settings={settings}
       status={status}
+      limits={limits}
       loading={loading}
       error={error}
       notice={notice}
       savingSetting={savingSetting}
+      savingLimits={savingLimits}
       busyUserId={busyUserId}
       onVideoUploadsChange={(mode) => void saveSettings({ video_uploads: mode })}
+      onSaveLimits={(values) => void saveLimits(values)}
       onRegistrationChange={(open) => void saveSettings({ allow_registration: open })}
       onUserDisabledChange={changeUserDisabled}
       onRefresh={() => void load()}

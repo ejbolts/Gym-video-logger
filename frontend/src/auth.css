@@ -395,6 +395,85 @@
   padding-top: 0.9rem;
 }
 
+.admin-limits {
+  display: grid;
+  gap: 1rem;
+  margin-top: 0.85rem;
+}
+
+.admin-limit-group {
+  display: grid;
+  gap: 0.7rem;
+  border-top: 1px solid var(--p-line);
+  padding-top: 0.9rem;
+}
+
+.admin-limit-group-heading {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.admin-limit-group-heading h3 {
+  margin: 0;
+  color: var(--p-ink);
+  font-size: 0.875rem;
+}
+
+.admin-limit-group-heading small,
+.admin-limit small {
+  color: var(--p-muted);
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+.admin-limit {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 6.75rem;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.admin-limit > span {
+  min-width: 0;
+  display: grid;
+  gap: 0.1rem;
+}
+
+.admin-limit strong {
+  color: var(--p-ink);
+  font-size: 0.8125rem;
+}
+
+.admin-limit input {
+  width: 100%;
+  min-height: 2.6rem;
+  border: 1px solid var(--p-line-strong);
+  border-radius: 10px;
+  padding: 0.5rem 0.65rem;
+  background: var(--p-page);
+  color: var(--p-ink);
+  /* 16px or larger stops iOS Safari from zooming the page on focus. */
+  font-size: 1rem;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.admin-limit input:focus-visible {
+  border-color: var(--p-accent);
+  outline: 2px solid var(--p-accent-soft);
+  outline-offset: 0;
+}
+
+.admin-limit input[aria-invalid='true'] {
+  border-color: var(--p-danger);
+}
+
+.admin-limit-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.6rem;
+}
+
 .admin-disk-meter {
   height: 0.5rem;
   overflow: hidden;

@@ -1,4 +1,6 @@
 import type {
+  AccountLimits,
+  AccountLimitsSettings,
   AdminUser,
   BodyMeasurement,
   BodyMeasurementCsvImportResult,
@@ -141,6 +143,13 @@ export const api = {
         body: JSON.stringify(payload),
       }),
     status: () => request<ServerStatus>('/api/admin/status'),
+    limits: () => request<AccountLimitsSettings>('/api/admin/limits'),
+    updateLimits: (values: AccountLimits) =>
+      request<AccountLimitsSettings>('/api/admin/limits', {
+        method: 'PUT',
+        headers: jsonHeaders,
+        body: JSON.stringify(values),
+      }),
   },
   updateProfile: (payload: ProfileUpdateInput) =>
     request<User>('/api/profile', {
