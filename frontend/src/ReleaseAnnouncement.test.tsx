@@ -24,7 +24,7 @@ describe('release popup', () => {
     expect(markup.match(/<li>/g)).toHaveLength(metadata.changes.length);
     expect(markup).toContain(`href="${metadata.url}"`);
     expect(markup).toContain('target="_blank" rel="noopener noreferrer"');
-    expect(markup).toContain('aria-label="Close Version 0.2.0"');
+    expect(markup).toContain(`aria-label="Close Version ${metadata.version}"`);
     expect(markup).toContain('>Got it</button>');
   });
 
