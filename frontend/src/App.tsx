@@ -62,6 +62,9 @@ import { PopupDialog } from './PopupDialog';
 import { ReleaseAnnouncement } from './ReleaseAnnouncement';
 import { useReleaseAnnouncement } from './useReleaseAnnouncement';
 import { canShowReleaseAnnouncement } from './releaseAnnouncements';
+import { HomeScreenGuide } from './HomeScreenGuide';
+import { useHomeScreenGuide } from './useHomeScreenGuide';
+import { runningAsInstalledApp } from './homeScreenGuideState';
 import { CreateExerciseDialog } from './CreateExerciseDialog';
 import { BackgroundActivityBar } from './BackgroundActivityBar';
 import { CardioEnergyCard } from './CardioEnergyCard';
@@ -446,6 +449,7 @@ function WorkoutCompletionDialog({
 export function App() {
   const { user } = useUserSession();
   const announcement = useReleaseAnnouncement(user?.id ?? null);
+  const homeScreenGuide = useHomeScreenGuide(user?.id ?? null, announcement.checked);
   const videosAllowed = canUploadVideos(user);
   const isAdmin = user?.is_admin === true;
   const initialHistoryState = isAppHistoryState(window.history.state) ? window.history.state : null;
@@ -918,6 +922,12 @@ export function App() {
             : null;
   const activeMainTab = mainTabFor(tab);
   const showTabBar = tab !== 'log';
+  // The home screen guide follows the release announcement, behind the same interruptions.
+  const canShowPrompts = canShowReleaseAnnouncement({
+    loading,
+    tab,
+    hasOtherDialog: message !== null || completionRecords.length > 0,
+  });
 
   function openHistorySection(section: HistorySection, exerciseId: string | null = null) {
     setHistoryOpenId(null);
@@ -927,12 +937,12 @@ export function App() {
 
   return (
     <div className={`tracker-app ${showTabBar ? 'has-tab-bar' : ''}`}>
-      {announcement.open &&
-        canShowReleaseAnnouncement({
-          loading,
-          tab,
-          hasOtherDialog: message !== null || completionRecords.length > 0,
-        }) && <ReleaseAnnouncement release={announcement.release} onClose={announcement.dismiss} />}
+      {announcement.open && canShowPrompts && (
+        <ReleaseAnnouncement release={announcement.release} onClose={announcement.dismiss} />
+      )}
+      {homeScreenGuide.open && !announcement.open && canShowPrompts && (
+        <HomeScreenGuide onClose={homeScreenGuide.dismiss} />
+      )}
       <EdgeSwipeBack onBack={navigateBack} enabled={canNavigateBack} />
       <BackgroundActivityBar label={backgroundActivityLabel} />
       {message && (
@@ -1124,6 +1134,7 @@ export function App() {
               onOpenAdmin={isAdmin ? () => setTab('admin') : undefined}
               releaseVersion={announcement.release.version}
               onOpenReleaseNotes={announcement.show}
+              onOpenHomeScreenGuide={homeScreenGuide.show}
             />
           </CachedTabPanel>
         )}
@@ -5564,9 +5575,11 @@ function SettingsScreen({
   onOpenAdmin,
   releaseVersion,
   onOpenReleaseNotes,
+  onOpenHomeScreenGuide,
 }: {
   releaseVersion: string;
   onOpenReleaseNotes: () => void;
+  onOpenHomeScreenGuide: () => void;
   account: User | null;
   onOpenProfile: () => void;
   /** Present only for administrators. */
@@ -5800,6 +5813,24 @@ function SettingsScreen({
         </header>
         <p>Read the latest release notes and see what's changed in Gym Logger.</p>
       </section>
+      {!runningAsInstalledApp() && (
+        <section className="settings-panel panel" aria-labelledby="home-screen-settings-title">
+          <header>
+            <div>
+              <p className="section-kicker">PHONE APP</p>
+              <h2 id="home-screen-settings-title">Add to Home Screen</h2>
+            </div>
+            <button
+              type="button"
+              className="profile-secondary release-settings-action"
+              onClick={onOpenHomeScreenGuide}
+            >
+              Show steps
+            </button>
+          </header>
+          <p>Open Gym Logger full screen from an icon on your phone, like an app.</p>
+        </section>
+      )}
       {account && (
         <section className="settings-panel panel" aria-labelledby="account-settings-title">
           <header>

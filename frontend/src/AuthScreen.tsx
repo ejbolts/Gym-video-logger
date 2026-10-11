@@ -7,6 +7,7 @@ import {
   type AuthFieldErrors,
   type AuthMode,
 } from './authForm';
+import { queueHomeScreenGuide } from './homeScreenGuideState';
 import type { AuthConfig, User } from './types';
 
 interface AuthScreenProps {
@@ -110,6 +111,7 @@ export function AuthScreen({ config, onAuthenticated, initialMode = 'sign-in' }:
       effectiveConfig,
     );
     if (result.ok) {
+      if (mode === 'create-account') queueHomeScreenGuide(result.user.id);
       try {
         await onAuthenticated(result.user);
       } finally {
