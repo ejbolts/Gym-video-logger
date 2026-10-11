@@ -4,7 +4,15 @@ import {
   inactiveWorkoutFinishAt,
   MAX_INACTIVE_WORKOUT_MS,
 } from './activeWorkoutTimeout';
-import { Fragment, startTransition, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Fragment,
+  startTransition,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode, RefObject } from 'react';
 import { createPortal, flushSync } from 'react-dom';
 import { api } from './api';
@@ -329,12 +337,15 @@ function formatDuration(totalSeconds: number): string {
   return formatSeconds(totalSeconds);
 }
 
+// Building a formatter is far slower than using one, and the calendar formats thousands of days.
+const prettyDateFormat = new Intl.DateTimeFormat(undefined, {
+  month: 'short',
+  day: 'numeric',
+  year: 'numeric',
+});
+
 function prettyDate(value: string): string {
-  return new Intl.DateTimeFormat(undefined, {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  }).format(new Date(`${value}T12:00:00`));
+  return prettyDateFormat.format(new Date(`${value}T12:00:00`));
 }
 
 function recordTypeLabel(type: PersonalRecord['record_type']): string {
@@ -1377,7 +1388,10 @@ function WorkoutCalendar({
   onDayClick: (workoutDate: string, entry: DashboardData['heatmap'][number] | undefined) => void;
 }) {
   const calendarScrollRef = useRef<HTMLDivElement>(null);
-  const map = new Map(entries.map((entry) => [entry.workout_date, entry]));
+  const map = useMemo(
+    () => new Map(entries.map((entry) => [entry.workout_date, entry])),
+    [entries],
+  );
   const months = useMemo(() => {
     const today = new Date();
     today.setHours(12, 0, 0, 0);
@@ -1405,6 +1419,11 @@ function WorkoutCalendar({
     }).reverse();
   }, [activeWorkoutDate, entries]);
   const todayKey = localCalendarDate(new Date());
+  // Taps read the latest handlers from a ref, so the memoised grid below never calls a stale one.
+  const handlersRef = useRef({ onDayClick, onActiveWorkoutClick });
+  useLayoutEffect(() => {
+    handlersRef.current = { onDayClick, onActiveWorkoutClick };
+  });
 
   useEffect(() => {
     const calendar = calendarScrollRef.current;
@@ -1415,9 +1434,11 @@ function WorkoutCalendar({
     return () => window.cancelAnimationFrame(frame);
   }, [months]);
 
-  return (
-    <div className="calendar-scroll" ref={calendarScrollRef}>
-      {months.map((month) => (
+  // Each tab switch re-renders the cached screens, and redrawing thousands of day cells was most
+  // of that cost. The grid now only rebuilds when its data changes.
+  const monthGrid = useMemo(
+    () =>
+      months.map((month) => (
         <article className="calendar-month" key={month.key}>
           <h3>{month.title}</h3>
           <div className="calendar-weekdays" aria-hidden="true">
@@ -1427,9 +1448,10 @@ function WorkoutCalendar({
             <span className="calendar-week-total-heading">Sets</span>
           </div>
           <div className="calendar-days">
-            {Array.from({ length: 6 }, (_, row) => month.cells.slice(row * 7, row * 7 + 7))
-              .filter((week) => week.some(Boolean))
-              .map((week, row) => {
+            {/* Every month keeps all six week rows, so months share one height and the ones
+                scrolled out of view can skip layout without the calendar changing height. */}
+            {Array.from({ length: 6 }, (_, row) => month.cells.slice(row * 7, row * 7 + 7)).map(
+              (week, row) => {
                 const weekSets = week.reduce(
                   (total, day) =>
                     day ? total + (map.get(localCalendarDate(day))?.set_count ?? 0) : total,
@@ -1454,8 +1476,10 @@ function WorkoutCalendar({
                           className={`calendar-day ${entry ? 'trained' : ''} ${inProgress ? 'in-progress' : ''} ${key === todayKey ? 'today' : ''} ${key > todayKey ? 'future' : ''}`}
                           key={key}
                           onClick={() => {
-                            if (inProgress && onActiveWorkoutClick) onActiveWorkoutClick();
-                            else onDayClick(key, entry);
+                            const handlers = handlersRef.current;
+                            if (inProgress && handlers.onActiveWorkoutClick) {
+                              handlers.onActiveWorkoutClick();
+                            } else handlers.onDayClick(key, entry);
                           }}
                           aria-current={key === todayKey ? 'date' : undefined}
                           aria-label={
@@ -1489,10 +1513,17 @@ function WorkoutCalendar({
                     <span className="calendar-week-total num">{weekSets || ''}</span>
                   </Fragment>
                 );
-              })}
+              },
+            )}
           </div>
         </article>
-      ))}
+      )),
+    [activeWorkoutDate, categoryColors, map, months, todayKey],
+  );
+
+  return (
+    <div className="calendar-scroll" ref={calendarScrollRef}>
+      {monthGrid}
     </div>
   );
 }
@@ -7632,6 +7663,10 @@ function HistoryScreen({
   );
   const recordCounts = useMemo(() => recordCountsByWorkout(personalRecords), [personalRecords]);
   const sectionIndicatorRef = useSlidingIndicator<HTMLDivElement>(section);
+  // Each section stays mounted once opened, so switching back only reveals it instead of
+  // rebuilding the calendar and charts.
+  const [visitedSections, setVisitedSections] = useState(() => new Set<HistorySection>([section]));
+  if (!visitedSections.has(section)) setVisitedSections(new Set([...visitedSections, section]));
   const defaultExerciseId = useMemo(
     () => mostTrainedExerciseId(workouts, today),
     [today, workouts],
@@ -7705,23 +7740,29 @@ function HistoryScreen({
           </div>
         </>
       )}
-      {section === 'progress' ? (
-        <ProgressScreen
-          exercises={exercises}
-          measurements={measurements}
-          onOpenWorkout={(workoutId, exerciseId) => onOpenWorkout(workoutId, exerciseId)}
-          embedded
-          initialExerciseId={initialExerciseId}
-          defaultExerciseId={defaultExerciseId}
-        />
-      ) : section === 'cardio' ? (
-        <CardioScreen
-          exercises={exercises}
-          onDataChange={onDataChange}
-          onOpenWorkout={(workoutId) => onOpenWorkout(workoutId, null)}
-        />
-      ) : (
-        <>
+      {visitedSections.has('progress') && (
+        <CachedTabPanel active={section === 'progress'}>
+          <ProgressScreen
+            exercises={exercises}
+            measurements={measurements}
+            onOpenWorkout={(workoutId, exerciseId) => onOpenWorkout(workoutId, exerciseId)}
+            embedded
+            initialExerciseId={initialExerciseId}
+            defaultExerciseId={defaultExerciseId}
+          />
+        </CachedTabPanel>
+      )}
+      {visitedSections.has('cardio') && (
+        <CachedTabPanel active={section === 'cardio'}>
+          <CardioScreen
+            exercises={exercises}
+            onDataChange={onDataChange}
+            onOpenWorkout={(workoutId) => onOpenWorkout(workoutId, null)}
+          />
+        </CachedTabPanel>
+      )}
+      {visitedSections.has('history') && (
+        <CachedTabPanel active={section === 'history'}>
           <section
             className="history-calendar-panel calendar-panel pulse-card"
             aria-label="Workout calendar"
@@ -7800,7 +7841,7 @@ function HistoryScreen({
               Show more · {workouts.length - visibleCount} older
             </button>
           )}
-        </>
+        </CachedTabPanel>
       )}
     </section>
   );
