@@ -17,6 +17,7 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import date, timedelta
 from math import floor
+from uuid import uuid4
 
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session, selectinload
@@ -31,6 +32,7 @@ from .models import (
     SetType,
     TrainingWorkout,
     UserSetting,
+    WorkoutCategory,
     WorkoutMovement,
     WorkoutSet,
 )
@@ -38,8 +40,9 @@ from .models import (
 KG_TO_LB = 2.2046226218
 EPLEY_FORMULA = "Epley: weight × (1 + reps ÷ 30), reps 1–30"
 
-# Conservative, editable defaults. Entries are deliberately exercise-specific.
-# New isolation movements receive primary credit only unless the user requests a secondary.
+# Exercise-specific bookkeeping estimates: direct work 1.0, meaningful indirect work 0.5.
+# See docs/EXERCISE-MUSCLE-CREDITS.md for the full audit, assumptions and references.
+# These are not measured fractions of hypertrophy or every muscle activated during a lift.
 DEFAULT_MUSCLE_MAPPING: dict[str, tuple[tuple[str, MuscleRole, float], ...]] = {
     "Barbell Bench Press": (
         ("Pectorals", MuscleRole.PRIMARY, 1.0),
@@ -48,16 +51,17 @@ DEFAULT_MUSCLE_MAPPING: dict[str, tuple[tuple[str, MuscleRole, float], ...]] = {
     ),
     "Incline Dumbbell Press": (
         ("Pectorals", MuscleRole.PRIMARY, 1.0),
-        ("Front delts", MuscleRole.PRIMARY, 1.0),
+        ("Front delts", MuscleRole.SECONDARY, 0.5),
         ("Triceps", MuscleRole.SECONDARY, 0.5),
     ),
     "Overhead Press": (
         ("Front delts", MuscleRole.PRIMARY, 1.0),
+        ("Side delts", MuscleRole.SECONDARY, 0.5),
         ("Triceps", MuscleRole.SECONDARY, 0.5),
-        ("Pectorals", MuscleRole.SECONDARY, 0.5),
     ),
     "Dumbbell Shoulder Press": (
         ("Front delts", MuscleRole.PRIMARY, 1.0),
+        ("Side delts", MuscleRole.SECONDARY, 0.5),
         ("Triceps", MuscleRole.SECONDARY, 0.5),
     ),
     "Lateral Raise": (
@@ -81,7 +85,8 @@ DEFAULT_MUSCLE_MAPPING: dict[str, tuple[tuple[str, MuscleRole, float], ...]] = {
         ("Glutes", MuscleRole.PRIMARY, 1.0),
         ("Hamstrings", MuscleRole.PRIMARY, 1.0),
         ("Spinal erectors", MuscleRole.PRIMARY, 1.0),
-        ("Upper back", MuscleRole.SECONDARY, 0.5),
+        ("Quadriceps", MuscleRole.SECONDARY, 0.5),
+        ("Mid / Upper Back", MuscleRole.SECONDARY, 0.5),
         ("Forearms", MuscleRole.SECONDARY, 0.5),
     ),
     "Barbell Row": (
@@ -89,6 +94,8 @@ DEFAULT_MUSCLE_MAPPING: dict[str, tuple[tuple[str, MuscleRole, float], ...]] = {
         ("Lats", MuscleRole.PRIMARY, 1.0),
         ("Biceps", MuscleRole.SECONDARY, 0.5),
         ("Rear deltoids", MuscleRole.SECONDARY, 0.5),
+        ("Forearms", MuscleRole.SECONDARY, 0.5),
+        ("Spinal erectors", MuscleRole.SECONDARY, 0.5),
     ),
     "Pull-up": (
         ("Lats", MuscleRole.PRIMARY, 1.0),
@@ -100,16 +107,24 @@ DEFAULT_MUSCLE_MAPPING: dict[str, tuple[tuple[str, MuscleRole, float], ...]] = {
         ("Biceps", MuscleRole.SECONDARY, 0.5),
         ("Forearms", MuscleRole.SECONDARY, 0.5),
     ),
-    "Single-Arm Lat Pulldown (Machine)": (("Lats", MuscleRole.PRIMARY, 1.0),),
+    "Single-Arm Lat Pulldown (Machine)": (
+        ("Lats", MuscleRole.PRIMARY, 1.0),
+        ("Biceps", MuscleRole.SECONDARY, 0.5),
+        ("Forearms", MuscleRole.SECONDARY, 0.5),
+    ),
     "Seated Cable Row": (
         ("Mid / Upper Back", MuscleRole.PRIMARY, 1.0),
-        ("Lats", MuscleRole.SECONDARY, 0.5),
+        ("Lats", MuscleRole.PRIMARY, 1.0),
         ("Biceps", MuscleRole.SECONDARY, 0.5),
+        ("Rear deltoids", MuscleRole.SECONDARY, 0.5),
+        ("Forearms", MuscleRole.SECONDARY, 0.5),
     ),
     "Seated Machine Row": (
         ("Mid / Upper Back", MuscleRole.PRIMARY, 1.0),
-        ("Lats", MuscleRole.SECONDARY, 0.5),
+        ("Lats", MuscleRole.PRIMARY, 1.0),
         ("Biceps", MuscleRole.SECONDARY, 0.5),
+        ("Rear deltoids", MuscleRole.SECONDARY, 0.5),
+        ("Forearms", MuscleRole.SECONDARY, 0.5),
     ),
     "Face Pull": (
         ("Rear deltoids", MuscleRole.PRIMARY, 1.0),
@@ -117,8 +132,14 @@ DEFAULT_MUSCLE_MAPPING: dict[str, tuple[tuple[str, MuscleRole, float], ...]] = {
     ),
     "Cable Shoulder Extensions": (("Rear deltoids", MuscleRole.PRIMARY, 1.0),),
     "Barbell Curl": (("Biceps", MuscleRole.PRIMARY, 1.0), ("Forearms", MuscleRole.SECONDARY, 0.5)),
-    "Machine Bicep Preacher Curl": (("Biceps", MuscleRole.PRIMARY, 1.0),),
-    "Single-Arm Preacher Curl": (("Biceps", MuscleRole.PRIMARY, 1.0),),
+    "Machine Bicep Preacher Curl": (
+        ("Biceps", MuscleRole.PRIMARY, 1.0),
+        ("Forearms", MuscleRole.SECONDARY, 0.5),
+    ),
+    "Single-Arm Preacher Curl": (
+        ("Biceps", MuscleRole.PRIMARY, 1.0),
+        ("Forearms", MuscleRole.SECONDARY, 0.5),
+    ),
     "Hammer Curl": (
         ("Biceps", MuscleRole.PRIMARY, 1.0),
         ("Forearms", MuscleRole.SECONDARY, 0.5),
@@ -154,8 +175,14 @@ DEFAULT_MUSCLE_MAPPING: dict[str, tuple[tuple[str, MuscleRole, float], ...]] = {
         ("Adductors", MuscleRole.SECONDARY, 0.5),
     ),
     "Leg Extension": (("Quadriceps", MuscleRole.PRIMARY, 1.0),),
-    "Seated Leg Curl": (("Hamstrings", MuscleRole.PRIMARY, 1.0),),
-    "Lying Leg Curl": (("Hamstrings", MuscleRole.PRIMARY, 1.0),),
+    "Seated Leg Curl": (
+        ("Hamstrings", MuscleRole.PRIMARY, 1.0),
+        ("Calves", MuscleRole.SECONDARY, 0.5),
+    ),
+    "Lying Leg Curl": (
+        ("Hamstrings", MuscleRole.PRIMARY, 1.0),
+        ("Calves", MuscleRole.SECONDARY, 0.5),
+    ),
     "Hip Thrust": (
         ("Glutes", MuscleRole.PRIMARY, 1.0),
         ("Hamstrings", MuscleRole.SECONDARY, 0.5),
@@ -168,14 +195,15 @@ DEFAULT_MUSCLE_MAPPING: dict[str, tuple[tuple[str, MuscleRole, float], ...]] = {
         ("Hamstrings", MuscleRole.PRIMARY, 1.0),
     ),
     "Seated Ab Crunch Machine": (("Core", MuscleRole.PRIMARY, 1.0),),
-    "Plank": (("Core", MuscleRole.PRIMARY, 1.0), ("Glutes", MuscleRole.SECONDARY, 0.5)),
+    "Plank": (("Core", MuscleRole.PRIMARY, 1.0),),
     "Hanging Leg Raise": (
         ("Core", MuscleRole.PRIMARY, 1.0),
-        ("Hip flexors", MuscleRole.SECONDARY, 0.5),
+        ("Hip flexors", MuscleRole.PRIMARY, 1.0),
     ),
 }
 
 MUSCLE_GROUP_ALIASES = {
+    "Upper back": "Mid / Upper Back",
     "Upper pectorals": "Pectorals",
     "Anterior deltoids": "Front delts",
     "Lateral deltoids": "Side delts",
@@ -230,6 +258,8 @@ def is_pr_eligible(item: WorkoutSet) -> bool:
 
 
 def muscle_credits(exercise: Exercise) -> list[tuple[str, float]]:
+    if exercise.kind == ExerciseKind.CARDIO or exercise.category == WorkoutCategory.CARDIO:
+        return []
     if exercise.muscle_contributions:
         credits: dict[str, float] = {}
         for item in exercise.muscle_contributions:
@@ -296,6 +326,8 @@ def seed_muscle_mappings(db: Session, user_id: str) -> None:
                 )
                 changed = True
     if changed:
+        # Workout snapshots contain these credits; invalidate old snapshots after a default update.
+        set_setting(db, user_id, "workout_cache_revision", str(uuid4()))
         db.commit()
 
 

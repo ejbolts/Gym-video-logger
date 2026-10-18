@@ -710,7 +710,9 @@ button.pulse-card:hover {
       (100% - var(--muscle-label-width) - var(--muscle-value-width) - 2 * var(--muscle-gap)) *
       var(--muscle-goal-ratio)
   );
-  border-left: 2px dotted var(--p-ink);
+  width: 2px;
+  background: radial-gradient(circle, var(--p-ink) 1px, transparent 1.25px) center top / 2px 0.5rem
+    repeat-y;
   transform: translateX(-1px);
   pointer-events: none;
 }
@@ -726,7 +728,9 @@ button.pulse-card:hover {
 
 .muscle-set-goal-key > span {
   width: 1rem;
-  border-top: 2px dotted var(--p-ink);
+  height: 2px;
+  background: radial-gradient(circle, var(--p-ink) 1px, transparent 1.25px) left center / 0.5rem 2px
+    repeat-x;
 }
 
 .muscle-bars li > span:first-child {

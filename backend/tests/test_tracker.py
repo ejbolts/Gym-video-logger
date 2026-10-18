@@ -130,7 +130,8 @@ def test_default_exercise_library_is_seeded(client):
     assert single_arm_preacher["muscle_group"] == "Biceps"
     assert single_arm_preacher["equipment"] == "Dumbbell"
     assert single_arm_preacher["muscle_contributions"] == [
-        {"muscle_name": "Biceps", "role": "primary", "contribution_factor": 1.0}
+        {"muscle_name": "Biceps", "role": "primary", "contribution_factor": 1.0},
+        {"muscle_name": "Forearms", "role": "secondary", "contribution_factor": 0.5},
     ]
     incline_press = next(item for item in exercises if item["name"] == "Incline Dumbbell Press")
     assert {item["muscle_name"] for item in incline_press["muscle_contributions"]} == {
@@ -160,7 +161,9 @@ def test_default_exercise_library_is_seeded(client):
     assert single_arm_lat_pulldown["muscle_group"] == "Lats"
     assert single_arm_lat_pulldown["equipment"] == "Machine"
     assert single_arm_lat_pulldown["muscle_contributions"] == [
-        {"muscle_name": "Lats", "role": "primary", "contribution_factor": 1.0}
+        {"muscle_name": "Biceps", "role": "secondary", "contribution_factor": 0.5},
+        {"muscle_name": "Forearms", "role": "secondary", "contribution_factor": 0.5},
+        {"muscle_name": "Lats", "role": "primary", "contribution_factor": 1.0},
     ]
     seated_machine_row = next(item for item in exercises if item["name"] == "Seated Machine Row")
     assert seated_machine_row["category"] == "pull"
@@ -171,12 +174,18 @@ def test_default_exercise_library_is_seeded(client):
         for contribution in seated_machine_row["muscle_contributions"]
     }
     assert seated_machine_row_contributions == {
+        "Forearms": {"muscle_name": "Forearms", "role": "secondary", "contribution_factor": 0.5},
         "Mid / Upper Back": {
             "muscle_name": "Mid / Upper Back",
             "role": "primary",
             "contribution_factor": 1.0,
         },
-        "Lats": {"muscle_name": "Lats", "role": "secondary", "contribution_factor": 0.5},
+        "Lats": {"muscle_name": "Lats", "role": "primary", "contribution_factor": 1.0},
+        "Rear deltoids": {
+            "muscle_name": "Rear deltoids",
+            "role": "secondary",
+            "contribution_factor": 0.5,
+        },
         "Biceps": {
             "muscle_name": "Biceps",
             "role": "secondary",
@@ -199,7 +208,8 @@ def test_default_exercise_library_is_seeded(client):
     assert machine_preacher_curl["muscle_group"] == "Biceps"
     assert machine_preacher_curl["equipment"] == "Machine"
     assert machine_preacher_curl["muscle_contributions"] == [
-        {"muscle_name": "Biceps", "role": "primary", "contribution_factor": 1.0}
+        {"muscle_name": "Biceps", "role": "primary", "contribution_factor": 1.0},
+        {"muscle_name": "Forearms", "role": "secondary", "contribution_factor": 0.5},
     ]
     single_leg_press = next(item for item in exercises if item["name"] == "Single Leg Press")
     assert single_leg_press["category"] == "lower"
@@ -227,11 +237,12 @@ def test_default_exercise_library_is_seeded(client):
         assert leg_curl["muscle_group"] == "Hamstrings"
         assert leg_curl["equipment"] == "Machine"
         assert leg_curl["muscle_contributions"] == [
+            {"muscle_name": "Calves", "role": "secondary", "contribution_factor": 0.5},
             {
                 "muscle_name": "Hamstrings",
                 "role": "primary",
                 "contribution_factor": 1.0,
-            }
+            },
         ]
     back_extension = next(item for item in exercises if item["name"] == "Back Extension Machine")
     assert back_extension["category"] == "lower"

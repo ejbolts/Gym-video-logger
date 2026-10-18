@@ -6,6 +6,16 @@
 
 ### Friends, profiles and a more personal Home
 
+- The weekly muscle-goal line has more space between its dots.
+- The [exercise-credit audit](EXERCISE-MUSCLE-CREDITS.md) reviews the built-in library using
+  1 set for direct work and 0.5 for meaningful assistance. It aligns row and pulldown
+  credits, includes forearm assistance on rows and preacher curls and calf assistance on
+  leg curls, refines shoulder press, incline press, deadlift and core credits, and combines
+  the old **Upper back** label with **Mid / Upper Back**. Existing workout totals use the
+  updated defaults after startup; custom exercises keep their saved mappings.
+  **Cable Shoulder Extensions is unchanged and excluded from this audit.** Credits are
+  bookkeeping estimates; technique and equipment can change which muscles do most work.
+
 - **Sets per muscle** on Today has a dotted line across the bars for your weekly goal.
   Change **Weekly sets per muscle** in **Settings > Training preferences**. The default is
   **10 working sets per muscle each week**; warmups do not count. The scale keeps the goal
@@ -140,6 +150,12 @@
   **Undo** restores body fat without changing the latest weight or notes.
 
 The deployed 0.6.5 announcement is preserved in Earlier versions.
+
+<img src="screenshots/releases/0.7.0-muscle-credit-audit.png" alt="Sets per muscle with visibly spaced dots on the weekly-goal marker and its key, using reviewed muscle credits in an isolated sample account." width="692">
+
+The weekly-goal marker uses small dots spaced eight pixels apart. The
+[exercise-credit audit](EXERCISE-MUSCLE-CREDITS.md) lists the direct and assisting credits
+for the reviewed library, with Cable Shoulder Extensions explicitly skipped.
 
 <img src="screenshots/releases/0.7.0-weekly-muscle-set-goal.png" alt="Sets per muscle with a dotted vertical weekly-goal line at 10 sets: Pectorals has 12 working sets above the goal, while the other muscles remain below it." width="692">
 

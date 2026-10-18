@@ -4,6 +4,7 @@
   "title": "Friends, profiles and a more personal Home",
   "summary": "Follow friends and see their latest workouts, edit your profile and sharing in one place, arrange Home your way, switch to light mode, and import workout history with a guided CSV flow.",
   "changes": [
+    "The weekly muscle-goal line has more space between dots. Reviewed exercise credits now consistently use full sets for direct work and half sets for meaningful assistance; Cable Shoulder Extensions is unchanged.",
     "Sets per muscle on Today shows a dotted line for your weekly goal. Set Weekly sets per muscle in Settings > Training preferences; it defaults to 10 working sets and excludes warmups.",
     "History's Filter by machine button sits beside Calendar in the card header, removing the separate row above the calendar.",
     "Finishing a new or resumed workout returns to Today immediately while the saving popup sends it to the server in the background. If saving fails, the workout reopens with your entries intact so you can retry.",
