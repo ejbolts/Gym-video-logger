@@ -2,6 +2,13 @@ import type { IconName } from './Icon';
 
 export const HOME_SECTIONS = [
   {
+    id: 'profile',
+    title: 'Profile',
+    description: 'Your photo and all-time totals',
+    icon: 'user',
+    size: 'full',
+  },
+  {
     id: 'next-workout',
     title: 'Next workout',
     description: 'Your suggested session',

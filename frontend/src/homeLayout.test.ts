@@ -83,12 +83,12 @@ describe('Home layout edits', () => {
   });
   it('moves in either direction while retaining hidden sections and not mutating the saved layout', () => {
     const saved = { ...defaultHomeLayout(), hidden: ['records' as const] };
-    const reordered = moveHomeSection(saved, 'consistency', 'next-workout');
+    const reordered = moveHomeSection(saved, 'consistency', 'profile');
     expect(reordered.order[0]).toBe('consistency');
     expect(reordered.order).toHaveLength(HOME_SECTIONS.length);
     expect(new Set(reordered.order).size).toBe(HOME_SECTIONS.length);
     expect(reordered.hidden).toEqual(['records']);
-    expect(saved.order[0]).toBe('next-workout');
+    expect(saved.order[0]).toBe('profile');
     expect(moveHomeSection(reordered, 'consistency', 'friends').order.at(-1)).toBe('consistency');
     expect(moveHomeSection(saved, 'records', 'records')).toBe(saved);
   });

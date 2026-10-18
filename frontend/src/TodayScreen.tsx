@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom';
 import type { UndoBodyweightCheckIn } from './bodyweightCheckIn';
 import { Icon } from './Icon';
 import { ProfileAvatar } from './ProfileAvatar';
+import { formatMemberSince } from './profileDisplay';
 import { HomeLayoutSections } from './HomeLayoutSections';
 import type { useHomeLayout } from './useHomeLayout';
 import type { HomeSectionId } from './homeLayout';
@@ -27,6 +28,7 @@ import type {
   DashboardData,
   PersonalRecord,
   TrackedWorkout,
+  User,
   WorkoutTypeColors,
 } from './types';
 import { localDate } from './utils';
@@ -77,6 +79,10 @@ export function SettingsButton({ onClick }: { onClick: () => void }) {
   );
 }
 
+function formatTotal(value: number | null | undefined): string {
+  return value == null ? '–' : value.toLocaleString();
+}
+
 const RECORD_LABELS: Partial<Record<PersonalRecord['record_type'], string>> = {
   reps_at_weight: 'Volume PR',
   weight: 'Weight PR',
@@ -110,6 +116,8 @@ export interface TodayScreenProps {
   /** Shown on the profile button so the signed-in account is visible at a glance. */
   profileLabel?: string;
   profilePhotoUrl?: string | null;
+  /** The signed-in account for the Profile section; omitted outside the signed-in app. */
+  profile?: Pick<User, 'display_name' | 'username' | 'profile_photo_url' | 'created_at'>;
   /** Follow requests waiting for approval, shown as a count on the profile button. */
   followRequests?: number;
   calendar?: ReactNode;
@@ -143,6 +151,7 @@ export function TodayScreen({
   onOpenProfile,
   profileLabel,
   profilePhotoUrl,
+  profile,
   followRequests = 0,
   calendar,
   friendsActivity,
@@ -209,6 +218,13 @@ export function TodayScreen({
     [measurements, today, weekStartDay],
   );
   const records = recentStrengthRecords(personalRecords, 3);
+  const strengthRecordCount = useMemo(
+    () =>
+      personalRecords.filter((record) => record.value > 0 && record.record_type in RECORD_LABELS)
+        .length,
+    [personalRecords],
+  );
+  const memberSince = profile ? formatMemberSince(profile.created_at, 'short') : null;
   const recommendationLabel = recommendation
     ? recommendation.category === 'cardio'
       ? 'Cardio'
@@ -216,6 +232,58 @@ export function TodayScreen({
     : null;
 
   const sections: Record<HomeSectionId, ReactNode> = {
+    profile: profile ? (
+      <section className="pulse-card today-profile" aria-labelledby="today-profile-title">
+        {onOpenProfile ? (
+          <button
+            className="today-profile-photo"
+            type="button"
+            onClick={onOpenProfile}
+            aria-label="Open profile"
+          >
+            <ProfileAvatar className="profile-avatar today-profile-avatar" user={profile} />
+          </button>
+        ) : (
+          <ProfileAvatar className="profile-avatar today-profile-avatar" user={profile} />
+        )}
+        <div className="today-profile-body">
+          <h2 id="today-profile-title">{profile.display_name.trim() || profile.username}</h2>
+          <p>
+            @{profile.username}
+            {memberSince && ` · since ${memberSince}`}
+          </p>
+          <dl className="today-profile-stats">
+            <div>
+              <dt>
+                <span className="today-profile-icon workouts" aria-hidden="true">
+                  <Icon name="calendar" />
+                </span>
+                Workouts
+              </dt>
+              <dd className="num">{formatTotal(data?.history?.total_workouts)}</dd>
+            </div>
+            <div>
+              <dt>
+                <span className="today-profile-icon cardio" aria-hidden="true">
+                  <Icon name="heart" />
+                </span>
+                Cardio
+              </dt>
+              <dd className="num">{formatTotal(data?.total_cardio_sessions)}</dd>
+            </div>
+            <div>
+              <dt>
+                <span className="today-profile-icon records" aria-hidden="true">
+                  <Icon name="trophy" />
+                </span>
+                PRs
+              </dt>
+              <dd className="num">{formatTotal(data ? strengthRecordCount : null)}</dd>
+            </div>
+          </dl>
+        </div>
+      </section>
+    ) : null,
     'next-workout':
       workoutStartedAt === null ? (
         <section className="pulse-card next-session" aria-labelledby="next-session-title">
@@ -229,30 +297,13 @@ export function TodayScreen({
             )}
             {recommendation ? 'Up next' : 'Ready when you are'}
           </p>
-          <details className="next-session-details">
-            <summary title="Show or hide workout details">
-              <h2 id="next-session-title">
-                {recommendationLabel ? `${recommendationLabel} day` : 'Start a workout'}
-              </h2>
-              <Icon name="chevron-down" />
-            </summary>
-            {recommendation && <p className="next-session-reason">{recommendation.reason}</p>}
-            {template ? (
-              <p className="next-session-meta">
-                {template.exercises.length}{' '}
-                {template.exercises.length === 1 ? 'exercise' : 'exercises'} · last{' '}
-                {recommendationLabel?.toLowerCase()}{' '}
-                {shortDate(template.sourceWorkout.workout_date)}
-              </p>
-            ) : (
-              <p className="next-session-meta">
-                {recommendation
-                  ? 'No previous session of this type yet. Start empty and add exercises.'
-                  : 'Log your first session to get a suggested next workout.'}
-              </p>
-            )}
-          </details>
-          {template && (
+          <div className="next-session-head">
+            <h2 id="next-session-title">
+              {recommendationLabel ? `${recommendationLabel} day` : 'Start a workout'}
+            </h2>
+            {template && <small>Last: {shortDate(template.sourceWorkout.workout_date)}</small>}
+          </div>
+          {template ? (
             <>
               <ul className="next-session-exercises">
                 {template.exercises.slice(0, 4).map(({ exercise, summary }) => (
@@ -268,6 +319,12 @@ export function TodayScreen({
                 </p>
               )}
             </>
+          ) : (
+            <p className="next-session-meta">
+              {recommendation
+                ? 'No previous session of this type yet. Start empty and add exercises.'
+                : 'Log your first session to get a suggested next workout.'}
+            </p>
           )}
           <div className="next-session-actions">
             {template ? (
@@ -276,11 +333,17 @@ export function TodayScreen({
                   className="pulse-button primary"
                   type="button"
                   onClick={() => onStartTemplate(template)}
+                  aria-label={`Start ${recommendationLabel?.toLowerCase()} workout`}
                 >
                   <Icon name="play" filled />
-                  Start {recommendationLabel?.toLowerCase()} workout
+                  Start workout
                 </button>
-                <button className="pulse-button secondary" type="button" onClick={onStartEmpty}>
+                <button
+                  className="pulse-button primary next-session-empty"
+                  type="button"
+                  onClick={onStartEmpty}
+                  aria-label="Start empty workout"
+                >
                   Empty
                 </button>
               </>

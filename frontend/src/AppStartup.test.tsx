@@ -4,7 +4,13 @@ import { App } from './App';
 import { AppTabBar } from './AppTabBar';
 import { TodayScreen, type TodayScreenProps } from './TodayScreen';
 import { useHomeLayout } from './useHomeLayout';
-import type { DashboardData, TrackedWorkout, User, WorkoutTypeColors } from './types';
+import type {
+  DashboardData,
+  PersonalRecord,
+  TrackedWorkout,
+  User,
+  WorkoutTypeColors,
+} from './types';
 import { UserContext, type UserSession } from './userContext';
 import { TrainingPreferencesContext } from './trainingPreferencesContext';
 import type { WeightUnit } from './weightUnits';
@@ -206,10 +212,57 @@ describe('App startup', () => {
       const markup = renderToday({ workouts: [workout] }, unit);
       expect(markup).toContain('Up next');
       expect(markup).toContain(`<b class="num">${expectedSummary}</b>`);
+      expect(markup).toContain('<small>Last: Mon 5 Oct</small>');
+      expect(markup).toContain('aria-label="Start pull workout"');
+      expect(markup).toContain('aria-label="Start empty workout"');
       expect(workout).toEqual(before);
       expect(workout.movements[0].sets[0].weight_kg).toBe(100);
     },
   );
+
+  it('shows the profile section with all-time totals and strength PRs', () => {
+    const record = (record_type: string, value: number) =>
+      ({
+        id: `${record_type}-${value}`,
+        record_type,
+        value,
+        achieved_date: '2026-10-01',
+      }) as unknown as PersonalRecord;
+    const markup = renderToday({
+      profile: {
+        display_name: 'Sample Lifter',
+        username: 'sample',
+        profile_photo_url: null,
+        created_at: '2025-03-02T10:00:00Z',
+      },
+      data: {
+        history: {
+          total_workouts: 1260,
+          first_workout_date: null,
+          last_workout_date: null,
+          has_sample_workouts: true,
+        },
+        total_cardio_sessions: 38,
+        recommendation: null,
+      } as unknown as DashboardData,
+      personalRecords: [
+        record('weight', 100),
+        record('reps_at_weight', 8),
+        record('estimated_1rm', 120),
+        record('weight', 0),
+      ],
+    });
+
+    expect(markup).toContain('id="today-profile-title">Sample Lifter</h2>');
+    expect(markup).toContain('@sample · since Mar 2025');
+    expect(markup).toMatch(/Workouts<\/dt><dd class="num">1,260<\/dd>/);
+    expect(markup).toMatch(/Cardio<\/dt><dd class="num">38<\/dd>/);
+    expect(markup).toMatch(/PRs<\/dt><dd class="num">2<\/dd>/);
+  });
+
+  it('omits the profile section outside the signed-in app', () => {
+    expect(renderToday()).not.toContain('today-profile');
+  });
 
   it('renders a Today-shaped skeleton before training data has loaded', () => {
     stubWindow('');
@@ -226,7 +279,6 @@ describe('App startup', () => {
 
     expect(markup).toContain('<h1>Today</h1>');
     expect(markup).toContain('Up next');
-    expect(markup).toContain('Next in your Push → Pull → Legs rotation.');
     expect(markup).toContain('Pull day');
     expect(markup).toContain('Workouts</span><strong>4</strong>');
     expect(markup).toContain('Cardio sessions</span><strong>0</strong>');

@@ -58,7 +58,8 @@ def test_older_layout_appends_new_sections_without_unhiding_old_sections(client)
         )
         db.commit()
     result = client.get("/api/home-layout").json()
-    assert result["order"][:2] == old["order"]
+    assert result["order"][0] == "profile"
+    assert result["order"][1:3] == old["order"]
     assert set(result["order"]) == set(SECTION_IDS)
     assert result["hidden"] == old["hidden"]
     assert result["widths"] == {}

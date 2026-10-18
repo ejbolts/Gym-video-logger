@@ -336,13 +336,28 @@
   .home-section-content .next-session-exercises {
     grid-template-columns: minmax(0, 1fr);
   }
+  .home-section-content .next-session-head {
+    flex-wrap: wrap;
+  }
   .home-section-content .next-session-actions {
     flex-direction: column;
   }
-  .home-section-content .next-session-actions .pulse-button {
-    padding: 0.5rem;
-    min-width: 0;
-    white-space: normal;
+  .home-section-content .next-session-actions .next-session-empty {
+    border-top: 1px solid rgb(255 255 255 / 22%);
+    border-left: 0;
+  }
+  .home-section-content .today-profile {
+    flex-direction: column;
+    gap: 0.75rem;
+    text-align: center;
+  }
+  .home-section-content .today-profile-body {
+    width: 100%;
+  }
+  .home-section-content .today-profile-avatar.profile-avatar {
+    width: 4.25rem;
+    height: 4.25rem;
+    font-size: 1.75rem;
   }
   .home-section-content .consistency-stats {
     flex-wrap: wrap;

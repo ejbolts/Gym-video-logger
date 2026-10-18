@@ -12,6 +12,7 @@ from .database import get_db
 from .training_metrics import get_setting, set_setting
 
 HomeSection = Literal[
+    "profile",
     "next-workout",
     "workouts",
     "cardio-sessions",
@@ -41,6 +42,10 @@ class HomeLayout(BaseModel):
     def validate_sections(self) -> HomeLayout:
         if len(self.order) != len(set(self.order)) or len(self.hidden) != len(set(self.hidden)):
             raise ValueError("Sections must not be repeated.")
+        # The profile header leads layouts saved before it existed; other new sections are
+        # appended. Neither changes the relative positions of saved sections.
+        if "profile" not in self.order:
+            self.order.insert(0, "profile")
         # Append newly introduced sections without changing existing saved positions.
         self.order.extend(section for section in SECTION_IDS if section not in self.order)
         return self
